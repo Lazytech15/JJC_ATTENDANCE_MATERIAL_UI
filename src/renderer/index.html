@@ -1,0 +1,1679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Attendance System</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+        
+        :root {
+            --primary: #1976d2;
+            --primary-dark: #1565c0;
+            --primary-light: #bbdefb;
+            --secondary: #dc004e;
+            --secondary-dark: #c51162;
+            --success: #388e3c;
+            --warning: #f57c00;
+            --error: #d32f2f;
+            --surface: #ffffff;
+            --background: #fafafa;
+            --on-surface: #212121;
+            --on-primary: #ffffff;
+            --text-primary: rgba(0, 0, 0, 0.87);
+            --text-secondary: rgba(0, 0, 0, 0.6);
+            --text-disabled: rgba(0, 0, 0, 0.38);
+            --divider: rgba(0, 0, 0, 0.12);
+            --shadow-1: 0 2px 8px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.1);
+            --shadow-2: 0 4px 16px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.12);
+            --shadow-3: 0 8px 24px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.15);
+            --shadow-4: 0 16px 32px rgba(0,0,0,0.25), 0 8px 16px rgba(0,0,0,0.18);
+            --shadow-floating: 0 12px 32px rgba(0,0,0,0.2), 0 4px 16px rgba(0,0,0,0.12);
+            --radius: 8px;
+            --radius-large: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: var(--background);
+            height: 100vh;
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Material Design Elevation */
+        .elevation-1 { box-shadow: var(--shadow-1); }
+        .elevation-2 { box-shadow: var(--shadow-2); }
+        .elevation-3 { box-shadow: var(--shadow-3); }
+        .elevation-4 { box-shadow: var(--shadow-4); }
+        .elevation-floating { box-shadow: var(--shadow-floating); }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 20px 28px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .header-left h1 {
+            font-size: 1.75rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            letter-spacing: -0.01em;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error);
+        }
+
+        .status-dot.online {
+            background: var(--success);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .datetime {
+            font-size: 1.5rem;
+            font-weight: 400;
+            color: var(--text-primary);
+            text-align: right;
+            line-height: 1.3;
+            letter-spacing: -0.01em;
+        }
+
+        .settings-btn {
+            background: var(--primary);
+            color: var(--on-primary);
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .settings-btn:hover {
+            background: var(--primary-dark);
+            box-shadow: var(--shadow-2);
+        }
+
+        .settings-btn:active {
+            box-shadow: var(--shadow-1);
+        }
+
+        /* Main Layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+            flex-shrink: 0;
+        }
+
+        /* Scanner Section */
+        .scanner-section {
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 24px;
+            text-align: center;
+        }
+
+        .scanner-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--primary-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            font-size: 1.5rem;
+        }
+
+        .scanner-section h2 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            letter-spacing: -0.01em;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        #barcodeInput {
+            flex: 1;
+            background: var(--surface);
+            border: 2px solid var(--divider);
+            border-radius: var(--radius);
+            padding: 12px;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+            font-family: inherit;
+        }
+
+        #barcodeInput:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+        }
+
+        #barcodeInput::placeholder {
+            color: var(--text-disabled);
+        }
+
+        .submit-btn {
+            background: var(--primary);
+            color: var(--on-primary);
+            border: none;
+            border-radius: var(--radius);
+            padding: 12px 18px;
+            cursor: pointer;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-size: 0.8rem;
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+
+        .submit-btn:hover {
+            background: var(--primary-dark);
+            box-shadow: var(--shadow-2);
+        }
+
+        .input-toggle {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            margin-top: 16px;
+        }
+
+        .input-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .input-toggle input[type="radio"] {
+            accent-color: var(--primary);
+        }
+
+        /* Statistics Section */
+        .stats-section {
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 24px;
+        }
+
+        .stats-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .stats-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--primary-light);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .stats-section h2 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 12px;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--divider);
+            border-radius: var(--radius);
+            padding: 16px;
+            text-align: center;
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+
+        .stat-card:hover {
+            box-shadow: var(--shadow-2);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 300;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+        }
+
+        /* Employee Display Modal */
+        .employee-display {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 48px;
+            min-width: 400px;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 1000;
+            display: none;
+        }
+
+        .employee-photo {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .employee-photo img {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid var(--primary-light);
+        }
+
+        .employee-info h3 {
+            font-size: 1.75rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.01em;
+        }
+
+        .employee-info p {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-bottom: 4px;
+        }
+
+        .clock-info {
+            margin-top: 32px;
+        }
+
+        .clock-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.125rem;
+            font-weight: 500;
+            padding: 12px 24px;
+            border-radius: 24px;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .clock-type.morning-in,
+        .clock-type.afternoon-in {
+            background: var(--success);
+            color: var(--on-primary);
+        }
+
+        .clock-type.morning-out,
+        .clock-type.afternoon-out {
+            background: var(--error);
+            color: var(--on-primary);
+        }
+
+        .clock-time {
+            font-size: 1.25rem;
+            font-weight: 400;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+
+        .hours-info {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        /* Dashboard */
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .dashboard-section {
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            min-height: 400px;
+        }
+
+        .dashboard-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-shrink: 0;
+        }
+
+        .dashboard-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--primary-light);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .dashboard-section h2 {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .employee-list,
+        .attendance-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--divider) transparent;
+            padding-right: 4px;
+        }
+
+        .employee-list::-webkit-scrollbar,
+        .attendance-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .employee-list::-webkit-scrollbar-track,
+        .attendance-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 3px;
+        }
+
+        .employee-list::-webkit-scrollbar-thumb,
+        .attendance-list::-webkit-scrollbar-thumb {
+            background: var(--divider);
+            border-radius: 3px;
+        }
+
+        .employee-list::-webkit-scrollbar-thumb:hover,
+        .attendance-list::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        .employee-item,
+        .attendance-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--surface);
+            border: 1px solid var(--divider);
+            border-radius: var(--radius);
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+            flex-shrink: 0;
+        }
+
+        .employee-item:hover,
+        .attendance-item:hover {
+            box-shadow: var(--shadow-1);
+            border-color: var(--primary-light);
+        }
+
+        .employee-avatar,
+        .attendance-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: var(--divider);
+            flex-shrink: 0;
+        }
+
+        .employee-details,
+        .attendance-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .employee-name,
+        .attendance-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .employee-dept,
+        .attendance-time {
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .clock-badge {
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.65rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            flex-shrink: 0;
+        }
+
+        .clock-badge.in {
+            background: rgba(56, 142, 60, 0.1);
+            color: var(--success);
+        }
+
+        .clock-badge.out {
+            background: rgba(211, 47, 47, 0.1);
+            color: var(--error);
+        }
+
+        /* Status Messages */
+        .status-message {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: var(--radius);
+            color: var(--on-primary);
+            font-weight: 500;
+            z-index: 1001;
+            transform: translateX(400px);
+            transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            min-width: 200px;
+        }
+
+        .status-message.show {
+            transform: translateX(0);
+        }
+
+        .status-message.success {
+            background: var(--success);
+        }
+
+        .status-message.error {
+            background: var(--error);
+        }
+
+        .status-message.info {
+            background: var(--primary);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 30px 16px;
+            color: var(--text-secondary);
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        /* Settings Modal */
+        .settings-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .settings-modal.show {
+            display: flex;
+        }
+
+        .settings-content {
+            background: var(--surface);
+            border-radius: var(--radius-large);
+            padding: 32px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .settings-header h2 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .close-btn:hover {
+            background: var(--divider);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--divider);
+            border-radius: var(--radius);
+            font-size: 1rem;
+            color: var(--text-primary);
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .help-text {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: var(--on-primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: var(--on-primary);
+        }
+
+        .btn-success:hover {
+            background: #2e7d32;
+        }
+
+        .btn-secondary {
+            background: var(--text-secondary);
+            color: var(--on-primary);
+        }
+
+        .btn-secondary:hover {
+            background: #424242;
+        }
+
+        .sync-info {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .sync-info h3 {
+            color: var(--primary);
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+
+        .sync-info p {
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-size: 0.9rem;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 24px;
+                text-align: center;
+                padding: 24px;
+            }
+
+            .header-left h1 {
+                font-size: 1.75rem;
+            }
+
+            .datetime {
+                font-size: 1.5rem;
+            }
+
+            .scanner-section,
+            .stats-section,
+            .dashboard-section {
+                padding: 24px;
+            }
+
+            .employee-display {
+                min-width: 90vw;
+                max-width: 400px;
+                padding: 32px 24px;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .stat-value {
+                font-size: 2rem;
+            }
+
+            .input-group {
+                flex-direction: column;
+            }
+
+            .settings-content {
+                padding: 24px;
+                width: 95%;
+            }
+
+            .button-group {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header elevation-1">
+            <div class="header-left">
+                <h1>Employee Attendance System</h1>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot offline"></span>
+                    <span>Offline</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="datetime" id="datetime"></div>
+                <button class="settings-btn elevation-1" id="settingsBtn">
+                    Settings
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Scanner Section -->
+            <section class="scanner-section elevation-1">
+                <div class="scanner-icon">📱</div>
+                <h2>Scan Employee Badge</h2>
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="barcodeInput" 
+                        placeholder="Scan barcode or enter ID number..."
+                        autocomplete="off"
+                        autofocus
+                    >
+                    <button id="manualSubmit" class="submit-btn elevation-1">Submit</button>
+                </div>
+                <div class="input-toggle">
+                    <label>
+                        <input type="radio" name="inputType" value="barcode" checked>
+                        Barcode Scanner
+                    </label>
+                    <label>
+                        <input type="radio" name="inputType" value="manual">
+                        Manual ID Entry
+                    </label>
+                </div>
+            </section>
+
+            <!-- Statistics Section -->
+            <section class="stats-section elevation-1">
+                <div class="stats-header">
+                    <div class="stats-icon">📊</div>
+                    <h2>Today's Statistics</h2>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalRegularHours">0</div>
+                        <div class="stat-label">Regular Hours</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalOvertimeHours">0</div>
+                        <div class="stat-label">Overtime Hours</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="presentCount">0</div>
+                        <div class="stat-label">Present</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="lateCount">0</div>
+                        <div class="stat-label">Late</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="absentCount">0</div>
+                        <div class="stat-label">Absent</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Employee Display Modal -->
+        <section class="employee-display elevation-4" id="employeeDisplay">
+            <div class="employee-photo">
+                <img id="employeePhoto" src="assets/profile.png" alt="Employee Photo">
+            </div>
+            <div class="employee-info">
+                <h3 id="employeeName"></h3>
+                <p id="employeeDepartment"></p>
+                <p id="employeeId"></p>
+            </div>
+            <div class="clock-info">
+                <div class="clock-type" id="clockType"></div>
+                <div class="clock-time" id="clockTime"></div>
+                <div class="hours-info" id="hoursInfo"></div>
+            </div>
+        </section>
+
+        <!-- Dashboard -->
+        <div class="dashboard">
+            <!-- Currently Clocked In -->
+            <section class="dashboard-section elevation-1">
+                <div class="dashboard-header">
+                    <div class="dashboard-icon">👥</div>
+                    <h2>Currently Clocked In</h2>
+                </div>
+                <div class="employee-list" id="currentlyClocked">
+                    <div class="loading">Loading...</div>
+                </div>
+            </section>
+
+            <!-- Today's Activity -->
+            <section class="dashboard-section elevation-1">
+                <div class="dashboard-header">
+                    <div class="dashboard-icon">📋</div>
+                    <h2>Today's Activity</h2>
+                </div>
+                <div class="attendance-list" id="todayActivity">
+                    <div class="loading">Loading...</div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Status Messages -->
+        <div class="status-message" id="statusMessage"></div>
+
+        <!-- Settings Modal -->
+        <div class="settings-modal" id="settingsModal">
+            <div class="settings-content elevation-4">
+                <div class="settings-header">
+                    <h2>Settings</h2>
+                    <button class="close-btn" id="closeSettings">&times;</button>
+                </div>
+                
+                <div id="settingsStatusMessage" style="display: none;"></div>
+                
+                <form id="settingsForm">
+                    <div class="form-group">
+                        <label for="serverUrl">Server URL</label>
+                        <input type="url" id="serverUrl" name="server_url" placeholder="http://192.168.1.71:3001/api/tables/emp_list/data">
+                        <div class="help-text">URL to fetch employee data from your server</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="syncInterval">Sync Interval (minutes)</label>
+                        <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5">
+                        <div class="help-text">How often to sync employee data (1-1440 minutes)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="gracePeriod">Grace Period (minutes)</label>
+                        <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5">
+                        <div class="help-text">Late arrival tolerance (0-30 minutes)</div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="button" class="btn btn-success" id="syncNowBtn">🔄 Sync Now</button>
+                        <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+                        <button type="button" class="btn btn-secondary" id="cancelSettings">✕ Cancel</button>
+                    </div>
+                </form>
+                
+                <div class="sync-info" id="syncInfo" style="display: none;">
+                    <h3>📊 Sync Information</h3>
+                    <p id="employeeCount">Employees in database: Loading...</p>
+                    <p id="lastSync">Last sync: Loading...</p>
+                    <p id="profileStatus">Profile images: Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Detect if running in Electron
+        const isElectron = typeof require !== 'undefined' && typeof window.require !== 'undefined';
+        let ipcRenderer = null;
+
+        if (isElectron) {
+            try {
+                ipcRenderer = require('electron').ipcRenderer;
+            } catch (error) {
+                console.log('Not running in Electron environment');
+            }
+        }
+
+        class AttendanceApp {
+            constructor() {
+                this.ws = null;
+                this.employeeDisplayTimeout = null;
+                this.imageLoadAttempts = new Map();
+                this.imageCounter = 0;
+                this.init();
+            }
+
+            async init() {
+                this.setupEventListeners();
+                this.startClock();
+                
+                if (ipcRenderer) {
+                    this.connectWebSocket();
+                    await this.loadInitialData();
+                } else {
+                    // Demo mode - populate with sample data
+                    this.loadDemoData();
+                }
+                
+                this.focusInput();
+            }
+
+            setupEventListeners() {
+                // Barcode input
+                const barcodeInput = document.getElementById("barcodeInput");
+                const manualSubmit = document.getElementById("manualSubmit");
+                const settingsBtn = document.getElementById("settingsBtn");
+
+                barcodeInput.addEventListener("keypress", (e) => {
+                    if (e.key === "Enter") {
+                        this.handleScan();
+                    }
+                });
+
+                barcodeInput.addEventListener("input", (e) => {
+                    const inputType = document.querySelector('input[name="inputType"]:checked').value;
+                    if (inputType === "barcode" && e.target.value.length >= 8) {
+                        setTimeout(() => {
+                            if (e.target.value === barcodeInput.value) {
+                                this.handleScan();
+                            }
+                        }, 100);
+                    }
+                });
+
+                manualSubmit.addEventListener("click", () => {
+                    this.handleScan();
+                });
+
+                settingsBtn.addEventListener("click", () => {
+                    this.openSettings();
+                });
+
+                // Settings modal
+                const settingsModal = document.getElementById("settingsModal");
+                const closeSettings = document.getElementById("closeSettings");
+                const cancelSettings = document.getElementById("cancelSettings");
+                const settingsForm = document.getElementById("settingsForm");
+                const syncNowBtn = document.getElementById("syncNowBtn");
+
+                closeSettings.addEventListener("click", () => {
+                    this.closeSettings();
+                });
+
+                cancelSettings.addEventListener("click", () => {
+                    this.closeSettings();
+                });
+
+                settingsModal.addEventListener("click", (e) => {
+                    if (e.target === settingsModal) {
+                        this.closeSettings();
+                    }
+                });
+
+                settingsForm.addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    this.saveSettings();
+                });
+
+                syncNowBtn.addEventListener("click", () => {
+                    this.syncNow();
+                });
+
+                // Keep input focused
+                document.addEventListener("click", (e) => {
+                    if (!e.target.closest(".employee-display") && !e.target.closest(".settings-modal")) {
+                        this.focusInput();
+                    }
+                });
+            }
+
+            focusInput() {
+                const barcodeInput = document.getElementById("barcodeInput");
+                setTimeout(() => barcodeInput.focus(), 100);
+            }
+
+            generateUniqueId(prefix) {
+                return `${prefix}-${++this.imageCounter}-${Date.now()}`;
+            }
+
+            startClock() {
+                const updateClock = () => {
+                    const now = new Date();
+                    const options = {
+                        weekday: "long",
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                    };
+                    document.getElementById("datetime").textContent = now.toLocaleDateString("en-US", options);
+                };
+
+                updateClock();
+                setInterval(updateClock, 1000);
+            }
+
+            connectWebSocket() {
+                if (!ipcRenderer) return;
+                
+                try {
+                    this.ws = new WebSocket("ws://localhost:8080");
+
+                    this.ws.onopen = () => {
+                        console.log("WebSocket connected");
+                        this.updateConnectionStatus(true);
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleWebSocketMessage(message);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log("WebSocket disconnected");
+                        this.updateConnectionStatus(false);
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error("WebSocket error:", error);
+                        this.updateConnectionStatus(false);
+                    };
+                } catch (error) {
+                    console.error("Failed to connect WebSocket:", error);
+                    this.updateConnectionStatus(false);
+                }
+            }
+
+            updateConnectionStatus(isOnline) {
+                const statusElement = document.getElementById("connectionStatus");
+                const dot = statusElement.querySelector(".status-dot");
+                const text = statusElement.querySelector("span:last-child");
+
+                if (isOnline) {
+                    dot.classList.add("online");
+                    text.textContent = "Online";
+                } else {
+                    dot.classList.remove("online");
+                    text.textContent = "Offline";
+                }
+            }
+
+            handleWebSocketMessage(message) {
+                switch (message.type) {
+                    case "attendance_update":
+                        this.loadTodayAttendance();
+                        break;
+                    default:
+                        console.log("Unknown WebSocket message:", message);
+                }
+            }
+
+            async handleScan() {
+                const input = document.getElementById("barcodeInput").value.trim();
+                const inputType = document.querySelector('input[name="inputType"]:checked').value;
+
+                if (!input) {
+                    this.showStatus("Please enter a barcode or ID number", "error");
+                    return;
+                }
+
+                if (ipcRenderer) {
+                    try {
+                        const result = await ipcRenderer.invoke("clock-attendance", {
+                            input: input,
+                            inputType: inputType,
+                        });
+
+                        if (result.success) {
+                            this.showEmployeeDisplay(result.data);
+                            this.clearInput();
+                            await this.loadTodayAttendance();
+                        } else {
+                            this.showStatus(result.error || "Employee not found", "error");
+                        }
+                    } catch (error) {
+                        console.error("Clock error:", error);
+                        this.showStatus("System error occurred", "error");
+                    }
+                } else {
+                    // Demo mode
+                    this.showDemoEmployeeDisplay(input);
+                    this.clearInput();
+                }
+            }
+
+            setupImageWithFallback(imgElement, employee_uid, altText) {
+                if (!imgElement || !employee_uid) return;
+
+                imgElement.onerror = null;
+                imgElement.onload = null;
+
+                const attemptKey = `${employee_uid}_${imgElement.id}`;
+                
+                this.imageLoadAttempts.delete(attemptKey);
+                this.imageLoadAttempts.set(attemptKey, 0);
+
+                const fallbackChain = [
+                    `profiles/${employee_uid}.jpg`,
+                    `profiles/${employee_uid}.png`,
+                    'assets/profile.png',
+                    this.getDefaultImageDataURL()
+                ];
+
+                const tryNextImage = () => {
+                    const attempts = this.imageLoadAttempts.get(attemptKey) || 0;
+                    
+                    if (attempts >= fallbackChain.length) {
+                        imgElement.src = this.getDefaultImageDataURL();
+                        imgElement.onerror = null;
+                        imgElement.onload = null;
+                        this.imageLoadAttempts.delete(attemptKey);
+                        return;
+                    }
+
+                    imgElement.onerror = () => {
+                        this.imageLoadAttempts.set(attemptKey, attempts + 1);
+                        tryNextImage();
+                    };
+
+                    imgElement.onload = () => {
+                        this.imageLoadAttempts.delete(attemptKey);
+                        imgElement.onerror = null;
+                        imgElement.onload = null;
+                    };
+
+                    imgElement.src = fallbackChain[attempts];
+                };
+
+                imgElement.alt = altText || 'Profile Image';
+                tryNextImage();
+            }
+
+            getDefaultImageDataURL() {
+                return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y0ZjRmNCIgcng9IjUwIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIzNSIgcj0iMTUiIGZpbGw9IiNjY2MiLz48cGF0aCBkPSJNMjAgNzVhMzAgMzAgMCAwIDEgNjAgMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg==';
+            }
+
+            showEmployeeDisplay(data) {
+                const display = document.getElementById("employeeDisplay");
+                const { employee, clockType, clockTime, regularHours, overtimeHours } = data;
+
+                document.getElementById("employeeName").textContent =
+                    `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
+                document.getElementById("employeeDepartment").textContent = employee.department || "No Department";
+                document.getElementById("employeeId").textContent = `ID: ${employee.id_number}`;
+
+                const photo = document.getElementById("employeePhoto");
+                photo.style.display = "block";
+                
+                this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${employee.last_name}`);
+
+                const clockTypeElement = document.getElementById("clockType");
+                clockTypeElement.textContent = this.formatClockType(clockType);
+                clockTypeElement.className = `clock-type ${clockType.replace("_", "-")}`;
+
+                document.getElementById("clockTime").textContent = new Date(clockTime).toLocaleTimeString();
+                document.getElementById("hoursInfo").textContent = `Regular: ${regularHours}h | Overtime: ${overtimeHours}h`;
+
+                display.style.display = "block";
+
+                if (this.employeeDisplayTimeout) {
+                    clearTimeout(this.employeeDisplayTimeout);
+                }
+
+                this.employeeDisplayTimeout = setTimeout(() => {
+                    display.style.display = "none";
+                    this.focusInput();
+                }, 15000);
+            }
+
+            showDemoEmployeeDisplay(input) {
+                const display = document.getElementById("employeeDisplay");
+                
+                // Demo employee data
+                const demoEmployee = {
+                    first_name: "John",
+                    last_name: "Doe",
+                    department: "Engineering",
+                    id_number: input
+                };
+
+                const clockTypes = ["morning_in", "morning_out", "afternoon_in", "afternoon_out"];
+                const randomClockType = clockTypes[Math.floor(Math.random() * clockTypes.length)];
+
+                document.getElementById("employeeName").textContent = `${demoEmployee.first_name} ${demoEmployee.last_name}`;
+                document.getElementById("employeeDepartment").textContent = demoEmployee.department;
+                document.getElementById("employeeId").textContent = `ID: ${demoEmployee.id_number}`;
+
+                const photo = document.getElementById("employeePhoto");
+                photo.src = this.getDefaultImageDataURL();
+
+                const clockTypeElement = document.getElementById("clockType");
+                clockTypeElement.textContent = this.formatClockType(randomClockType);
+                clockTypeElement.className = `clock-type ${randomClockType.replace("_", "-")}`;
+
+                document.getElementById("clockTime").textContent = new Date().toLocaleTimeString();
+                document.getElementById("hoursInfo").textContent = `Regular: 8h | Overtime: 0h`;
+
+                display.style.display = "block";
+
+                if (this.employeeDisplayTimeout) {
+                    clearTimeout(this.employeeDisplayTimeout);
+                }
+
+                this.employeeDisplayTimeout = setTimeout(() => {
+                    display.style.display = "none";
+                    this.focusInput();
+                }, 15000);
+
+                this.showStatus("Demo mode: Employee clocked successfully", "success");
+            }
+
+            formatClockType(clockType) {
+                const types = {
+                    morning_in: "🟢 Morning In",
+                    morning_out: "🔴 Morning Out",
+                    afternoon_in: "🟢 Afternoon In",
+                    afternoon_out: "🔴 Afternoon Out",
+                };
+                return types[clockType] || clockType;
+            }
+
+            clearInput() {
+                document.getElementById("barcodeInput").value = "";
+                this.focusInput();
+            }
+
+            async loadInitialData() {
+                if (ipcRenderer) {
+                    await Promise.all([this.loadTodayAttendance(), this.syncEmployees()]);
+                }
+            }
+
+            loadDemoData() {
+                // Demo statistics
+                document.getElementById("totalRegularHours").textContent = "48";
+                document.getElementById("totalOvertimeHours").textContent = "5";
+                document.getElementById("presentCount").textContent = "12";
+                document.getElementById("lateCount").textContent = "3";
+                document.getElementById("absentCount").textContent = "2";
+
+                // Demo currently clocked employees
+                this.updateCurrentlyClocked([
+                    { employee_uid: "demo1", first_name: "Alice", last_name: "Smith", department: "HR" },
+                    { employee_uid: "demo2", first_name: "Bob", last_name: "Johnson", department: "IT" }
+                ]);
+
+                // Demo today's activity
+                this.updateTodayActivity([
+                    { employee_uid: "demo1", first_name: "Alice", last_name: "Smith", clock_time: new Date(), clock_type: "morning_in" },
+                    { employee_uid: "demo2", first_name: "Bob", last_name: "Johnson", clock_time: new Date(Date.now() - 60000), clock_type: "morning_in" }
+                ]);
+
+                this.updateConnectionStatus(false); // Demo shows offline
+            }
+
+            async loadTodayAttendance() {
+                if (!ipcRenderer) return;
+                
+                try {
+                    const result = await ipcRenderer.invoke("get-today-attendance");
+
+                    if (result.success) {
+                        this.updateCurrentlyClocked(result.data.currentlyClocked);
+                        this.updateTodayActivity(result.data.attendance);
+                        this.updateStatistics(result.data.statistics);
+                    }
+                } catch (error) {
+                    console.error("Error loading attendance:", error);
+                }
+            }
+
+            updateStatistics(stats) {
+                if (!stats) return;
+
+                document.getElementById("totalRegularHours").textContent = stats.totalRegularHours || 0;
+                document.getElementById("totalOvertimeHours").textContent = stats.totalOvertimeHours || 0;
+                document.getElementById("presentCount").textContent = stats.presentCount || 0;
+                document.getElementById("lateCount").textContent = stats.lateCount || 0;
+                document.getElementById("absentCount").textContent = stats.absentCount || 0;
+            }
+
+            updateCurrentlyClocked(employees) {
+                const container = document.getElementById("currentlyClocked");
+
+                if (!employees || employees.length === 0) {
+                    container.innerHTML = '<div class="loading">No employees currently clocked in</div>';
+                    return;
+                }
+
+                const imageIds = [];
+
+                container.innerHTML = employees
+                    .map((emp) => {
+                        const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
+                        imageIds.push({ id: empId, uid: emp.employee_uid, name: `${emp.first_name} ${emp.last_name}` });
+                        
+                        return `
+                            <div class="employee-item">
+                                <img class="employee-avatar" 
+                                     id="${empId}"
+                                     alt="${emp.first_name} ${emp.last_name}">
+                                <div class="employee-details">
+                                    <div class="employee-name">${emp.first_name} ${emp.last_name}</div>
+                                    <div class="employee-dept">${emp.department || "No Department"}</div>
+                                </div>
+                                <div class="clock-badge in">Clocked In</div>
+                            </div>
+                        `;
+                    })
+                    .join("");
+
+                setTimeout(() => {
+                    imageIds.forEach(({ id, uid, name }) => {
+                        const imgElement = document.getElementById(id);
+                        if (imgElement) {
+                            if (ipcRenderer) {
+                                this.setupImageWithFallback(imgElement, uid, name);
+                            } else {
+                                imgElement.src = this.getDefaultImageDataURL();
+                            }
+                        }
+                    });
+                }, 10);
+            }
+
+            updateTodayActivity(attendance) {
+                const container = document.getElementById("todayActivity");
+
+                if (!attendance || attendance.length === 0) {
+                    container.innerHTML = '<div class="loading">No activity today</div>';
+                    return;
+                }
+
+                const attendanceSlice = attendance.slice(0, 10);
+                const imageIds = [];
+                
+                container.innerHTML = attendanceSlice
+                    .map((record, index) => {
+                        const recordId = this.generateUniqueId(`activity-${record.employee_uid}-${index}`);
+                        imageIds.push({ 
+                            id: recordId, 
+                            uid: record.employee_uid, 
+                            name: `${record.first_name} ${record.last_name}` 
+                        });
+                        
+                        return `
+                            <div class="attendance-item">
+                                <img class="attendance-avatar" 
+                                     id="${recordId}"
+                                     alt="${record.first_name} ${record.last_name}">
+                                <div class="attendance-details">
+                                    <div class="attendance-name">${record.first_name} ${record.last_name}</div>
+                                    <div class="attendance-time">${new Date(record.clock_time).toLocaleTimeString()}</div>
+                                </div>
+                                <div class="clock-badge ${record.clock_type.includes("in") ? "in" : "out"}">
+                                    ${this.formatClockType(record.clock_type)}
+                                </div>
+                            </div>
+                        `;
+                    })
+                    .join("");
+
+                setTimeout(() => {
+                    imageIds.forEach(({ id, uid, name }) => {
+                        const imgElement = document.getElementById(id);
+                        if (imgElement) {
+                            if (ipcRenderer) {
+                                this.setupImageWithFallback(imgElement, uid, name);
+                            } else {
+                                imgElement.src = this.getDefaultImageDataURL();
+                            }
+                        }
+                    });
+                }, 10);
+            }
+
+            async syncEmployees() {
+                if (!ipcRenderer) return;
+                
+                try {
+                    const result = await ipcRenderer.invoke("sync-employees");
+
+                    if (result.success) {
+                        this.showStatus(result.message, "success");
+                    } else {
+                        console.warn("Sync warning:", result.error);
+                    }
+                } catch (error) {
+                    console.error("Sync error:", error);
+                }
+            }
+
+            // Settings functionality
+            openSettings() {
+                const modal = document.getElementById("settingsModal");
+                modal.classList.add("show");
+                if (ipcRenderer) {
+                    this.loadSettings();
+                    this.loadSyncInfo();
+                }
+            }
+
+            closeSettings() {
+                const modal = document.getElementById("settingsModal");
+                modal.classList.remove("show");
+                this.focusInput();
+            }
+
+            async loadSettings() {
+                if (!ipcRenderer) {
+                    // Demo values
+                    document.getElementById('serverUrl').value = 'http://192.168.1.71:3001/api/tables/emp_list/data';
+                    document.getElementById('syncInterval').value = '5';
+                    document.getElementById('gracePeriod').value = '5';
+                    return;
+                }
+
+                try {
+                    const result = await ipcRenderer.invoke('get-settings');
+                    
+                    if (result.success) {
+                        const settings = result.data;
+                        
+                        document.getElementById('serverUrl').value = settings.server_url || '';
+                        document.getElementById('syncInterval').value = Math.floor((settings.sync_interval || 300000) / 60000);
+                        document.getElementById('gracePeriod').value = settings.grace_period || 5;
+                    }
+                } catch (error) {
+                    console.error('Error loading settings:', error);
+                    this.showSettingsStatus('Error loading settings', 'error');
+                }
+            }
+
+            async saveSettings() {
+                if (!ipcRenderer) {
+                    this.showSettingsStatus('Demo mode: Settings saved successfully!', 'success');
+                    return;
+                }
+
+                try {
+                    const formData = new FormData(document.getElementById('settingsForm'));
+                    const settings = {
+                        server_url: formData.get('server_url'),
+                        sync_interval: (parseInt(formData.get('sync_interval')) * 60000).toString(),
+                        grace_period: formData.get('grace_period')
+                    };
+
+                    const result = await ipcRenderer.invoke('update-settings', settings);
+                    
+                    if (result.success) {
+                        this.showSettingsStatus('Settings saved successfully!', 'success');
+                    } else {
+                        this.showSettingsStatus(result.error || 'Error saving settings', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error saving settings:', error);
+                    this.showSettingsStatus('Error saving settings', 'error');
+                }
+            }
+
+            async syncNow() {
+                if (!ipcRenderer) {
+                    this.showSettingsStatus('Demo mode: Sync completed successfully!', 'success');
+                    return;
+                }
+
+                const syncBtn = document.getElementById('syncNowBtn');
+                const originalText = syncBtn.textContent;
+                
+                syncBtn.textContent = '🔄 Syncing...';
+                syncBtn.disabled = true;
+                
+                try {
+                    const result = await ipcRenderer.invoke('sync-employees');
+                    
+                    if (result.success) {
+                        this.showSettingsStatus(result.message, 'success');
+                        await this.loadSyncInfo();
+                    } else {
+                        this.showSettingsStatus(result.error || 'Sync failed', 'error');
+                    }
+                } catch (error) {
+                    console.error('Sync error:', error);
+                    this.showSettingsStatus('Sync error occurred', 'error');
+                } finally {
+                    syncBtn.textContent = originalText;
+                    syncBtn.disabled = false;
+                }
+            }
+
+            async loadSyncInfo() {
+                if (!ipcRenderer) {
+                    document.getElementById('employeeCount').textContent = 'Employees in database: 25 (Demo)';
+                    document.getElementById('lastSync').textContent = 'Last sync: Just now (Demo)';
+                    document.getElementById('profileStatus').textContent = 'Profile images: 20/25 downloaded (Demo)';
+                    document.getElementById('syncInfo').style.display = 'block';
+                    return;
+                }
+
+                try {
+                    const employeesResult = await ipcRenderer.invoke('get-employees');
+                    
+                    if (employeesResult.success) {
+                        document.getElementById('employeeCount').textContent = 
+                            `Employees in database: ${employeesResult.data.length}`;
+                        
+                        const profileResult = await ipcRenderer.invoke('check-profile-images');
+                        if (profileResult.success) {
+                            document.getElementById('profileStatus').textContent = 
+                                `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`;
+                        }
+                        
+                        document.getElementById('syncInfo').style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('Error loading sync info:', error);
+                }
+            }
+
+            showStatus(message, type = "info") {
+                const statusElement = document.getElementById("statusMessage");
+                statusElement.textContent = message;
+                statusElement.className = `status-message ${type} show`;
+
+                setTimeout(() => {
+                    statusElement.classList.remove("show");
+                }, 4000);
+            }
+
+            showSettingsStatus(message, type = 'info') {
+                const statusElement = document.getElementById('settingsStatusMessage');
+                statusElement.textContent = message;
+                statusElement.className = `status-message ${type}`;
+                statusElement.style.display = 'block';
+                
+                setTimeout(() => {
+                    statusElement.style.display = 'none';
+                }, 4000);
+            }
+        }
+
+        // Initialize app when DOM is loaded
+        document.addEventListener("DOMContentLoaded", () => {
+            new AttendanceApp();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+{
+  "name": "electron-attendance-system",
+  "version": "1.0.0",
+  "description": "Employee Attendance Recording System with Barcode Scanning",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "dist": "electron-builder --publish=never"
+  },
+  "keywords": [
+    "electron",
+    "attendance",
+    "barcode",
+    "employee"
+  ],
+  "author": "Your Company",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.0.0",
+    "node-fetch": "^2.6.7",
+    "ws": "^8.14.2"
+  },
+  "build": {
+    "appId": "com.company.attendance-system",
+    "productName": "Employee Attendance System",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  }
+}
