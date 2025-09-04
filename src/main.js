@@ -7,6 +7,7 @@ const employeeRoutes = require("./api/routes/employees")
 const attendanceRoutes = require("./api/routes/attendance")
 const settingsRoutes = require("./api/routes/settings")
 const exportRoutes = require("./api/routes/export")
+const attendanceSyncRoutes = require("./api/routes/attendance-sync")
 
 
 
@@ -106,6 +107,12 @@ app.whenReady().then(async () => {
             },
           },
           {
+            label: "Sync Attendance to Server",
+            click: () => {
+              mainWindow.webContents.send('sync-attendance-to-server')
+            },
+          },
+          {
             label: "Web Export URL",
             click: () => {
               const { shell } = require('electron')
@@ -194,6 +201,7 @@ console.log('Employee routes available:', Object.keys(employeeRoutes || {}))
 console.log('Attendance routes available:', Object.keys(attendanceRoutes || {}))
 console.log('Settings routes available:', Object.keys(settingsRoutes || {}))
 console.log('Export routes available:', Object.keys(exportRoutes || {}))
+console.log('Attendance sync routes available:', Object.keys(attendanceSyncRoutes || {}))
 
 // IPC handlers with error checking
 safelyRegisterHandler("get-employees", employeeRoutes?.getEmployees, "employeeRoutes", "getEmployees")
@@ -210,6 +218,12 @@ safelyRegisterHandler("get-today-statistics", attendanceRoutes?.getTodayStatisti
 safelyRegisterHandler("export-attendance-data", exportRoutes?.exportAttendanceData, "exportRoutes", "exportAttendanceData")
 safelyRegisterHandler("get-export-formats", exportRoutes?.getExportFormats, "exportRoutes", "getExportFormats")
 safelyRegisterHandler("get-export-statistics", exportRoutes?.getExportStatistics, "exportRoutes", "getExportStatistics")
+
+// Attendance sync route handlers
+safelyRegisterHandler("sync-attendance-to-server", attendanceSyncRoutes?.syncAttendanceToServer, "attendanceSyncRoutes", "syncAttendanceToServer")
+safelyRegisterHandler("get-unsynced-attendance-count", attendanceSyncRoutes?.getUnsyncedAttendanceCount, "attendanceSyncRoutes", "getUnsyncedAttendanceCount")
+safelyRegisterHandler("get-all-attendance-for-sync", attendanceSyncRoutes?.getAllAttendanceForSync, "attendanceSyncRoutes", "getAllAttendanceForSync")
+safelyRegisterHandler("mark-attendance-as-synced", attendanceSyncRoutes?.markAttendanceAsSynced, "attendanceSyncRoutes", "markAttendanceAsSynced")
 
 // This one is defined locally, so it should work fine
 ipcMain.handle("open-settings", () => createSettingsWindow())

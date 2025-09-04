@@ -7,6 +7,13 @@ class AttendanceApp {
     this.imageLoadAttempts = new Map() // Track image load attempts
     this.imageCounter = 0 // Counter for unique IDs
     this.barcodeTimeout = null // Add timeout for barcode handling
+    this.autoSyncInterval = null // Auto-sync interval
+    this.syncSettings = {
+      enabled: true,
+      interval: 5 * 60 * 1000, // Default 5 minutes
+      retryAttempts: 3,
+      retryDelay: 30000 // 30 seconds
+    }
     this.init()
   }
 
@@ -15,10 +22,124 @@ class AttendanceApp {
     this.startClock()
     this.connectWebSocket()
     await this.loadInitialData()
+    await this.loadSyncSettings() // Load sync settings from database
+    this.startAutoSync() // Start automatic sync
     this.focusInput()
   }
 
-  // Combined save and sync functionality
+  // Load sync settings from the database
+  async loadSyncSettings() {
+    if (!ipcRenderer) return
+
+    try {
+      const result = await ipcRenderer.invoke('get-settings')
+      if (result.success && result.data) {
+        // Update sync interval from settings
+        const syncInterval = parseInt(result.data.sync_interval) || (5 * 60 * 1000)
+        this.syncSettings.interval = syncInterval
+        console.log('Loaded sync settings - interval:', syncInterval, 'ms')
+      }
+    } catch (error) {
+      console.error('Error loading sync settings:', error)
+    }
+  }
+
+  // Start automatic attendance sync
+  startAutoSync() {
+    if (this.autoSyncInterval) {
+      clearInterval(this.autoSyncInterval)
+    }
+
+    if (!this.syncSettings.enabled) return
+
+    console.log('Starting auto-sync with interval:', this.syncSettings.interval, 'ms')
+    
+    this.autoSyncInterval = setInterval(() => {
+      this.performAttendanceSync(true) // Silent sync
+    }, this.syncSettings.interval)
+
+    // Also perform an initial sync after 10 seconds
+    setTimeout(() => {
+      this.performAttendanceSync(true)
+    }, 10000)
+  }
+
+  // Stop automatic sync
+  stopAutoSync() {
+    if (this.autoSyncInterval) {
+      clearInterval(this.autoSyncInterval)
+      this.autoSyncInterval = null
+      console.log('Auto-sync stopped')
+    }
+  }
+
+  // Perform attendance sync with retry logic
+  async performAttendanceSync(silent = false, retryCount = 0) {
+    if (!ipcRenderer) {
+      if (!silent) {
+        this.showStatus('Demo mode: Sync simulated successfully!', 'success')
+      }
+      return { success: true, message: 'Demo sync' }
+    }
+
+    try {
+      // First check if there are records to sync
+      const countResult = await ipcRenderer.invoke('get-unsynced-attendance-count')
+      
+      if (!countResult.success || countResult.count === 0) {
+        if (!silent) {
+          this.showStatus('No attendance records to sync', 'info')
+        }
+        return { success: true, message: 'No records to sync' }
+      }
+
+      if (!silent) {
+        this.showStatus(`Syncing ${countResult.count} attendance records...`, 'info')
+      }
+
+      // Perform the sync
+      const syncResult = await ipcRenderer.invoke('sync-attendance-to-server')
+      
+      if (syncResult.success) {
+        if (!silent) {
+          this.showStatus(syncResult.message, 'success')
+        }
+        console.log('Attendance sync successful:', syncResult.message)
+        
+        // Update sync info display if settings modal is open
+        if (document.getElementById('settingsModal').classList.contains('show')) {
+          await this.loadSyncInfo()
+        }
+        
+        return syncResult
+      } else {
+        throw new Error(syncResult.message)
+      }
+      
+    } catch (error) {
+      console.error('Attendance sync error:', error)
+      
+      // Retry logic
+      if (retryCount < this.syncSettings.retryAttempts) {
+        console.log(`Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`)
+        
+        setTimeout(() => {
+          this.performAttendanceSync(silent, retryCount + 1)
+        }, this.syncSettings.retryDelay)
+        
+        if (!silent) {
+          this.showStatus(`Sync failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`, 'warning')
+        }
+      } else {
+        if (!silent) {
+          this.showStatus(`Sync failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`, 'error')
+        }
+        return { success: false, message: error.message }
+      }
+    }
+  }
+
+  // Enhanced save and sync functionality
   async saveAndSync() {
     const syncNowBtn = document.getElementById('syncNowBtn')
     const originalText = syncNowBtn.textContent
@@ -78,20 +199,38 @@ class AttendanceApp {
         return
       }
 
-      // Update button text to show sync phase
-      syncNowBtn.textContent = '🔄 Syncing...'
+      // Update local sync settings
+      this.syncSettings.interval = parseInt(settings.sync_interval)
+      
+      // Restart auto-sync with new interval
+      this.startAutoSync()
+
+      // Update button text to show employee sync phase
+      syncNowBtn.textContent = '🔄 Syncing Employees...'
 
       // Then sync the employees
-      const syncResult = await ipcRenderer.invoke('sync-employees')
+      const employeeSyncResult = await ipcRenderer.invoke('sync-employees')
       
-      if (syncResult.success) {
-        this.showSettingsStatus('Settings saved and sync completed successfully!', 'success')
+      if (!employeeSyncResult.success) {
+        this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, 'warning')
+        return
+      }
+
+      // Update button text to show attendance sync phase
+      syncNowBtn.textContent = '📊 Syncing Attendance...'
+
+      // Finally sync attendance
+      const attendanceSyncResult = await this.performAttendanceSync(false)
+      
+      if (attendanceSyncResult && attendanceSyncResult.success) {
+        this.showSettingsStatus('Settings saved and all data synced successfully!', 'success')
         await this.loadSyncInfo()
         // Also refresh the main attendance data
         await this.loadTodayAttendance()
       } else {
-        this.showSettingsStatus(`Settings saved, but sync failed: ${syncResult.error}`, 'warning')
+        this.showSettingsStatus('Settings saved, employees synced, but attendance sync had issues', 'warning')
       }
+      
     } catch (error) {
       console.error('Save and sync error:', error)
       this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, 'error')
@@ -187,6 +326,14 @@ class AttendanceApp {
       this.saveAndSync()
     })
 
+    // Add manual attendance sync button functionality
+    const syncAttendanceBtn = document.getElementById('syncAttendanceBtn')
+    if (syncAttendanceBtn) {
+      syncAttendanceBtn.addEventListener("click", () => {
+        this.performAttendanceSync(false) // Not silent
+      })
+    }
+
     // Keep input focused but allow interaction with employee display
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".employee-display") && !e.target.closest("button") && !e.target.closest("input")) {
@@ -205,6 +352,13 @@ class AttendanceApp {
         }
       })
     })
+
+    // Listen for IPC events from main process
+    if (ipcRenderer) {
+      ipcRenderer.on('sync-attendance-to-server', () => {
+        this.performAttendanceSync(false)
+      })
+    }
   }
 
   // Settings functionality
@@ -213,6 +367,7 @@ class AttendanceApp {
     modal.classList.add("show")
     this.loadSettings()
     this.loadSyncInfo()
+    this.loadAttendanceSyncInfo() // Load attendance sync info
   }
 
   closeSettings() {
@@ -283,6 +438,67 @@ class AttendanceApp {
       }
     } catch (error) {
       console.error('Error loading sync info:', error)
+    }
+  }
+
+  // Load attendance sync information
+  async loadAttendanceSyncInfo() {
+    if (!ipcRenderer) {
+      // Demo values
+      const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
+      if (attendanceSyncInfo) {
+        attendanceSyncInfo.innerHTML = `
+          <div class="sync-info-item">
+            <strong>Unsynced Records:</strong> 3 (Demo)
+          </div>
+          <div class="sync-info-item">
+            <strong>Auto-sync:</strong> Enabled - Every 5 minutes
+          </div>
+          <div class="sync-info-item">
+            <strong>Last Attendance Sync:</strong> 2 minutes ago (Demo)
+          </div>
+        `
+      }
+      return
+    }
+
+    try {
+      const unsyncedResult = await ipcRenderer.invoke('get-unsynced-attendance-count')
+      const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
+      
+      if (attendanceSyncInfo && unsyncedResult.success) {
+        const syncIntervalMinutes = Math.floor(this.syncSettings.interval / 60000)
+        const syncStatus = this.syncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : 'Disabled'
+        
+        attendanceSyncInfo.innerHTML = `
+          <div class="sync-info-item">
+            <strong>Unsynced Records:</strong> ${unsyncedResult.count}
+          </div>
+          <div class="sync-info-item">
+            <strong>Auto-sync:</strong> ${syncStatus}
+          </div>
+          <div class="sync-info-item">
+            <strong>Next sync:</strong> <span id="nextSyncTime">Calculating...</span>
+          </div>
+        `
+        
+        // Update next sync time if auto-sync is enabled
+        if (this.syncSettings.enabled && this.autoSyncInterval) {
+          this.updateNextSyncTime()
+        }
+      }
+    } catch (error) {
+      console.error('Error loading attendance sync info:', error)
+    }
+  }
+
+  // Update next sync countdown
+  updateNextSyncTime() {
+    // This is a simplified version - in a real app you might want to track the exact next sync time
+    const nextSyncElement = document.getElementById('nextSyncTime')
+    if (nextSyncElement) {
+      const minutes = Math.floor(this.syncSettings.interval / 60000)
+      nextSyncElement.textContent = `~${minutes} minutes`
     }
   }
 
@@ -384,6 +600,10 @@ class AttendanceApp {
     switch (message.type) {
       case "attendance_update":
         this.loadTodayAttendance()
+        // Trigger sync after attendance update
+        setTimeout(() => {
+          this.performAttendanceSync(true) // Silent sync
+        }, 2000)
         break
       default:
         console.log("Unknown WebSocket message:", message)
@@ -422,6 +642,12 @@ class AttendanceApp {
         this.clearInput()
         await this.loadTodayAttendance()
         this.showStatus("Attendance recorded successfully", "success")
+        
+        // Trigger automatic sync after successful attendance recording
+        setTimeout(() => {
+          this.performAttendanceSync(true) // Silent sync
+        }, 3000)
+        
       } else {
         this.showStatus(result.error || "Employee not found", "error")
         this.focusInput()
@@ -690,9 +916,39 @@ class AttendanceApp {
       statusElement.classList.remove("show")
     }, 4000)
   }
+
+  // Clean up when app is being destroyed
+  destroy() {
+    this.stopAutoSync()
+    
+    if (this.employeeDisplayTimeout) {
+      clearTimeout(this.employeeDisplayTimeout)
+    }
+    
+    if (this.barcodeTimeout) {
+      clearTimeout(this.barcodeTimeout)
+    }
+    
+    if (this.ws) {
+      this.ws.close()
+    }
+    
+    // Clean up image load attempts
+    this.imageLoadAttempts.clear()
+    
+    console.log('AttendanceApp destroyed and cleaned up')
+  }
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener("DOMContentLoaded", () => {
-  new AttendanceApp()
+  // Store reference globally for cleanup if needed
+  window.attendanceApp = new AttendanceApp()
+})
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+  if (window.attendanceApp && typeof window.attendanceApp.destroy === 'function') {
+    window.attendanceApp.destroy()
+  }
 })
