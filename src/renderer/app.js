@@ -6,6 +6,7 @@ class AttendanceApp {
     this.employeeDisplayTimeout = null
     this.imageLoadAttempts = new Map() // Track image load attempts
     this.imageCounter = 0 // Counter for unique IDs
+    this.barcodeTimeout = null // Add timeout for barcode handling
     this.init()
   }
 
@@ -17,28 +18,138 @@ class AttendanceApp {
     this.focusInput()
   }
 
+  // Combined save and sync functionality
+  async saveAndSync() {
+    const syncNowBtn = document.getElementById('syncNowBtn')
+    const originalText = syncNowBtn.textContent
+    
+    // Show loading state
+    syncNowBtn.textContent = '💾 Saving & Syncing...'
+    syncNowBtn.disabled = true
+    
+    if (!ipcRenderer) {
+      this.showSettingsStatus('Demo mode: Settings saved and sync completed successfully!', 'success')
+      await this.loadSyncInfo()
+      syncNowBtn.textContent = originalText
+      syncNowBtn.disabled = false
+      return
+    }
+
+    try {
+      // First, save the settings
+      const settingsForm = document.getElementById('settingsForm')
+      if (!settingsForm) {
+        throw new Error('Settings form not found')
+      }
+
+      const formData = new FormData(settingsForm)
+      
+      // Get server URL with proper null checking
+      const serverUrlInput = formData.get('serverUrl') || document.getElementById('serverUrl')?.value
+      if (!serverUrlInput) {
+        this.showSettingsStatus('Server URL is required', 'error')
+        return
+      }
+
+      // Clean the base URL and ensure it doesn't already have the API endpoint
+      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, '') // Remove trailing slash
+      if (baseUrl.endsWith('/api/tables/emp_list/data')) {
+        baseUrl = baseUrl.replace('/api/tables/emp_list/data', '')
+      }
+      
+      const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`
+      
+      // Get other form values with fallbacks
+      const syncIntervalInput = formData.get('syncInterval') || document.getElementById('syncInterval')?.value || '5'
+      const gracePeriodInput = formData.get('gracePeriod') || document.getElementById('gracePeriod')?.value || '5'
+      
+      const settings = {
+        server_url: fullServerUrl,
+        sync_interval: (parseInt(syncIntervalInput) * 60000).toString(),
+        grace_period: gracePeriodInput
+      }
+
+      console.log('Saving settings:', settings) // Debug log
+
+      const saveResult = await ipcRenderer.invoke('update-settings', settings)
+      
+      if (!saveResult.success) {
+        this.showSettingsStatus(saveResult.error || 'Error saving settings', 'error')
+        return
+      }
+
+      // Update button text to show sync phase
+      syncNowBtn.textContent = '🔄 Syncing...'
+
+      // Then sync the employees
+      const syncResult = await ipcRenderer.invoke('sync-employees')
+      
+      if (syncResult.success) {
+        this.showSettingsStatus('Settings saved and sync completed successfully!', 'success')
+        await this.loadSyncInfo()
+        // Also refresh the main attendance data
+        await this.loadTodayAttendance()
+      } else {
+        this.showSettingsStatus(`Settings saved, but sync failed: ${syncResult.error}`, 'warning')
+      }
+    } catch (error) {
+      console.error('Save and sync error:', error)
+      this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, 'error')
+    } finally {
+      syncNowBtn.textContent = originalText
+      syncNowBtn.disabled = false
+    }
+  }
+
   setupEventListeners() {
     // Barcode input
     const barcodeInput = document.getElementById("barcodeInput")
     const manualSubmit = document.getElementById("manualSubmit")
     const settingsBtn = document.getElementById("settingsBtn")
+    const closeSettings = document.getElementById("closeSettings")
+    const cancelSettings = document.getElementById("cancelSettings")
+    const settingsModal = document.getElementById("settingsModal")
+    const settingsForm = document.getElementById("settingsForm")
+    const syncNowBtn = document.getElementById("syncNowBtn")
 
     barcodeInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
+        e.preventDefault() // Prevent form submission
         this.handleScan()
       }
     })
 
     barcodeInput.addEventListener("input", (e) => {
-      // Auto-submit for barcode scanner (typically ends with Enter)
       const inputType = document.querySelector('input[name="inputType"]:checked').value
-      if (inputType === "barcode" && e.target.value.length >= 8) {
-        // Small delay to ensure complete barcode is captured
-        setTimeout(() => {
-          if (e.target.value === barcodeInput.value) {
+      
+      // Clear any existing timeout
+      if (this.barcodeTimeout) {
+        clearTimeout(this.barcodeTimeout)
+      }
+
+      if (inputType === "barcode") {
+        // For barcode scanners, wait for a brief pause after input stops
+        // This ensures the complete barcode is captured before auto-submitting
+        this.barcodeTimeout = setTimeout(() => {
+          const currentValue = e.target.value.trim()
+          if (currentValue.length >= 8) { // Minimum barcode length
             this.handleScan()
           }
-        }, 100)
+        }, 150) // Wait 150ms after last input
+      }
+    })
+
+    // Handle paste events (some barcode scanners simulate paste)
+    barcodeInput.addEventListener("paste", (e) => {
+      const inputType = document.querySelector('input[name="inputType"]:checked').value
+      
+      if (inputType === "barcode") {
+        setTimeout(() => {
+          const pastedValue = e.target.value.trim()
+          if (pastedValue.length >= 8) {
+            this.handleScan()
+          }
+        }, 50)
       }
     })
 
@@ -46,21 +157,158 @@ class AttendanceApp {
       this.handleScan()
     })
 
+    // Settings event listeners
     settingsBtn.addEventListener("click", () => {
-      ipcRenderer.invoke("open-settings")
+      this.openSettings()
     })
 
-    // Keep input focused
+    closeSettings.addEventListener("click", () => {
+      this.closeSettings()
+    })
+
+    cancelSettings.addEventListener("click", () => {
+      this.closeSettings()
+    })
+
+    settingsModal.addEventListener("click", (e) => {
+      if (e.target === settingsModal) {
+        this.closeSettings()
+      }
+    })
+
+    // Settings form submission - now calls saveAndSync
+    settingsForm.addEventListener("submit", (e) => {
+      e.preventDefault()
+      this.saveAndSync()
+    })
+
+    // Sync now button - now calls saveAndSync
+    syncNowBtn.addEventListener("click", () => {
+      this.saveAndSync()
+    })
+
+    // Keep input focused but allow interaction with employee display
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".employee-display")) {
+      if (!e.target.closest(".employee-display") && !e.target.closest("button") && !e.target.closest("input")) {
         this.focusInput()
       }
     })
+
+    // Handle input type changes
+    const inputTypeRadios = document.querySelectorAll('input[name="inputType"]')
+    inputTypeRadios.forEach(radio => {
+      radio.addEventListener("change", () => {
+        this.focusInput()
+        // Clear any pending timeouts when switching input types
+        if (this.barcodeTimeout) {
+          clearTimeout(this.barcodeTimeout)
+        }
+      })
+    })
+  }
+
+  // Settings functionality
+  openSettings() {
+    const modal = document.getElementById("settingsModal")
+    modal.classList.add("show")
+    this.loadSettings()
+    this.loadSyncInfo()
+  }
+
+  closeSettings() {
+    const modal = document.getElementById("settingsModal")
+    modal.classList.remove("show")
+    // Clear any status messages
+    const statusElement = document.getElementById('settingsStatusMessage')
+    statusElement.style.display = 'none'
+  }
+
+  async loadSettings() {
+    if (!ipcRenderer) {
+      // Demo values
+      document.getElementById('serverUrl').value = 'URL'
+      document.getElementById('syncInterval').value = '5'
+      document.getElementById('gracePeriod').value = '5'
+      return
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('get-settings')
+      
+      if (result.success) {
+        const settings = result.data
+        
+        document.getElementById('serverUrl').value = settings.server_url || ''
+        document.getElementById('syncInterval').value = Math.floor((settings.sync_interval || 300000) / 60000)
+        document.getElementById('gracePeriod').value = settings.grace_period || 5
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error)
+      this.showSettingsStatus('Error loading settings', 'error')
+    }
+  }
+
+  async loadSyncInfo() {
+    if (!ipcRenderer) {
+      document.getElementById('employeeCount').textContent = 'Employees in database: 25 (Demo)'
+      document.getElementById('lastSync').textContent = 'Last sync: Just now (Demo)'
+      document.getElementById('profileStatus').textContent = 'Profile images: 20/25 downloaded (Demo)'
+      document.getElementById('syncInfo').style.display = 'block'
+      return
+    }
+
+    try {
+      const employeesResult = await ipcRenderer.invoke('get-employees')
+      
+      if (employeesResult.success) {
+        document.getElementById('employeeCount').textContent = 
+          `Employees in database: ${employeesResult.data.length}`
+        
+        const settingsResult = await ipcRenderer.invoke('get-settings')
+        if (settingsResult.success && settingsResult.data.last_sync) {
+          const lastSync = new Date(parseInt(settingsResult.data.last_sync))
+          document.getElementById('lastSync').textContent = 
+            `Last sync: ${lastSync.toLocaleString()}`
+        } else {
+          document.getElementById('lastSync').textContent = 'Last sync: Never'
+        }
+        
+        const profileResult = await ipcRenderer.invoke('check-profile-images')
+        if (profileResult.success) {
+          document.getElementById('profileStatus').textContent = 
+            `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`
+        }
+        
+        document.getElementById('syncInfo').style.display = 'block'
+      }
+    } catch (error) {
+      console.error('Error loading sync info:', error)
+    }
+  }
+
+  showSettingsStatus(message, type = 'info') {
+    const statusElement = document.getElementById('settingsStatusMessage')
+    statusElement.textContent = message
+    statusElement.className = `status-message ${type}`
+    statusElement.style.display = 'block'
+    statusElement.style.position = 'relative'
+    statusElement.style.top = 'auto'
+    statusElement.style.right = 'auto'
+    statusElement.style.transform = 'none'
+    statusElement.style.marginBottom = '16px'
+    statusElement.style.borderRadius = '8px'
+    
+    setTimeout(() => {
+      statusElement.style.display = 'none'
+    }, 4000)
   }
 
   focusInput() {
     const barcodeInput = document.getElementById("barcodeInput")
-    setTimeout(() => barcodeInput.focus(), 100)
+    setTimeout(() => {
+      barcodeInput.focus()
+      barcodeInput.select() // Select all text for easy replacement
+    }, 100)
   }
 
   // Generate unique ID for images
@@ -143,13 +391,25 @@ class AttendanceApp {
   }
 
   async handleScan() {
+    // Clear any pending timeouts
+    if (this.barcodeTimeout) {
+      clearTimeout(this.barcodeTimeout)
+    }
+
     const input = document.getElementById("barcodeInput").value.trim()
     const inputType = document.querySelector('input[name="inputType"]:checked').value
 
     if (!input) {
       this.showStatus("Please enter a barcode or ID number", "error")
+      this.focusInput()
       return
     }
+
+    // Show processing state
+    const submitButton = document.getElementById("manualSubmit")
+    const originalText = submitButton.textContent
+    submitButton.textContent = "Processing..."
+    submitButton.disabled = true
 
     try {
       const result = await ipcRenderer.invoke("clock-attendance", {
@@ -161,12 +421,19 @@ class AttendanceApp {
         this.showEmployeeDisplay(result.data)
         this.clearInput()
         await this.loadTodayAttendance()
+        this.showStatus("Attendance recorded successfully", "success")
       } else {
         this.showStatus(result.error || "Employee not found", "error")
+        this.focusInput()
       }
     } catch (error) {
       console.error("Clock error:", error)
       this.showStatus("System error occurred", "error")
+      this.focusInput()
+    } finally {
+      // Restore submit button
+      submitButton.textContent = originalText
+      submitButton.disabled = false
     }
   }
 
@@ -280,7 +547,7 @@ class AttendanceApp {
 
   clearInput() {
     document.getElementById("barcodeInput").value = ""
-    this.focusInput()
+    setTimeout(() => this.focusInput(), 100)
   }
 
   async loadInitialData() {

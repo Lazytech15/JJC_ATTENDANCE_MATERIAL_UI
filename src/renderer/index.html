@@ -957,7 +957,7 @@
                 <form id="settingsForm">
                     <div class="form-group">
                         <label for="serverUrl">Server URL</label>
-                        <input type="url" id="serverUrl" name="server_url" placeholder="http://192.168.1.71:3001/api/tables/emp_list/data">
+                        <input type="url" id="serverUrl" name="server_url" placeholder="">
                         <div class="help-text">URL to fetch employee data from your server</div>
                     </div>
                     
@@ -975,7 +975,7 @@
                     
                     <div class="button-group">
                         <button type="button" class="btn btn-success" id="syncNowBtn">🔄 Sync Now</button>
-                        <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+                        <!-- <button type="submit" class="btn btn-primary">💾 Save Settings</button> -->
                         <button type="button" class="btn btn-secondary" id="cancelSettings">✕ Cancel</button>
                     </div>
                 </form>
@@ -986,11 +986,15 @@
                     <p id="lastSync">Last sync: Loading...</p>
                     <p id="profileStatus">Profile images: Loading...</p>
                 </div>
+                
             </div>
         </div>
-    </div>
+    </div>   
+    <script src="./app.js"></script>
+</body>
+</html>
 
-    <script>
+ <!-- <script>
         // Detect if running in Electron
         const isElectron = typeof require !== 'undefined' && typeof window.require !== 'undefined';
         let ipcRenderer = null;
@@ -1673,7 +1677,4 @@
         // Initialize app when DOM is loaded
         document.addEventListener("DOMContentLoaded", () => {
             new AttendanceApp();
-        });
-    </script>
-</body>
-</html>
+        }); </script> -->
