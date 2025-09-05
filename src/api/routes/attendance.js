@@ -98,8 +98,23 @@ async function getEmployeeAttendance(event, { employeeUid, startDate, endDate })
   }
 }
 
+// Add the missing getTodayStatistics handler function
+async function getTodayStatistics() {
+  try {
+    const stats = Attendance.getTodayStatistics()
+    return {
+      success: true,
+      data: stats,
+    }
+  } catch (error) {
+    console.error("Error getting today statistics:", error)
+    return { success: false, error: error.message }
+  }
+}
+
 module.exports = {
   clockAttendance,
   getTodayAttendance,
   getEmployeeAttendance,
+  getTodayStatistics, // Add this to the exports
 }
