@@ -19,7 +19,7 @@ class ProfileService {
 
   async downloadAndStoreProfile(uid, serverUrl) {
     try {
-      const profileUrl = `${serverUrl}/api/files/employee/${uid}/profile`
+      const profileUrl = `${serverUrl}/api/profile/${uid}`
       const profilePath = path.join(this.profilesDir, `${uid}.jpg`)
 
       // Check if profile already exists
@@ -35,6 +35,59 @@ class ProfileService {
     } catch (error) {
       console.error(`Error downloading profile for employee ${uid}:`, error)
       return null
+    }
+  }
+
+  // NEW METHOD: Check how many profile images are downloaded
+  async checkProfileImages(employeeUids = []) {
+    try {
+      let downloadedCount = 0
+      const total = employeeUids.length
+
+      // Check each employee UID to see if their profile image exists locally
+      for (const uid of employeeUids) {
+        const exists = await this.profileExists(uid)
+        if (exists) {
+          downloadedCount++
+        }
+      }
+
+      return {
+        success: true,
+        downloaded: downloadedCount,
+        total: total,
+        missing: employeeUids.filter(async uid => !(await this.profileExists(uid)))
+      }
+    } catch (error) {
+      console.error("Error checking profile images:", error)
+      return {
+        success: false,
+        error: error.message,
+        downloaded: 0,
+        total: 0
+      }
+    }
+  }
+
+  // Alternative method if you want to scan the directory instead of checking specific UIDs
+  async checkAllProfileImages() {
+    try {
+      const files = await fs.readdir(this.profilesDir)
+      const profileImages = files.filter(file => file.endsWith('.jpg'))
+      
+      return {
+        success: true,
+        downloaded: profileImages.length,
+        profiles: profileImages.map(file => file.replace('.jpg', '')) // Return UIDs
+      }
+    } catch (error) {
+      console.error("Error checking all profile images:", error)
+      return {
+        success: false,
+        error: error.message,
+        downloaded: 0,
+        profiles: []
+      }
     }
   }
 

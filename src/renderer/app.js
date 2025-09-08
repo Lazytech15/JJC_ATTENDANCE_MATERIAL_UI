@@ -1,5 +1,3 @@
-const { ipcRenderer } = require("electron")
-
 class AttendanceApp {
   constructor() {
     this.ws = null
@@ -14,6 +12,7 @@ class AttendanceApp {
       retryAttempts: 3,
       retryDelay: 30000 // 30 seconds
     }
+    this.electronAPI = window.electronAPI // Use the exposed API
     this.init()
   }
 
@@ -29,10 +28,10 @@ class AttendanceApp {
 
   // Load sync settings from the database
   async loadSyncSettings() {
-    if (!ipcRenderer) return
+    if (!this.electronAPI) return
 
     try {
-      const result = await ipcRenderer.invoke('get-settings')
+      const result = await this.electronAPI.getSettings()
       if (result.success && result.data) {
         // Update sync interval from settings
         const syncInterval = parseInt(result.data.sync_interval) || (5 * 60 * 1000)
@@ -75,7 +74,7 @@ class AttendanceApp {
 
   // Perform attendance sync with retry logic
   async performAttendanceSync(silent = false, retryCount = 0) {
-    if (!ipcRenderer) {
+    if (!this.electronAPI) {
       if (!silent) {
         this.showStatus('Demo mode: Sync simulated successfully!', 'success')
       }
@@ -84,7 +83,7 @@ class AttendanceApp {
 
     try {
       // First check if there are records to sync
-      const countResult = await ipcRenderer.invoke('get-unsynced-attendance-count')
+      const countResult = await this.electronAPI.getUnsyncedAttendanceCount()
       
       if (!countResult.success || countResult.count === 0) {
         if (!silent) {
@@ -98,7 +97,7 @@ class AttendanceApp {
       }
 
       // Perform the sync
-      const syncResult = await ipcRenderer.invoke('sync-attendance-to-server')
+      const syncResult = await this.electronAPI.syncAttendanceToServer()
       
       if (syncResult.success) {
         if (!silent) {
@@ -148,7 +147,7 @@ class AttendanceApp {
     syncNowBtn.textContent = '💾 Saving & Syncing...'
     syncNowBtn.disabled = true
     
-    if (!ipcRenderer) {
+    if (!this.electronAPI) {
       this.showSettingsStatus('Demo mode: Settings saved and sync completed successfully!', 'success')
       await this.loadSyncInfo()
       syncNowBtn.textContent = originalText
@@ -192,7 +191,7 @@ class AttendanceApp {
 
       console.log('Saving settings:', settings) // Debug log
 
-      const saveResult = await ipcRenderer.invoke('update-settings', settings)
+      const saveResult = await this.electronAPI.updateSettings(settings)
       
       if (!saveResult.success) {
         this.showSettingsStatus(saveResult.error || 'Error saving settings', 'error')
@@ -209,7 +208,7 @@ class AttendanceApp {
       syncNowBtn.textContent = '🔄 Syncing Employees...'
 
       // Then sync the employees
-      const employeeSyncResult = await ipcRenderer.invoke('sync-employees')
+      const employeeSyncResult = await this.electronAPI.syncEmployees()
       
       if (!employeeSyncResult.success) {
         this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, 'warning')
@@ -251,12 +250,22 @@ class AttendanceApp {
     const settingsForm = document.getElementById("settingsForm")
     const syncNowBtn = document.getElementById("syncNowBtn")
 
+    let canScan = true;
+
     barcodeInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
-        e.preventDefault() // Prevent form submission
-        this.handleScan()
+        e.preventDefault();
+
+        if (canScan) {
+          canScan = false; 
+          this.handleScan(); 
+
+          setTimeout(() => {
+            canScan = true;
+          }, 2000);
+        }
       }
-    })
+    });
 
     barcodeInput.addEventListener("input", (e) => {
       const inputType = document.querySelector('input[name="inputType"]:checked').value
@@ -267,14 +276,12 @@ class AttendanceApp {
       }
 
       if (inputType === "barcode") {
-        // For barcode scanners, wait for a brief pause after input stops
-        // This ensures the complete barcode is captured before auto-submitting
         this.barcodeTimeout = setTimeout(() => {
           const currentValue = e.target.value.trim()
-          if (currentValue.length >= 8) { // Minimum barcode length
+          if (currentValue.length >= 8) { 
             this.handleScan()
           }
-        }, 150) // Wait 150ms after last input
+        }, 2000)
       }
     })
 
@@ -288,7 +295,7 @@ class AttendanceApp {
           if (pastedValue.length >= 8) {
             this.handleScan()
           }
-        }, 50)
+        },2000)
       }
     })
 
@@ -353,9 +360,10 @@ class AttendanceApp {
       })
     })
 
-    // Listen for IPC events from main process
-    if (ipcRenderer) {
-      ipcRenderer.on('sync-attendance-to-server', () => {
+    // Listen for IPC events from main process using the exposed API
+    if (this.electronAPI) {
+      // Set up listener for sync attendance events
+      this.electronAPI.onSyncAttendanceToServer(() => {
         this.performAttendanceSync(false)
       })
     }
@@ -379,7 +387,7 @@ class AttendanceApp {
   }
 
   async loadSettings() {
-    if (!ipcRenderer) {
+    if (!this.electronAPI) {
       // Demo values
       document.getElementById('serverUrl').value = 'URL'
       document.getElementById('syncInterval').value = '5'
@@ -388,7 +396,7 @@ class AttendanceApp {
     }
 
     try {
-      const result = await ipcRenderer.invoke('get-settings')
+      const result = await this.electronAPI.getSettings()
       
       if (result.success) {
         const settings = result.data
@@ -404,7 +412,7 @@ class AttendanceApp {
   }
 
   async loadSyncInfo() {
-    if (!ipcRenderer) {
+    if (!this.electronAPI) {
       document.getElementById('employeeCount').textContent = 'Employees in database: 25 (Demo)'
       document.getElementById('lastSync').textContent = 'Last sync: Just now (Demo)'
       document.getElementById('profileStatus').textContent = 'Profile images: 20/25 downloaded (Demo)'
@@ -413,13 +421,13 @@ class AttendanceApp {
     }
 
     try {
-      const employeesResult = await ipcRenderer.invoke('get-employees')
+      const employeesResult = await this.electronAPI.getEmployees()
       
       if (employeesResult.success) {
         document.getElementById('employeeCount').textContent = 
           `Employees in database: ${employeesResult.data.length}`
         
-        const settingsResult = await ipcRenderer.invoke('get-settings')
+        const settingsResult = await this.electronAPI.getSettings()
         if (settingsResult.success && settingsResult.data.last_sync) {
           const lastSync = new Date(parseInt(settingsResult.data.last_sync))
           document.getElementById('lastSync').textContent = 
@@ -428,7 +436,7 @@ class AttendanceApp {
           document.getElementById('lastSync').textContent = 'Last sync: Never'
         }
         
-        const profileResult = await ipcRenderer.invoke('check-profile-images')
+        const profileResult = await this.electronAPI.checkProfileImages()
         if (profileResult.success) {
           document.getElementById('profileStatus').textContent = 
             `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`
@@ -443,7 +451,7 @@ class AttendanceApp {
 
   // Load attendance sync information
   async loadAttendanceSyncInfo() {
-    if (!ipcRenderer) {
+    if (!this.electronAPI) {
       // Demo values
       const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
       if (attendanceSyncInfo) {
@@ -463,7 +471,7 @@ class AttendanceApp {
     }
 
     try {
-      const unsyncedResult = await ipcRenderer.invoke('get-unsynced-attendance-count')
+      const unsyncedResult = await this.electronAPI.getUnsyncedAttendanceCount()
       const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
       
       if (attendanceSyncInfo && unsyncedResult.success) {
@@ -632,7 +640,7 @@ class AttendanceApp {
     submitButton.disabled = true
 
     try {
-      const result = await ipcRenderer.invoke("clock-attendance", {
+      const result = await this.electronAPI.clockAttendance({
         input: input,
         inputType: inputType,
       })
@@ -724,7 +732,7 @@ class AttendanceApp {
 
   showEmployeeDisplay(data) {
     const display = document.getElementById("employeeDisplay")
-    const { employee, clockType, clockTime, regularHours, overtimeHours } = data
+    const { employee, clockType, sessionType, clockTime, regularHours, overtimeHours, isOvertimeSession } = data
 
     // Update employee info
     document.getElementById("employeeName").textContent =
@@ -738,14 +746,35 @@ class AttendanceApp {
     // Use the improved image loading method
     this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${employee.last_name}`)
 
-    // Update clock info
+    // Update clock info with enhanced display
     const clockTypeElement = document.getElementById("clockType")
-    clockTypeElement.textContent = this.formatClockType(clockType)
-    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")}`
+    clockTypeElement.textContent = this.formatClockType(clockType, sessionType)
+    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${isOvertimeSession ? 'overtime' : ''}`
 
     document.getElementById("clockTime").textContent = new Date(clockTime).toLocaleTimeString()
 
-    document.getElementById("hoursInfo").textContent = `Regular: ${regularHours}h | Overtime: ${overtimeHours}h`
+    // Enhanced hours display
+    const hoursInfo = document.getElementById("hoursInfo")
+    const totalHours = (regularHours || 0) + (overtimeHours || 0)
+    
+    if (isOvertimeSession) {
+      hoursInfo.innerHTML = `
+        <div class="hours-breakdown overtime-session">
+          <div class="regular-hours">Regular: ${regularHours || 0}h</div>
+          <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
+          <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
+          <div class="session-indicator">🌙 ${sessionType || 'Overtime Session'}</div>
+        </div>
+      `
+    } else {
+      hoursInfo.innerHTML = `
+        <div class="hours-breakdown">
+          <div class="regular-hours">Regular: ${regularHours || 0}h</div>
+          <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
+          <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
+        </div>
+      `
+    }
 
     // Show display
     display.style.display = "block"
@@ -761,12 +790,25 @@ class AttendanceApp {
     }, 15000)
   }
 
-  formatClockType(clockType) {
+  formatClockType(clockType, sessionType) {
+    // Use enhanced session type from backend if available
+    if (sessionType) {
+      const isIn = clockType.endsWith('_in')
+      const emoji = isIn ? '🟢' : '🔴'
+      const action = isIn ? 'In' : 'Out'
+      return `${emoji} ${sessionType} ${action}`
+    }
+
+    // Fallback to original mapping with new types
     const types = {
       morning_in: "🟢 Morning In",
       morning_out: "🔴 Morning Out",
-      afternoon_in: "🟢 Afternoon In",
+      afternoon_in: "🟢 Afternoon In", 
       afternoon_out: "🔴 Afternoon Out",
+      evening_in: "🟢 Evening In (Overtime)",
+      evening_out: "🔴 Evening Out (Overtime)",
+      overtime_in: "🟢 Overtime In",
+      overtime_out: "🔴 Overtime Out",
     }
     return types[clockType] || clockType
   }
@@ -782,7 +824,7 @@ class AttendanceApp {
 
   async loadTodayAttendance() {
     try {
-      const result = await ipcRenderer.invoke("get-today-attendance")
+      const result = await this.electronAPI.getTodayAttendance()
 
       if (result.success) {
         this.updateCurrentlyClocked(result.data.currentlyClocked)
@@ -797,11 +839,54 @@ class AttendanceApp {
   updateStatistics(stats) {
     if (!stats) return
 
+    // Update basic statistics
     document.getElementById("totalRegularHours").textContent = stats.totalRegularHours || 0
     document.getElementById("totalOvertimeHours").textContent = stats.totalOvertimeHours || 0
     document.getElementById("presentCount").textContent = stats.presentCount || 0
     document.getElementById("lateCount").textContent = stats.lateCount || 0
     document.getElementById("absentCount").textContent = stats.absentCount || 0
+
+    // Update overtime-specific statistics if available
+    if (stats.overtimeEmployeesCount !== undefined) {
+      const overtimeStatsElement = document.getElementById("overtimeStats")
+      if (overtimeStatsElement) {
+        overtimeStatsElement.innerHTML = `
+          <div class="stat-item overtime-stat">
+            <div class="stat-value">${stats.overtimeEmployeesCount}</div>
+            <div class="stat-label">In Overtime</div>
+          </div>
+          <div class="stat-item evening-stat">
+            <div class="stat-value">${stats.eveningSessionsCount || 0}</div>
+            <div class="stat-label">Evening Sessions</div>
+          </div>
+        `
+      }
+    }
+
+    // Update session breakdown if available
+    if (stats.sessionBreakdown) {
+      const sessionBreakdownElement = document.getElementById("sessionBreakdown")
+      if (sessionBreakdownElement) {
+        sessionBreakdownElement.innerHTML = `
+          <div class="session-stat morning">
+            <span class="session-count">${stats.sessionBreakdown.morning || 0}</span>
+            <span class="session-label">Morning</span>
+          </div>
+          <div class="session-stat afternoon">
+            <span class="session-count">${stats.sessionBreakdown.afternoon || 0}</span>
+            <span class="session-label">Afternoon</span>
+          </div>
+          <div class="session-stat evening">
+            <span class="session-count">${stats.sessionBreakdown.evening || 0}</span>
+            <span class="session-label">Evening</span>
+          </div>
+          <div class="session-stat overtime">
+            <span class="session-count">${stats.sessionBreakdown.overtime || 0}</span>
+            <span class="session-label">Overtime</span>
+          </div>
+        `
+      }
+    }
   }
 
   updateCurrentlyClocked(employees) {
@@ -819,8 +904,14 @@ class AttendanceApp {
         const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`)
         imageIds.push({ id: empId, uid: emp.employee_uid, name: `${emp.first_name} ${emp.last_name}` })
         
+        // Determine session type and styling
+        const sessionType = emp.sessionType || this.getSessionTypeFromClockType(emp.last_clock_type)
+        const isOvertime = emp.isOvertimeSession || this.isOvertimeClockType(emp.last_clock_type)
+        const badgeClass = isOvertime ? 'overtime' : 'in'
+        const sessionIcon = this.getSessionIcon(emp.last_clock_type)
+        
         return `
-            <div class="employee-item">
+            <div class="employee-item ${isOvertime ? 'overtime-employee' : ''}">
                 <img class="employee-avatar" 
                      id="${empId}"
                      alt="${emp.first_name} ${emp.last_name}">
@@ -828,7 +919,9 @@ class AttendanceApp {
                     <div class="employee-name">${emp.first_name} ${emp.last_name}</div>
                     <div class="employee-dept">${emp.department || "No Department"}</div>
                 </div>
-                <div class="clock-badge in">Clocked In</div>
+                <div class="clock-badge ${badgeClass}">
+                    ${sessionIcon} ${sessionType}
+                </div>
             </div>
         `
       })
@@ -865,17 +958,24 @@ class AttendanceApp {
           name: `${record.first_name} ${record.last_name}` 
         })
         
+        // Enhanced display for overtime sessions
+        const sessionType = record.sessionType || this.getSessionTypeFromClockType(record.clock_type)
+        const isOvertime = record.isOvertimeSession || this.isOvertimeClockType(record.clock_type)
+        const badgeClass = record.clock_type.includes("in") ? "in" : "out"
+        const finalBadgeClass = `${badgeClass} ${isOvertime ? 'overtime' : ''}`
+        
         return `
-            <div class="attendance-item">
+            <div class="attendance-item ${isOvertime ? 'overtime-record' : ''}">
                 <img class="attendance-avatar" 
                      id="${recordId}"
                      alt="${record.first_name} ${record.last_name}">
                 <div class="attendance-details">
                     <div class="attendance-name">${record.first_name} ${record.last_name}</div>
                     <div class="attendance-time">${new Date(record.clock_time).toLocaleTimeString()}</div>
+                    ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ''}
                 </div>
-                <div class="clock-badge ${record.clock_type.includes("in") ? "in" : "out"}">
-                    ${this.formatClockType(record.clock_type)}
+                <div class="clock-badge ${finalBadgeClass}">
+                    ${this.formatClockType(record.clock_type, sessionType)}
                 </div>
             </div>
         `
@@ -893,9 +993,38 @@ class AttendanceApp {
     }, 10)
   }
 
+  // Helper function to determine if clock type is overtime
+  isOvertimeClockType(clockType) {
+    return clockType && (clockType.startsWith('evening') || clockType.startsWith('overtime'))
+  }
+
+  // Helper function to get session type from clock type
+  getSessionTypeFromClockType(clockType) {
+    if (!clockType) return 'Unknown'
+    
+    if (clockType.startsWith('morning')) return 'Morning'
+    if (clockType.startsWith('afternoon')) return 'Afternoon'
+    if (clockType.startsWith('evening')) return 'Evening'
+    if (clockType.startsWith('overtime')) return 'Overtime'
+    
+    return 'Unknown'
+  }
+
+  // Helper function to get session icon
+  getSessionIcon(clockType) {
+    if (!clockType) return '🔘'
+    
+    if (clockType.startsWith('morning')) return '🌅'
+    if (clockType.startsWith('afternoon')) return '☀️'
+    if (clockType.startsWith('evening')) return '🌙'
+    if (clockType.startsWith('overtime')) return '⭐'
+    
+    return '🔘'
+  }
+
   async syncEmployees() {
     try {
-      const result = await ipcRenderer.invoke("sync-employees")
+      const result = await this.electronAPI.syncEmployees()
 
       if (result.success) {
         this.showStatus(result.message, "success")

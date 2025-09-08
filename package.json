@@ -1,14 +1,16 @@
 {
-  "name": "electron-attendance-system",
+  "name": "jjc-attendance-tracking",
   "version": "1.0.0",
-  "description": "Employee Attendance Recording System with Barcode Scanning",
+  "description": "Offline and dynamic tracking of employee attendance via barcode scanner",
   "main": "src/main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev",
+    "dev": "NODE_ENV=development electron . --dev",
     "build": "electron-builder",
-    "dist": "electron-builder --publish=never"
+    "dist": "electron-builder --publish=never",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild": "npx electron-rebuild"
   },
   "keywords": [
     "electron",
@@ -16,10 +18,9 @@
     "barcode",
     "employee"
   ],
-  "author": "Your Company",
+  "author": "Dev. Emmmanuel S. Ablao",
   "license": "MIT",
   "devDependencies": {
-    "@electron/rebuild": "^4.0.1",
     "electron": "^27.0.0",
     "electron-builder": "^24.6.4"
   },
@@ -32,18 +33,63 @@
     "ws": "^8.14.2"
   },
   "build": {
-    "appId": "com.company.attendance-system",
-    "productName": "Employee Attendance System",
+    "appId": "com.jjc.attendance-system",
+    "productName": "JJC Attendance Tracking",
     "directories": {
       "output": "dist"
     },
     "files": [
       "src/**/*",
-      "node_modules/**/*"
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src",
+        "to": "app/src",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets",
+        "to": "app/assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "src/**/*",
+      "assets/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "assets/icon.ico"
-    }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "license": "assets/license.txt"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "asar": false,
+    "compression": "normal",
+    "npmRebuild": true
   }
 }
