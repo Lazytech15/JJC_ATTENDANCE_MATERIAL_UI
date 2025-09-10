@@ -166,6 +166,63 @@ function createTables() {
     `)
     console.log('✓ Attendance table created')
 
+    // NEW: Attendance Statistics table for detailed calculations
+    console.log('Creating attendance_statistics table...')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS attendance_statistics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_uid INTEGER,
+        attendance_id INTEGER,
+        clock_out_id INTEGER,
+        session_type TEXT CHECK(session_type IN (
+          'morning', 'afternoon', 'evening', 'overtime', 'continuous'
+        )),
+        clock_in_time DATETIME,
+        clock_out_time DATETIME,
+        total_minutes_worked INTEGER,
+        regular_hours REAL DEFAULT 0,
+        overtime_hours REAL DEFAULT 0,
+        total_hours REAL DEFAULT 0,
+        
+        -- Calculation breakdown
+        early_arrival_minutes INTEGER DEFAULT 0,
+        early_arrival_overtime_hours REAL DEFAULT 0,
+        morning_session_hours REAL DEFAULT 0,
+        afternoon_session_hours REAL DEFAULT 0,
+        evening_session_hours REAL DEFAULT 0,
+        regular_overtime_hours REAL DEFAULT 0,
+        night_shift_hours REAL DEFAULT 0,
+        
+        -- Special rules applied
+        early_morning_rule_applied INTEGER DEFAULT 0,
+        overnight_shift INTEGER DEFAULT 0,
+        grace_period_applied INTEGER DEFAULT 0,
+        lunch_break_excluded INTEGER DEFAULT 0,
+        
+        -- Time boundaries used in calculation
+        session_start_minutes INTEGER,
+        session_end_minutes INTEGER,
+        effective_clock_in_minutes INTEGER,
+        effective_clock_out_minutes INTEGER,
+        
+        -- Grace periods and adjustments
+        lateness_minutes INTEGER DEFAULT 0,
+        grace_period_minutes INTEGER DEFAULT 0,
+        session_grace_period INTEGER DEFAULT 0,
+        
+        -- Calculation metadata
+        calculation_method TEXT, -- 'continuous', 'session', 'evening', 'overtime'
+        special_notes TEXT,
+        date TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        FOREIGN KEY (employee_uid) REFERENCES employees (uid),
+        FOREIGN KEY (attendance_id) REFERENCES attendance (id),
+        FOREIGN KEY (clock_out_id) REFERENCES attendance (id)
+      )
+    `)
+    console.log('✓ Attendance statistics table created')
+
     // Settings table
     console.log('Creating settings table...')
     db.exec(`
@@ -227,7 +284,17 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_time ON attendance (clock_time)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_type ON attendance (clock_type)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance (employee_uid, date)",
-      "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'"
+      "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'",
+      
+      // NEW: Indexes for statistics table
+      "CREATE INDEX IF NOT EXISTS idx_stats_employee_uid ON attendance_statistics (employee_uid)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_date ON attendance_statistics (date)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_attendance_id ON attendance_statistics (attendance_id)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_clock_out_id ON attendance_statistics (clock_out_id)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_employee_date ON attendance_statistics (employee_uid, date)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_session_type ON attendance_statistics (session_type)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
+      "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)"
     ]
 
     indexes.forEach((indexQuery, i) => {
@@ -364,6 +431,41 @@ function runMigrations() {
       insertVersion.run(3, "Added overtime configuration settings")
       
       console.log('✓ Migration 3: Overtime settings added')
+    }
+
+    // Migration 4: Create attendance_statistics table
+    if (currentVersion < 4) {
+      console.log('Running migration 4: Creating attendance_statistics table...')
+      
+      // The table creation is handled in createTables(), but we need to ensure indexes
+      try {
+        // Add new indexes for statistics table
+        const statsIndexes = [
+          "CREATE INDEX IF NOT EXISTS idx_stats_employee_uid ON attendance_statistics (employee_uid)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_date ON attendance_statistics (date)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_attendance_id ON attendance_statistics (attendance_id)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_clock_out_id ON attendance_statistics (clock_out_id)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_employee_date ON attendance_statistics (employee_uid, date)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_session_type ON attendance_statistics (session_type)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
+          "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)"
+        ]
+
+        statsIndexes.forEach(indexQuery => {
+          try {
+            db.exec(indexQuery)
+          } catch (error) {
+            console.log(`- Index already exists: ${indexQuery.split(' ')[5]}`)
+          }
+        })
+
+        console.log('✓ Migration 4: Attendance statistics table and indexes created')
+      } catch (error) {
+        console.log('- Migration 4: Statistics table already exists')
+      }
+
+      const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+      insertVersion.run(4, "Added attendance_statistics table for detailed calculation tracking")
     }
 
     console.log('✓ All migrations completed successfully')
