@@ -22,3 +22,5 @@ coverage
 *.tar
 dist
 dist-electron
+package-lock.json
+yarn.lock
