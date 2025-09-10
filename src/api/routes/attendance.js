@@ -13,6 +13,7 @@ const profileService = require("../../services/profileService")
 const dateService = require("../../services/dateService")
 const settingsRoutes = require("./settings")
 
+// Fix the determineClockType call in the clockAttendance function
 async function clockAttendance(event, { input, inputType = "barcode" }) {
   try {
     // Find employee by barcode or ID number
@@ -153,8 +154,14 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
 
     console.log(`Last clock record: ${lastClockType} at ${lastClockTime}`)
 
-    // Determine the next clock type
-    const clockType = determineClockType(lastClockType, currentDateTime, lastClockTime, employee.uid, getDatabase )
+    // FIXED: Pass all required parameters to determineClockType
+    const clockType = determineClockType(
+      lastClockType, 
+      currentDateTime, 
+      lastClockTime, 
+      employee.uid,  // Pass employee UID for the new 17:00 rule
+      db             // Pass database connection for the new 17:00 rule
+    )
     console.log(`Determined clock type: ${clockType}`)
 
     // ENHANCED: Better validation for clock-out scenarios
