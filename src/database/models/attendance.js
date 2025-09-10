@@ -72,18 +72,226 @@ class Attendance {
     return stmt.all(...params)
   }
 
+  // NEW: Bulk download profiles for employees who clocked in today
+  static async ensureTodayProfilesDownloaded(profileService, serverUrl, onProgress = null) {
+    if (!profileService || !serverUrl) {
+      console.warn("ProfileService or serverUrl not provided - skipping profile download")
+      return { success: false, message: "Missing required parameters" }
+    }
+
+    try {
+      const db = getDatabase()
+      const today = dateService.getCurrentDate()
+
+      // Get all unique employee UIDs who have attendance records today
+      const stmt = db.prepare(`
+        SELECT DISTINCT a.employee_uid as uid, e.first_name, e.last_name
+        FROM attendance a
+        JOIN employees e ON a.employee_uid = e.uid
+        WHERE a.date = ?
+      `)
+      
+      const employeesWithAttendance = stmt.all(today)
+      const employeeUids = employeesWithAttendance.map(emp => emp.uid)
+
+      if (employeeUids.length === 0) {
+        return { 
+          success: true, 
+          message: "No attendance records for today - no profiles to download",
+          downloaded: 0,
+          total: 0
+        }
+      }
+
+      if (onProgress) {
+        onProgress({
+          stage: 'checking',
+          message: `Checking profiles for ${employeeUids.length} employees who clocked in today`,
+          employees: employeesWithAttendance
+        })
+      }
+
+      // Check which profiles are missing
+      const profileCheck = await profileService.checkProfileImages(employeeUids)
+      
+      if (profileCheck.missingUids.length === 0) {
+        return {
+          success: true,
+          message: `All ${profileCheck.downloaded} profiles already downloaded`,
+          downloaded: profileCheck.downloaded,
+          total: profileCheck.total,
+          alreadyExisted: true
+        }
+      }
+
+      if (onProgress) {
+        onProgress({
+          stage: 'downloading',
+          message: `Downloading ${profileCheck.missingUids.length} missing profiles`,
+          missing: profileCheck.missingUids,
+          existing: profileCheck.downloadedUids
+        })
+      }
+
+      // Bulk download missing profiles
+      const downloadResult = await profileService.bulkDownloadSpecificEmployees(
+        serverUrl,
+        profileCheck.missingUids,
+        onProgress
+      )
+
+      return {
+        success: downloadResult.success,
+        message: downloadResult.message,
+        downloaded: Object.keys(downloadResult.profiles).length,
+        total: employeeUids.length,
+        previouslyDownloaded: profileCheck.downloaded,
+        newlyDownloaded: Object.keys(downloadResult.profiles).length,
+        profiles: downloadResult.profiles
+      }
+
+    } catch (error) {
+      console.error("Error ensuring today's profiles are downloaded:", error)
+      return {
+        success: false,
+        error: error.message,
+        downloaded: 0,
+        total: 0
+      }
+    }
+  }
+
+  // NEW: Bulk download profiles for all employees in attendance history
+  static async ensureAllAttendanceProfilesDownloaded(profileService, serverUrl, dateRange = null, onProgress = null) {
+    if (!profileService || !serverUrl) {
+      console.warn("ProfileService or serverUrl not provided - skipping profile download")
+      return { success: false, message: "Missing required parameters" }
+    }
+
+    try {
+      const db = getDatabase()
+      let query = `
+        SELECT DISTINCT a.employee_uid as uid, e.first_name, e.last_name, e.department
+        FROM attendance a
+        JOIN employees e ON a.employee_uid = e.uid
+      `
+      
+      const params = []
+
+      if (dateRange) {
+        if (dateRange.startDate) {
+          query += (params.length === 0 ? " WHERE" : " AND") + " a.date >= ?"
+          params.push(dateRange.startDate)
+        }
+        if (dateRange.endDate) {
+          query += (params.length === 0 ? " WHERE" : " AND") + " a.date <= ?"
+          params.push(dateRange.endDate)
+        }
+      }
+
+      const stmt = db.prepare(query)
+      const employees = stmt.all(...params)
+      const employeeUids = employees.map(emp => emp.uid)
+
+      if (employeeUids.length === 0) {
+        return { 
+          success: true, 
+          message: "No attendance records found - no profiles to download",
+          downloaded: 0,
+          total: 0
+        }
+      }
+
+      if (onProgress) {
+        onProgress({
+          stage: 'checking',
+          message: `Checking profiles for ${employeeUids.length} employees in attendance history`,
+          dateRange: dateRange
+        })
+      }
+
+      // Check current profile status
+      const profileCheck = await profileService.checkProfileImages(employeeUids)
+      
+      if (profileCheck.missingUids.length === 0) {
+        return {
+          success: true,
+          message: `All ${profileCheck.downloaded} profiles already downloaded`,
+          downloaded: profileCheck.downloaded,
+          total: profileCheck.total,
+          alreadyExisted: true
+        }
+      }
+
+      // Bulk download missing profiles
+      const downloadResult = await profileService.bulkDownloadSpecificEmployees(
+        serverUrl,
+        profileCheck.missingUids,
+        onProgress
+      )
+
+      return {
+        success: downloadResult.success,
+        message: downloadResult.message,
+        downloaded: Object.keys(downloadResult.profiles).length,
+        total: employeeUids.length,
+        previouslyDownloaded: profileCheck.downloaded,
+        newlyDownloaded: Object.keys(downloadResult.profiles).length,
+        profiles: downloadResult.profiles
+      }
+
+    } catch (error) {
+      console.error("Error ensuring attendance profiles are downloaded:", error)
+      return {
+        success: false,
+        error: error.message,
+        downloaded: 0,
+        total: 0
+      }
+    }
+  }
+
+  // UPDATED: Clock in method now uses bulk profile downloading
   static async clockIn(employee, clockType, profileService, serverUrl) {
     const db = getDatabase()
     const clockTime = dateService.getCurrentDateTime()
     const createdAt = dateService.getCurrentDateTime()
     const today = dateService.getCurrentDate()
 
+    // Check if we have the profile locally first
     let profilePath = null
-    if (profileService && serverUrl) {
+    if (profileService) {
       try {
-        profilePath = await profileService.downloadAndStoreProfile(employee.id_number, serverUrl)
+        const existingProfilePath = profileService.getLocalProfilePath(employee.id_number)
+        const profileExists = await profileService.profileExists(employee.id_number)
+        
+        if (profileExists) {
+          profilePath = existingProfilePath
+          console.log(`Using existing profile for employee ${employee.id_number}`)
+        } else if (serverUrl) {
+          // If profile doesn't exist locally, trigger a bulk download for today's employees
+          console.log(`Profile not found for employee ${employee.id_number}, triggering bulk download...`)
+          
+          // This will download profiles for all employees who clocked in today (including this one)
+          const bulkResult = await this.ensureTodayProfilesDownloaded(
+            profileService, 
+            serverUrl,
+            (progress) => {
+              console.log(`Bulk download progress: ${progress.stage} - ${progress.message}`)
+            }
+          )
+          
+          if (bulkResult.success && bulkResult.profiles && bulkResult.profiles[employee.id_number]) {
+            profilePath = bulkResult.profiles[employee.id_number].path
+            console.log(`Downloaded profile for employee ${employee.id_number} via bulk download`)
+          } else {
+            // Fallback to individual download if bulk fails
+            console.warn(`Bulk download failed for employee ${employee.id_number}, attempting individual download...`)
+            profilePath = await profileService.downloadAndStoreProfile(employee.id_number, serverUrl)
+          }
+        }
       } catch (error) {
-        console.error("Error downloading profile:", error)
+        console.error(`Error handling profile for employee ${employee.id_number}:`, error)
       }
     }
 
@@ -170,6 +378,36 @@ class Attendance {
     }
   }
 
+  // NEW: Get attendance records with local profile paths
+  static async getTodayAttendanceWithProfiles(profileService) {
+    const attendance = this.getTodayAttendance()
+    
+    if (!profileService) {
+      return attendance
+    }
+
+    // Add local profile paths to attendance records
+    return attendance.map(record => {
+      try {
+        const profilePath = profileService.getLocalProfilePath(record.employee_uid)
+        const profileExists = require('fs').existsSync(profilePath)
+        
+        return {
+          ...record,
+          local_profile_path: profileExists ? profilePath : null,
+          has_local_profile: profileExists
+        }
+      } catch (error) {
+        console.warn(`Error checking profile for employee ${record.employee_uid}:`, error)
+        return {
+          ...record,
+          local_profile_path: null,
+          has_local_profile: false
+        }
+      }
+    })
+  }
+
   static hasPendingClockIn(employeeUid, date) {
     const db = getDatabase()
     const stmt = db.prepare(`
@@ -197,69 +435,98 @@ class Attendance {
   }
 
   static getCurrentlyClocked() {
-  const db = getDatabase()
-  const today = dateService.getCurrentDate()
+    const db = getDatabase()
+    const today = dateService.getCurrentDate()
 
-  // First approach: Using CTE (for modern SQLite versions)
-  const stmt = db.prepare(`
-    WITH EmployeeLastClock AS (
+    // First approach: Using CTE (for modern SQLite versions)
+    const stmt = db.prepare(`
+      WITH EmployeeLastClock AS (
+        SELECT 
+          a.employee_uid,
+          e.first_name,
+          e.last_name,
+          e.department,
+          e.profile_picture,
+          a.clock_type as last_clock_type,
+          a.clock_time as last_clock_time,
+          ROW_NUMBER() OVER (PARTITION BY a.employee_uid ORDER BY a.clock_time DESC) as rn
+        FROM attendance a
+        JOIN employees e ON a.employee_uid = e.uid
+        WHERE a.date = ?
+      )
       SELECT 
-        a.employee_uid,
-        e.first_name,
-        e.last_name,
-        e.department,
-        e.profile_picture,
-        a.clock_type as last_clock_type,
-        a.clock_time as last_clock_time,
-        ROW_NUMBER() OVER (PARTITION BY a.employee_uid ORDER BY a.clock_time DESC) as rn
-      FROM attendance a
-      JOIN employees e ON a.employee_uid = e.uid
-      WHERE a.date = ?
-    )
-    SELECT 
-      employee_uid,
-      first_name,
-      last_name,
-      department,
-      profile_picture,
-      last_clock_time,
-      last_clock_type
-    FROM EmployeeLastClock
-    WHERE rn = 1 
-      AND last_clock_type IN ('morning_in', 'afternoon_in', 'evening_in', 'overtime_in')
-    ORDER BY last_clock_time DESC
-  `)
-
-  try {
-    return stmt.all(today)
-  } catch (error) {
-    // Fallback for older SQLite versions that don't support CTEs
-    console.log("CTE not supported, using fallback query")
-    
-    const fallbackStmt = db.prepare(`
-      SELECT DISTINCT 
-        a1.employee_uid,
-        e.first_name,
-        e.last_name,
-        e.department,
-        e.profile_picture,
-        a1.clock_time as last_clock_time,
-        a1.clock_type as last_clock_type
-      FROM attendance a1
-      JOIN employees e ON a1.employee_uid = e.uid
-      WHERE a1.date = ?
-        AND a1.clock_time = (
-          SELECT MAX(a2.clock_time) 
-          FROM attendance a2 
-          WHERE a2.employee_uid = a1.employee_uid AND a2.date = ?
-        )
-        AND a1.clock_type IN ('morning_in', 'afternoon_in', 'evening_in', 'overtime_in')
-      ORDER BY a1.clock_time DESC
+        employee_uid,
+        first_name,
+        last_name,
+        department,
+        profile_picture,
+        last_clock_time,
+        last_clock_type
+      FROM EmployeeLastClock
+      WHERE rn = 1 
+        AND last_clock_type IN ('morning_in', 'afternoon_in', 'evening_in', 'overtime_in')
+      ORDER BY last_clock_time DESC
     `)
-    
-    return fallbackStmt.all(today, today)
+
+    try {
+      return stmt.all(today)
+    } catch (error) {
+      // Fallback for older SQLite versions that don't support CTEs
+      console.log("CTE not supported, using fallback query")
+      
+      const fallbackStmt = db.prepare(`
+        SELECT DISTINCT 
+          a1.employee_uid,
+          e.first_name,
+          e.last_name,
+          e.department,
+          e.profile_picture,
+          a1.clock_time as last_clock_time,
+          a1.clock_type as last_clock_type
+        FROM attendance a1
+        JOIN employees e ON a1.employee_uid = e.uid
+        WHERE a1.date = ?
+          AND a1.clock_time = (
+            SELECT MAX(a2.clock_time) 
+            FROM attendance a2 
+            WHERE a2.employee_uid = a1.employee_uid AND a2.date = ?
+          )
+          AND a1.clock_type IN ('morning_in', 'afternoon_in', 'evening_in', 'overtime_in')
+        ORDER BY a1.clock_time DESC
+      `)
+      
+      return fallbackStmt.all(today, today)
+    }
   }
-}
+
+  // NEW: Get currently clocked employees with local profile information
+  static async getCurrentlyClockedWithProfiles(profileService) {
+    const currentlyClocked = this.getCurrentlyClocked()
+    
+    if (!profileService) {
+      return currentlyClocked
+    }
+
+    return currentlyClocked.map(record => {
+      try {
+        const profilePath = profileService.getLocalProfilePath(record.employee_uid)
+        const profileExists = require('fs').existsSync(profilePath)
+        
+        return {
+          ...record,
+          local_profile_path: profileExists ? profilePath : null,
+          has_local_profile: profileExists
+        }
+      } catch (error) {
+        console.warn(`Error checking profile for employee ${record.employee_uid}:`, error)
+        return {
+          ...record,
+          local_profile_path: null,
+          has_local_profile: false
+        }
+      }
+    })
+  }
 
   static getTodayStatistics() {
     const db = getDatabase()
@@ -379,6 +646,35 @@ class Attendance {
     `)
 
     return stmt.all(today, today, today)
+  }
+
+  // NEW: Get current overtime employees with profile information
+  static async getCurrentOvertimeEmployeesWithProfiles(profileService) {
+    const overtimeEmployees = this.getCurrentOvertimeEmployees()
+    
+    if (!profileService) {
+      return overtimeEmployees
+    }
+
+    return overtimeEmployees.map(record => {
+      try {
+        const profilePath = profileService.getLocalProfilePath(record.employee_uid)
+        const profileExists = require('fs').existsSync(profilePath)
+        
+        return {
+          ...record,
+          local_profile_path: profileExists ? profilePath : null,
+          has_local_profile: profileExists
+        }
+      } catch (error) {
+        console.warn(`Error checking profile for employee ${record.employee_uid}:`, error)
+        return {
+          ...record,
+          local_profile_path: null,
+          has_local_profile: false
+        }
+      }
+    })
   }
 
   // New method to check if employee has completed their regular shift for the day
