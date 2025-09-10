@@ -1,994 +1,1507 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Employee Attendance System</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
-        
-        :root {
-            --primary: #1976d2;
-            --primary-dark: #1565c0;
-            --primary-light: #bbdefb;
-            --secondary: #dc004e;
-            --secondary-dark: #c51162;
-            --success: #388e3c;
-            --warning: #f57c00;
-            --error: #d32f2f;
-            --surface: #ffffff;
-            --background: #fafafa;
-            --on-surface: #212121;
-            --on-primary: #ffffff;
-            --text-primary: rgba(0, 0, 0, 0.87);
-            --text-secondary: rgba(0, 0, 0, 0.6);
-            --text-disabled: rgba(0, 0, 0, 0.38);
-            --divider: rgba(0, 0, 0, 0.12);
-            --shadow-1: 0 2px 8px rgba(0,0,0,0.15), 0 1px 4px rgba(0,0,0,0.1);
-            --shadow-2: 0 4px 16px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.12);
-            --shadow-3: 0 8px 24px rgba(0,0,0,0.22), 0 4px 12px rgba(0,0,0,0.15);
-            --shadow-4: 0 16px 32px rgba(0,0,0,0.25), 0 8px 16px rgba(0,0,0,0.18);
-            --shadow-floating: 0 12px 32px rgba(0,0,0,0.2), 0 4px 16px rgba(0,0,0,0.12);
-            --radius: 8px;
-            --radius-large: 16px;
+      @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap");
+
+      :root {
+        --primary: #1976d2;
+        --primary-dark: #1565c0;
+        --primary-light: #bbdefb;
+        --secondary: #dc004e;
+        --secondary-dark: #c51162;
+        --success: #388e3c;
+        --warning: #f57c00;
+        --error: #d32f2f;
+        --surface: #ffffff;
+        --background: #fafafa;
+        --on-surface: #212121;
+        --on-primary: #ffffff;
+        --text-primary: rgba(0, 0, 0, 0.87);
+        --text-secondary: rgba(0, 0, 0, 0.6);
+        --text-disabled: rgba(0, 0, 0, 0.38);
+        --divider: rgba(0, 0, 0, 0.12);
+        --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
+        --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.18),
+          0 2px 8px rgba(0, 0, 0, 0.12);
+        --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.22),
+          0 4px 12px rgba(0, 0, 0, 0.15);
+        --shadow-4: 0 16px 32px rgba(0, 0, 0, 0.25),
+          0 8px 16px rgba(0, 0, 0, 0.18);
+        --shadow-floating: 0 12px 32px rgba(0, 0, 0, 0.2),
+          0 4px 16px rgba(0, 0, 0, 0.12);
+        --radius: 8px;
+        --radius-large: 16px;
+        --header-color1: rgba(0, 47, 85, 0.6);
+        --header-color2: rgba(0, 58, 105, 0.4);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Roboto", sans-serif;
+        background: var(--background);
+        height: 100vh;
+        color: var(--text-primary);
+        line-height: 1.6;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /* Gear background pattern */
+      body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0.1;
+        background-image: url(../../assets/companyLogoBackground.jpg);
+        background-size: 400px 400px, 300px 300px, 500px 500px, 250px 250px;
+        background-position: 0 0, 200px 150px, -100px 300px, 300px -50px;
+        z-index: -1;
+        pointer-events: none;
+      }
+
+      /* Additional gear shapes using CSS */
+      body::after {
+        content: "⚙️";
+        position: fixed;
+        top: 10%;
+        right: 5%;
+        font-size: 120px;
+        opacity: 0.02;
+        z-index: -1;
+        pointer-events: none;
+        transform: rotate(15deg);
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 16px 20px;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      /* Additional gear decorations */
+      .container::before {
+        content: "⚙️";
+        position: fixed;
+        bottom: 10%;
+        left: 3%;
+        font-size: 80px;
+        opacity: 0.025;
+        z-index: -1;
+        pointer-events: none;
+        transform: rotate(-20deg);
+      }
+
+      .container::after {
+        content: "⚙️";
+        position: fixed;
+        top: 60%;
+        right: 8%;
+        font-size: 60px;
+        opacity: 0.02;
+        z-index: -1;
+        pointer-events: none;
+        transform: rotate(45deg);
+      }
+
+      /* Material Design Elevation */
+      .elevation-1 {
+        box-shadow: var(--shadow-1);
+      }
+      .elevation-2 {
+        box-shadow: var(--shadow-2);
+      }
+      .elevation-3 {
+        box-shadow: var(--shadow-3);
+      }
+      .elevation-4 {
+        box-shadow: var(--shadow-4);
+      }
+      .elevation-floating {
+        box-shadow: var(--shadow-floating);
+      }
+
+      /* Header with lighter blue background */
+      .header {
+        background: linear-gradient(
+            135deg,
+            rgba(21, 147, 250, 0.4),
+            rgba(64, 102, 133, 0.3)
+          ),
+          url("https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80")
+            center/cover;
+        border-radius: var(--radius-large);
+        padding: 24px 32px;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+        color: var(--on-primary);
+        min-height: 140px;
+        overflow: hidden;
+        box-shadow: var(--shadow-2);
+        transition: all 0.5s ease-in-out;
+      }
+
+      /* FIXED: Use ::before with CSS custom properties */
+      .header::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(
+          135deg,
+          var(--header-color1),
+          var(--header-color2)
+        );
+        z-index: 1;
+        transition: background 0.5s ease-in-out;
+      }
+
+      .header > * {
+        position: relative;
+        z-index: 2;
+      }
+
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+
+      /* Optional: Add a subtle animation for time transitions */
+      @keyframes timeTransition {
+        0% {
+          opacity: 0.8;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0.8;
+        }
+      }
+
+      .header.time-changing::before {
+        animation: timeTransition 1s ease-in-out;
+      }
+
+      /* Alternative Method 2: Direct class-based approach */
+      /* You can use these classes instead if you prefer */
+      .header.morning::before {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 183, 77, 0.6),
+          rgba(255, 138, 101, 0.5)
+        ) !important;
+      }
+
+      .header.afternoon::before {
+        background: linear-gradient(
+          135deg,
+          rgba(52, 152, 219, 0.6),
+          rgba(41, 128, 185, 0.4)
+        ) !important;
+      }
+
+      .header.evening::before {
+        background: linear-gradient(
+          135deg,
+          rgba(231, 76, 60, 0.6),
+          rgba(155, 89, 182, 0.5)
+        ) !important;
+      }
+
+      .header.night::before {
+        background: linear-gradient(
+          135deg,
+          rgba(0, 47, 85, 0.6),
+          rgba(0, 58, 105, 0.4)
+        ) !important;
+      }
+
+      .company-logo {
+        width: 150px;
+        height: 150px;
+        background: white;
+        border-radius: var(--radius-large);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.5rem;
+        box-shadow: var(--shadow-2);
+        flex-shrink: 0;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .company-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: var(--radius-large);
+      }
+
+      /* Fallback CSS gear icon if image fails to load */
+      .company-logo::before {
+        content: "";
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        z-index: -1;
+        background: radial-gradient(
+            circle at center,
+            transparent 15px,
+            #1976d2 17px,
+            #1976d2 19px,
+            transparent 21px
+          ),
+          radial-gradient(
+            circle at center,
+            transparent 8px,
+            #1976d2 10px,
+            #1976d2 35px,
+            transparent 37px
+          );
+        background-size: 70px 70px, 70px 70px;
+      }
+
+      .company-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .company-name {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: var(--on-primary);
+        margin: 0;
+        letter-spacing: -0.02em;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+      }
+
+      .company-address {
+        font-size: 0.8rem;
+        color: rgba(241, 241, 241, 0.849);
+        margin: 0;
+        font-weight: 400;
+        text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
+        line-height: 1.4;
+      }
+
+      .connection-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+        color: rgba(241, 241, 241, 0.849);
+        font-weight: 500;
+        margin-top: 8px;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--error);
+        box-shadow: 0 0 8px rgba(211, 47, 47, 0.6);
+      }
+
+      .status-dot.online {
+        background: #4caf50;
+        box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+      }
+
+      .header-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 16px;
+      }
+
+      .datetime {
+        font-size: 2.6rem;
+        font-weight: 300;
+        color: var(--on-primary);
+        text-align: right;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+      }
+
+      .settings-btn {
+        background: rgba(33, 33, 33, 0.1);
+        color: var(--primary-light);
+        border: 2px solid rgba(88, 52, 189, 0.2);
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        backdrop-filter: blur(10px);
+      }
+
+      .settings-btn:hover {
+        background: rgba(0, 123, 255, 0.15);
+        border-color: rgba(0, 123, 255, 0.3);
+        box-shadow: var(--shadow-2);
+        transform: translateY(-1px);
+      }
+
+      .settings-btn:active {
+        transform: translateY(0);
+      }
+
+      .refresh-btn {
+        background: rgba(33, 33, 33, 0.1); /* subtle blue tint */
+        color: var(--primary-light);
+        border: 2px solid rgba(88, 52, 189, 0.2);
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        backdrop-filter: blur(10px);
+      }
+
+      .refresh-btn:hover {
+        background: rgba(0, 123, 255, 0.15);
+        border-color: rgba(0, 123, 255, 0.3);
+        box-shadow: var(--shadow-2);
+        transform: translateY(-1px);
+      }
+
+      .refresh-btn:active {
+        transform: translateY(0);
+      }
+
+      /* Main Layout */
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+        flex-shrink: 0;
+      }
+
+      /* Scanner Section */
+      .scanner-section {
+        background: var(--surface);
+        border-radius: var(--radius-large);
+        padding: 24px;
+        text-align: center;
+      }
+
+      .scanner-icon {
+        width: 48px;
+        height: 48px;
+        background: var(--primary-light);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 16px;
+        font-size: 1.5rem;
+      }
+
+      .scanner-section h2 {
+        font-size: 1.25rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 20px;
+        letter-spacing: -0.01em;
+      }
+
+      .input-group {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      #barcodeInput {
+        flex: 1;
+        background: var(--surface);
+        border: 2px solid var(--divider);
+        border-radius: var(--radius);
+        padding: 12px;
+        font-size: 0.9rem;
+        color: var(--text-primary);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+      }
+
+      #barcodeInput:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+      }
+
+      #barcodeInput::placeholder {
+        color: var(--text-disabled);
+      }
+
+      .submit-btn {
+        background: var(--primary);
+        color: var(--on-primary);
+        border: none;
+        border-radius: var(--radius);
+        padding: 12px 18px;
+        cursor: pointer;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.8rem;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .submit-btn:hover {
+        background: var(--primary-dark);
+        box-shadow: var(--shadow-2);
+      }
+
+      .input-toggle {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        margin-top: 16px;
+      }
+
+      .input-toggle label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-weight: 500;
+        font-size: 0.85rem;
+      }
+
+      .input-toggle input[type="radio"] {
+        accent-color: var(--primary);
+      }
+
+      /* Statistics Section */
+      .stats-section {
+        background: var(--surface);
+        border-radius: var(--radius-large);
+        padding: 24px;
+      }
+
+      .stats-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      .stats-icon {
+        width: 40px;
+        height: 40px;
+        background: var(--primary-light);
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+      }
+
+      .stats-section h2 {
+        font-size: 1.25rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        letter-spacing: -0.01em;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        gap: 12px;
+      }
+
+      .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        padding: 16px;
+        text-align: center;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .stat-card:hover {
+        box-shadow: var(--shadow-2);
+      }
+
+      .stat-value {
+        font-size: 2rem;
+        font-weight: 300;
+        color: var(--text-primary);
+        margin-bottom: 6px;
+        line-height: 1;
+      }
+
+      .stat-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 500;
+      }
+
+      /* Employee Display Modal */
+      .employee-display {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--surface);
+        border-radius: var(--radius-large);
+        padding: 48px;
+        min-width: 400px;
+        text-align: center;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        z-index: 1000;
+        display: none;
+      }
+
+      .employee-photo {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+
+      .employee-photo img {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 4px solid var(--primary-light);
+      }
+
+      .employee-info h3 {
+        font-size: 1.75rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        letter-spacing: -0.01em;
+      }
+
+      .employee-info p {
+        color: var(--text-secondary);
+        font-size: 1rem;
+        margin-bottom: 4px;
+      }
+
+      .clock-info {
+        margin-top: 32px;
+      }
+
+      .clock-type {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 1.125rem;
+        font-weight: 500;
+        padding: 12px 24px;
+        border-radius: 24px;
+        margin-bottom: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .clock-type.morning-in,
+      .clock-type.afternoon-in {
+        background: var(--success);
+        color: var(--on-primary);
+      }
+
+      .clock-type.morning-out,
+      .clock-type.afternoon-out {
+        background: var(--error);
+        color: var(--on-primary);
+      }
+
+      .clock-time {
+        font-size: 1.25rem;
+        font-weight: 400;
+        color: var(--text-primary);
+        margin-bottom: 12px;
+      }
+
+      .hours-info {
+        color: var(--text-secondary);
+        font-size: 1rem;
+      }
+
+      /* Dashboard */
+      .dashboard {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .dashboard-section {
+        background: var(--surface);
+        border-radius: var(--radius-large);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        min-height: 400px;
+      }
+
+      .dashboard-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+        flex-shrink: 0;
+      }
+
+      .dashboard-icon {
+        width: 36px;
+        height: 36px;
+        background: var(--primary-light);
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+      }
+
+      .dashboard-section h2 {
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        letter-spacing: -0.01em;
+      }
+
+      .employee-list,
+      .attendance-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--divider) transparent;
+        padding-right: 4px;
+      }
+
+      .employee-list::-webkit-scrollbar,
+      .attendance-list::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .employee-list::-webkit-scrollbar-track,
+      .attendance-list::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 3px;
+      }
+
+      .employee-list::-webkit-scrollbar-thumb,
+      .attendance-list::-webkit-scrollbar-thumb {
+        background: var(--divider);
+        border-radius: 3px;
+      }
+
+      .employee-list::-webkit-scrollbar-thumb:hover,
+      .attendance-list::-webkit-scrollbar-thumb:hover {
+        background: var(--text-secondary);
+      }
+
+      .employee-item,
+      .attendance-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        flex-shrink: 0;
+      }
+
+      .employee-item:hover,
+      .attendance-item:hover {
+        box-shadow: var(--shadow-1);
+        border-color: var(--primary-light);
+      }
+
+      .employee-avatar,
+      .attendance-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: var(--divider);
+        flex-shrink: 0;
+      }
+
+      .employee-details,
+      .attendance-details {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .employee-name,
+      .attendance-name {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 2px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .employee-dept,
+      .attendance-time {
+        color: var(--text-secondary);
+        font-size: 0.7rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .clock-badge {
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 0.65rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        flex-shrink: 0;
+      }
+
+      .clock-badge.in {
+        background: rgba(56, 142, 60, 0.1);
+        color: var(--success);
+      }
+
+      .clock-badge.out {
+        background: rgba(211, 47, 47, 0.1);
+        color: var(--error);
+      }
+
+      /* Status Messages */
+      .status-message {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        padding: 16px 24px;
+        border-radius: var(--radius);
+        color: var(--on-primary);
+        font-weight: 500;
+        z-index: 1001;
+        transform: translateX(400px);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        min-width: 200px;
+      }
+
+      .status-message.show {
+        transform: translateX(0);
+      }
+
+      .status-message.success {
+        background: var(--success);
+      }
+
+      .status-message.error {
+        background: var(--error);
+      }
+
+      .status-message.info {
+        background: var(--primary);
+      }
+
+      /* Download Toast - specialized for sync operations */
+      .download-toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 16px 24px;
+        border-radius: var(--radius);
+        color: var(--on-primary);
+        font-weight: 500;
+        z-index: 1002;
+        transform: translateY(100px);
+        opacity: 0;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        min-width: 280px;
+        max-width: 400px;
+        box-shadow: var(--shadow-3);
+        border-left: 4px solid transparent;
+      }
+
+      .download-toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+
+      .download-toast.success {
+        background: var(--success);
+        border-left-color: #2e7d32;
+      }
+
+      .download-toast.error {
+        background: var(--error);
+        border-left-color: #c62828;
+      }
+
+      .download-toast.warning {
+        background: var(--warning);
+        border-left-color: #ef6c00;
+      }
+
+      .download-toast.info {
+        background: var(--primary);
+        border-left-color: var(--primary-dark);
+      }
+
+      .loading {
+        text-align: center;
+        padding: 30px 16px;
+        color: var(--text-secondary);
+        font-style: italic;
+        font-size: 0.85rem;
+      }
+
+      /* Settings Modal */
+      .settings-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+      }
+
+      .settings-modal.show {
+        display: flex;
+      }
+
+      .settings-content {
+        background: var(--surface);
+        border-radius: var(--radius-large);
+        padding: 32px;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: relative;
+      }
+
+      .settings-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+      }
+
+      .settings-header h2 {
+        font-size: 1.5rem;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .close-btn {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 50%;
+        transition: background 0.2s;
+      }
+
+      .close-btn:hover {
+        background: var(--divider);
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .form-group input {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid var(--divider);
+        border-radius: var(--radius);
+        font-size: 1rem;
+        color: var(--text-primary);
+        transition: border-color 0.2s;
+        font-family: inherit;
+      }
+
+      .form-group input:focus {
+        outline: none;
+        border-color: var(--primary);
+      }
+
+      .help-text {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin-top: 4px;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 24px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: var(--radius);
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--on-primary);
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-dark);
+      }
+
+      .btn-success {
+        background: var(--success);
+        color: var(--on-primary);
+      }
+
+      .btn-success:hover {
+        background: #2e7d32;
+      }
+
+      .btn-secondary {
+        background: var(--text-secondary);
+        color: var(--on-primary);
+      }
+
+      .btn-secondary:hover {
+        background: #424242;
+      }
+
+      .sync-info {
+        background: #e3f2fd;
+        border: 1px solid #bbdefb;
+        border-radius: var(--radius);
+        padding: 16px;
+        margin-top: 16px;
+      }
+
+      .sync-info h3 {
+        color: var(--primary);
+        margin-bottom: 8px;
+        font-size: 1rem;
+      }
+
+      .sync-info p {
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+        font-size: 0.9rem;
+      }
+
+      /* Responsive Design */
+      @media (max-width: 1200px) {
+        .main-grid {
+          grid-template-columns: 1fr;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        .dashboard {
+          grid-template-columns: 1fr;
         }
+      }
 
-        body {
-            font-family: 'Roboto', sans-serif;
-            background: var(--background);
-            height: 100vh;
-            color: var(--text-primary);
-            line-height: 1.6;
-            overflow: hidden;
-        }
-
+      @media (max-width: 768px) {
         .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 16px 20px;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+          padding: 16px;
         }
 
-        /* Material Design Elevation */
-        .elevation-1 { box-shadow: var(--shadow-1); }
-        .elevation-2 { box-shadow: var(--shadow-2); }
-        .elevation-3 { box-shadow: var(--shadow-3); }
-        .elevation-4 { box-shadow: var(--shadow-4); }
-        .elevation-floating { box-shadow: var(--shadow-floating); }
-
-        /* Header */
         .header {
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 20px 28px;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: relative;
-            flex-shrink: 0;
+          flex-direction: column;
+          gap: 20px;
+          text-align: center;
+          padding: 20px;
+          min-height: 160px;
         }
 
-        .header-left h1 {
-            font-size: 1.75rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 6px;
-            letter-spacing: -0.01em;
+        .header-left {
+          flex-direction: column;
+          gap: 16px;
+          align-items: center;
         }
 
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            font-weight: 500;
+        .company-logo {
+          width: 60px;
+          height: 60px;
+          font-size: 2rem;
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--error);
+        .company-name {
+          font-size: 1.4rem;
         }
 
-        .status-dot.online {
-            background: var(--success);
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 24px;
+        .company-address {
+          font-size: 0.9rem;
+          text-align: center;
         }
 
         .datetime {
-            font-size: 2.1rem;
-            font-weight: 400;
-            color: var(--text-primary);
-            text-align: right;
-            line-height: 1.3;
-            letter-spacing: -0.01em;
+          font-size: 1.6rem;
         }
 
-        .settings-btn {
-            background: var(--primary);
-            color: var(--on-primary);
-            border: none;
-            padding: 10px 20px;
-            border-radius: var(--radius);
-            cursor: pointer;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
-            display: flex;
-            align-items: center;
-            gap: 6px;
+        .scanner-section,
+        .stats-section,
+        .dashboard-section {
+          padding: 24px;
         }
 
-        .settings-btn:hover {
-            background: var(--primary-dark);
-            box-shadow: var(--shadow-2);
-        }
-
-        .settings-btn:active {
-            box-shadow: var(--shadow-1);
-        }
-
-        /* Main Layout */
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 16px;
-            flex-shrink: 0;
-        }
-
-        /* Scanner Section */
-        .scanner-section {
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 24px;
-            text-align: center;
-        }
-
-        .scanner-icon {
-            width: 48px;
-            height: 48px;
-            background: var(--primary-light);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 16px;
-            font-size: 1.5rem;
-        }
-
-        .scanner-section h2 {
-            font-size: 1.25rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 20px;
-            letter-spacing: -0.01em;
-        }
-
-        .input-group {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-
-        #barcodeInput {
-            flex: 1;
-            background: var(--surface);
-            border: 2px solid var(--divider);
-            border-radius: var(--radius);
-            padding: 12px;
-            font-size: 0.9rem;
-            color: var(--text-primary);
-            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
-            font-family: inherit;
-        }
-
-        #barcodeInput:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
-        }
-
-        #barcodeInput::placeholder {
-            color: var(--text-disabled);
-        }
-
-        .submit-btn {
-            background: var(--primary);
-            color: var(--on-primary);
-            border: none;
-            border-radius: var(--radius);
-            padding: 12px 18px;
-            cursor: pointer;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            font-size: 0.8rem;
-            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
-        }
-
-        .submit-btn:hover {
-            background: var(--primary-dark);
-            box-shadow: var(--shadow-2);
-        }
-
-        .input-toggle {
-            display: flex;
-            gap: 16px;
-            justify-content: center;
-            margin-top: 16px;
-        }
-
-        .input-toggle label {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            cursor: pointer;
-            color: var(--text-secondary);
-            font-weight: 500;
-            font-size: 0.85rem;
-        }
-
-        .input-toggle input[type="radio"] {
-            accent-color: var(--primary);
-        }
-
-        /* Statistics Section */
-        .stats-section {
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 24px;
-        }
-
-        .stats-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .stats-icon {
-            width: 40px;
-            height: 40px;
-            background: var(--primary-light);
-            border-radius: var(--radius);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
-        }
-
-        .stats-section h2 {
-            font-size: 1.25rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
+        .employee-display {
+          min-width: 90vw;
+          max-width: 400px;
+          padding: 32px 24px;
         }
 
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-            gap: 12px;
-        }
-
-        .stat-card {
-            background: var(--surface);
-            border: 1px solid var(--divider);
-            border-radius: var(--radius);
-            padding: 16px;
-            text-align: center;
-            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
-        }
-
-        .stat-card:hover {
-            box-shadow: var(--shadow-2);
+          grid-template-columns: repeat(2, 1fr);
         }
 
         .stat-value {
-            font-size: 2rem;
-            font-weight: 300;
-            color: var(--text-primary);
-            margin-bottom: 6px;
-            line-height: 1;
+          font-size: 2rem;
         }
 
-        .stat-label {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            font-weight: 500;
-        }
-
-        /* Employee Display Modal */
-        .employee-display {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 48px;
-            min-width: 400px;
-            text-align: center;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-            z-index: 1000;
-            display: none;
-        }
-
-        .employee-photo {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 24px;
-        }
-
-        .employee-photo img {
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 4px solid var(--primary-light);
-        }
-
-        .employee-info h3 {
-            font-size: 1.75rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-            letter-spacing: -0.01em;
-        }
-
-        .employee-info p {
-            color: var(--text-secondary);
-            font-size: 1rem;
-            margin-bottom: 4px;
-        }
-
-        .clock-info {
-            margin-top: 32px;
-        }
-
-        .clock-type {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 1.125rem;
-            font-weight: 500;
-            padding: 12px 24px;
-            border-radius: 24px;
-            margin-bottom: 16px;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-        }
-
-        .clock-type.morning-in,
-        .clock-type.afternoon-in {
-            background: var(--success);
-            color: var(--on-primary);
-        }
-
-        .clock-type.morning-out,
-        .clock-type.afternoon-out {
-            background: var(--error);
-            color: var(--on-primary);
-        }
-
-        .clock-time {
-            font-size: 1.25rem;
-            font-weight: 400;
-            color: var(--text-primary);
-            margin-bottom: 12px;
-        }
-
-        .hours-info {
-            color: var(--text-secondary);
-            font-size: 1rem;
-        }
-
-        /* Dashboard */
-        .dashboard {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            flex: 1;
-            min-height: 0;
-        }
-
-        .dashboard-section {
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            min-height: 400px;
-        }
-
-        .dashboard-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-            flex-shrink: 0;
-        }
-
-        .dashboard-icon {
-            width: 36px;
-            height: 36px;
-            background: var(--primary-light);
-            border-radius: var(--radius);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1rem;
-        }
-
-        .dashboard-section h2 {
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
-        }
-
-        .employee-list,
-        .attendance-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            overflow-y: auto;
-            scrollbar-width: thin;
-            scrollbar-color: var(--divider) transparent;
-            padding-right: 4px;
-        }
-
-        .employee-list::-webkit-scrollbar,
-        .attendance-list::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .employee-list::-webkit-scrollbar-track,
-        .attendance-list::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.05);
-            border-radius: 3px;
-        }
-
-        .employee-list::-webkit-scrollbar-thumb,
-        .attendance-list::-webkit-scrollbar-thumb {
-            background: var(--divider);
-            border-radius: 3px;
-        }
-
-        .employee-list::-webkit-scrollbar-thumb:hover,
-        .attendance-list::-webkit-scrollbar-thumb:hover {
-            background: var(--text-secondary);
-        }
-
-        .employee-item,
-        .attendance-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            background: var(--surface);
-            border: 1px solid var(--divider);
-            border-radius: var(--radius);
-            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
-            flex-shrink: 0;
-        }
-
-        .employee-item:hover,
-        .attendance-item:hover {
-            box-shadow: var(--shadow-1);
-            border-color: var(--primary-light);
-        }
-
-        .employee-avatar,
-        .attendance-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            object-fit: cover;
-            background: var(--divider);
-            flex-shrink: 0;
-        }
-
-        .employee-details,
-        .attendance-details {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .employee-name,
-        .attendance-name {
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 2px;
-            font-size: 0.8rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .employee-dept,
-        .attendance-time {
-            color: var(--text-secondary);
-            font-size: 0.7rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .clock-badge {
-            padding: 4px 8px;
-            border-radius: 8px;
-            font-size: 0.65rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            flex-shrink: 0;
-        }
-
-        .clock-badge.in {
-            background: rgba(56, 142, 60, 0.1);
-            color: var(--success);
-        }
-
-        .clock-badge.out {
-            background: rgba(211, 47, 47, 0.1);
-            color: var(--error);
-        }
-
-        /* Status Messages */
-        .status-message {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            padding: 16px 24px;
-            border-radius: var(--radius);
-            color: var(--on-primary);
-            font-weight: 500;
-            z-index: 1001;
-            transform: translateX(400px);
-            transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-            min-width: 200px;
-        }
-
-        .status-message.show {
-            transform: translateX(0);
-        }
-
-        .status-message.success {
-            background: var(--success);
-        }
-
-        .status-message.error {
-            background: var(--error);
-        }
-
-        .status-message.info {
-            background: var(--primary);
-        }
-
-        .loading {
-            text-align: center;
-            padding: 30px 16px;
-            color: var(--text-secondary);
-            font-style: italic;
-            font-size: 0.85rem;
-        }
-
-        /* Settings Modal */
-        .settings-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
-        .settings-modal.show {
-            display: flex;
+        .input-group {
+          flex-direction: column;
         }
 
         .settings-content {
-            background: var(--surface);
-            border-radius: var(--radius-large);
-            padding: 32px;
-            max-width: 500px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            position: relative;
-        }
-
-        .settings-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 24px;
-        }
-
-        .settings-header h2 {
-            font-size: 1.5rem;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        .close-btn {
-            background: none;
-            border: none;
-            font-size: 1.5rem;
-            color: var(--text-secondary);
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 50%;
-            transition: background 0.2s;
-        }
-
-        .close-btn:hover {
-            background: var(--divider);
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 6px;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid var(--divider);
-            border-radius: var(--radius);
-            font-size: 1rem;
-            color: var(--text-primary);
-            transition: border-color 0.2s;
-            font-family: inherit;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
-
-        .help-text {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            margin-top: 4px;
+          padding: 24px;
+          width: 95%;
         }
 
         .button-group {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-            margin-top: 24px;
-            flex-wrap: wrap;
+          justify-content: center;
         }
 
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: var(--radius);
-            font-size: 0.9rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
+        .download-toast {
+          bottom: 16px;
+          right: 16px;
+          min-width: 250px;
+          max-width: calc(100vw - 32px);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .header {
+          padding: 16px;
         }
 
-        .btn-primary {
-            background: var(--primary);
-            color: var(--on-primary);
+        .company-name {
+          font-size: 1.2rem;
         }
 
-        .btn-primary:hover {
-            background: var(--primary-dark);
+        .company-address {
+          font-size: 0.8rem;
         }
 
-        .btn-success {
-            background: var(--success);
-            color: var(--on-primary);
+        .datetime {
+          font-size: 1.4rem;
         }
 
-        .btn-success:hover {
-            background: #2e7d32;
+        .settings-btn {
+          padding: 8px 16px;
+          font-size: 0.8rem;
         }
-
-        .btn-secondary {
-            background: var(--text-secondary);
-            color: var(--on-primary);
-        }
-
-        .btn-secondary:hover {
-            background: #424242;
-        }
-
-        .sync-info {
-            background: #e3f2fd;
-            border: 1px solid #bbdefb;
-            border-radius: var(--radius);
-            padding: 16px;
-            margin-top: 16px;
-        }
-
-        .sync-info h3 {
-            color: var(--primary);
-            margin-bottom: 8px;
-            font-size: 1rem;
-        }
-
-        .sync-info p {
-            color: var(--text-secondary);
-            margin-bottom: 4px;
-            font-size: 0.9rem;
-        }
-
-        /* Responsive Design */
-        @media (max-width: 1200px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .dashboard {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 16px;
-            }
-
-            .header {
-                flex-direction: column;
-                gap: 24px;
-                text-align: center;
-                padding: 24px;
-            }
-
-            .header-left h1 {
-                font-size: 1.75rem;
-            }
-
-            .datetime {
-                font-size: 1.5rem;
-            }
-
-            .scanner-section,
-            .stats-section,
-            .dashboard-section {
-                padding: 24px;
-            }
-
-            .employee-display {
-                min-width: 90vw;
-                max-width: 400px;
-                padding: 32px 24px;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .stat-value {
-                font-size: 2rem;
-            }
-
-            .input-group {
-                flex-direction: column;
-            }
-
-            .settings-content {
-                padding: 24px;
-                width: 95%;
-            }
-
-            .button-group {
-                justify-content: center;
-            }
-        }
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="container">
-        <!-- Header -->
-        <header class="header elevation-1">
-            <div class="header-left">
-                <h1><b>JJC Engineering Works & <br/> General Services</b></h1>
-                <div class="connection-status" id="connectionStatus">
-                    <span class="status-dot offline"></span>
-                    <span>Offline</span>
-                </div>
+      <!-- Header -->
+      <header class="header elevation-1">
+        <div class="header-left">
+          <div class="company-logo">
+            <img
+              src="../../assets/companyLogo.jpg"
+              alt="Company Logo"
+              onerror="this.style.display='none'"
+            />
+          </div>
+          <div class="company-info">
+            <h1 class="company-name">
+              JJC Engineering Works & General Services
+            </h1>
+            <p class="company-address">
+              Block 3 Lot 11, South Carolina St., Joyous Heights Subdivision,
+              <br />
+              Sitio Hinapao, Antipolo City, Rizal <br />
+              Tel. # : 8-288-26-86 | E-mail : jjcenggworks@yahoo.com
+            </p>
+            <div class="connection-status" id="connectionStatus">
+              <span class="status-dot offline"></span>
+              <span>Offline</span>
             </div>
-            <div class="header-right">
-                <div class="datetime" id="datetime"></div>
-                <button class="settings-btn elevation-1" id="settingsBtn">
-                    Settings
-                </button>
-            </div>
-        </header>
-
-        <!-- Main Grid -->
-        <div class="main-grid">
-            <!-- Scanner Section -->
-            <section class="scanner-section elevation-1">
-                <div class="scanner-icon">📱</div>
-                <h2>Scan Employee Badge</h2>
-                <div class="input-group">
-                    <input 
-                        type="text" 
-                        id="barcodeInput" 
-                        placeholder="Scan barcode or enter ID number..."
-                        autocomplete="off"
-                        autofocus
-                    >
-                    <button id="manualSubmit" class="submit-btn elevation-1">Submit</button>
-                </div>
-                <div class="input-toggle">
-                    <label>
-                        <input type="radio" name="inputType" value="barcode" checked>
-                        Barcode Scanner
-                    </label>
-                    <label>
-                        <input type="radio" name="inputType" value="manual">
-                        Manual ID Entry
-                    </label>
-                </div>
-            </section>
-
-            <!-- Statistics Section -->
-            <section class="stats-section elevation-1">
-                <div class="stats-header">
-                    <div class="stats-icon">📊</div>
-                    <h2>Today's Statistics</h2>
-                </div>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-value" id="totalRegularHours">0</div>
-                        <div class="stat-label">Regular Hours</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="totalOvertimeHours">0</div>
-                        <div class="stat-label">Overtime Hours</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="presentCount">0</div>
-                        <div class="stat-label">Present</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="lateCount">0</div>
-                        <div class="stat-label">Late</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="absentCount">0</div>
-                        <div class="stat-label">Absent</div>
-                    </div>
-                </div>
-            </section>
+          </div>
         </div>
+        <div class="header-right">
+          <div class="datetime" id="datetime"></div>
+          <button class="settings-btn elevation-1" id="settingsBtn">
+            ⚙️ Settings
+          </button>
+          <button class="refresh-btn elevation-1" onclick="location.reload();">
+            🔄 Refresh
+          </button>
+        </div>
+      </header>
 
-        <!-- Employee Display Modal -->
-        <section class="employee-display elevation-4" id="employeeDisplay">
-            <div class="employee-photo">
-                <img id="employeePhoto" src="assets/profile.png" alt="Employee Photo">
-            </div>
-            <div class="employee-info">
-                <h3 id="employeeName"></h3>
-                <p id="employeeDepartment"></p>
-                <p id="employeeId"></p>
-            </div>
-            <div class="clock-info">
-                <div class="clock-type" id="clockType"></div>
-                <div class="clock-time" id="clockTime"></div>
-                <div class="hours-info" id="hoursInfo"></div>
-            </div>
+      <!-- Main Grid -->
+      <div class="main-grid">
+        <!-- Scanner Section -->
+        <section class="scanner-section elevation-1">
+          <div class="scanner-icon">📱</div>
+          <h2>Scan Employee Badge</h2>
+          <div class="input-group">
+            <input
+              type="text"
+              id="barcodeInput"
+              placeholder="Scan barcode or enter ID number..."
+              autocomplete="off"
+              autofocus
+            />
+            <button id="manualSubmit" class="submit-btn elevation-1">
+              Submit
+            </button>
+          </div>
+          <div class="input-toggle">
+            <label>
+              <input type="radio" name="inputType" value="barcode" checked />
+              Barcode Scanner
+            </label>
+            <label>
+              <input type="radio" name="inputType" value="manual" />
+              Manual ID Entry
+            </label>
+          </div>
         </section>
 
-        <!-- Dashboard -->
-        <div class="dashboard">
-            <!-- Currently Clocked In -->
-            <section class="dashboard-section elevation-1">
-                <div class="dashboard-header">
-                    <div class="dashboard-icon">👥</div>
-                    <h2>Currently Clocked In</h2>
-                </div>
-                <div class="employee-list" id="currentlyClocked">
-                    <div class="loading">Loading...</div>
-                </div>
-            </section>
-
-            <!-- Today's Activity -->
-            <section class="dashboard-section elevation-1">
-                <div class="dashboard-header">
-                    <div class="dashboard-icon">📋</div>
-                    <h2>Today's Activity</h2>
-                </div>
-                <div class="attendance-list" id="todayActivity">
-                    <div class="loading">Loading...</div>
-                </div>
-            </section>
-        </div>
-
-        <!-- Status Messages -->
-        <div class="status-message" id="statusMessage"></div>
-
-        <!-- Settings Modal -->
-        <div class="settings-modal" id="settingsModal">
-            <div class="settings-content elevation-4">
-                <div class="settings-header">
-                    <h2>Settings</h2>
-                    <button class="close-btn" id="closeSettings">&times;</button>
-                </div>
-                
-                <div id="settingsStatusMessage" style="display: none;"></div>
-                
-                <form id="settingsForm">
-                    <div class="form-group">
-                        <label for="serverUrl">Server URL</label>
-                        <input type="url" id="serverUrl" name="server_url" placeholder="">
-                        <div class="help-text">URL to fetch employee data from your server</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="syncInterval">Sync Interval (minutes)</label>
-                        <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5">
-                        <div class="help-text">How often to sync employee data (1-1440 minutes)</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="gracePeriod">Grace Period (minutes)</label>
-                        <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5">
-                        <div class="help-text">Late arrival tolerance (0-30 minutes)</div>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button type="button" class="btn btn-success" id="syncNowBtn">🔄 Sync Now</button>
-                        <button type="button" class="btn btn-secondary" id="cancelSettings">✕ Cancel</button>
-                    </div>
-                </form>
-                
-                <div class="sync-info" id="syncInfo" style="display: none;">
-                    <h3>📊 Sync Information</h3>
-                    <p id="employeeCount">Employees in database: Loading...</p>
-                    <p id="lastSync">Last sync: Loading...</p>
-                    <p id="profileStatus">Profile images: Loading...</p>
-                </div>
-                
+        <!-- Statistics Section -->
+        <section class="stats-section elevation-1">
+          <div class="stats-header">
+            <div class="stats-icon">📊</div>
+            <h2>Today's Statistics</h2>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="totalRegularHours">0</div>
+              <div class="stat-label">Regular Hours</div>
             </div>
+            <div class="stat-card">
+              <div class="stat-value" id="totalOvertimeHours">0</div>
+              <div class="stat-label">Overtime Hours</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="presentCount">0</div>
+              <div class="stat-label">Present</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="lateCount">0</div>
+              <div class="stat-label">Late</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="absentCount">0</div>
+              <div class="stat-label">Absent</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Employee Display Modal -->
+      <section class="employee-display elevation-4" id="employeeDisplay">
+        <div class="employee-photo">
+          <img
+            id="employeePhoto"
+            src="assets/profile.png"
+            alt="Employee Photo"
+          />
         </div>
-    </div>   
+        <div class="employee-info">
+          <h3 id="employeeName"></h3>
+          <p id="employeeDepartment"></p>
+          <p id="employeeId"></p>
+        </div>
+        <div class="clock-info">
+          <div class="clock-type" id="clockType"></div>
+          <div class="clock-time" id="clockTime"></div>
+          <div class="hours-info" id="hoursInfo"></div>
+        </div>
+      </section>
+
+      <!-- Dashboard -->
+      <div class="dashboard">
+        <!-- Currently Clocked In -->
+        <section class="dashboard-section elevation-1">
+          <div class="dashboard-header">
+            <div class="dashboard-icon">👥</div>
+            <h2>Currently Clocked In</h2>
+          </div>
+          <div class="employee-list" id="currentlyClocked">
+            <div class="loading">Loading...</div>
+          </div>
+        </section>
+
+        <!-- Today's Activity -->
+        <section class="dashboard-section elevation-1">
+          <div class="dashboard-header">
+            <div class="dashboard-icon">📋</div>
+            <h2>Today's Activity</h2>
+          </div>
+          <div class="attendance-list" id="todayActivity">
+            <div class="loading">Loading...</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Status Messages -->
+      <div class="status-message" id="statusMessage"></div>
+
+      <!-- Settings Modal -->
+      <div class="settings-modal" id="settingsModal">
+        <div class="settings-content elevation-4">
+          <div class="settings-header">
+            <h2>Settings</h2>
+            <button class="close-btn" id="closeSettings">&times;</button>
+          </div>
+
+          <div id="settingsStatusMessage" style="display: none"></div>
+
+          <form id="settingsForm">
+            <div class="form-group">
+              <label for="serverUrl">Server URL</label>
+              <input
+                type="url"
+                id="serverUrl"
+                name="server_url"
+                placeholder=""
+              />
+              <div class="help-text">
+                URL to fetch employee data from your server
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="syncInterval">Sync Interval (minutes)</label>
+              <input
+                type="number"
+                id="syncInterval"
+                name="sync_interval"
+                min="1"
+                max="1440"
+                placeholder="5"
+              />
+              <div class="help-text">
+                How often to sync employee data (1-1440 minutes)
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="gracePeriod">Grace Period (minutes)</label>
+              <input
+                type="number"
+                id="gracePeriod"
+                name="grace_period"
+                min="0"
+                max="30"
+                placeholder="5"
+              />
+              <div class="help-text">Late arrival tolerance (0-30 minutes)</div>
+            </div>
+
+            <div class="button-group">
+              <button type="button" class="btn btn-success" id="syncNowBtn">
+                🔄 Sync Now
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                id="cancelSettings"
+              >
+                ✕ Cancel
+              </button>
+            </div>
+          </form>
+
+          <div class="sync-info" id="syncInfo" style="display: none">
+            <h3>📊 Sync Information</h3>
+            <p id="employeeCount">Employees in database: Loading...</p>
+            <p id="lastSync">Last sync: Loading...</p>
+            <p id="profileStatus">Profile images: Loading...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download Toast -->
+      <div class="download-toast" id="downloadToast"></div>
+    </div>
+    <script>
+      // FIXED: Proper way to update header colors dynamically
+      let testTime = null; // For testing different times
+
+      function updateHeaderBackground(customTime = null) {
+        const now = customTime || new Date();
+        const hours = now.getHours();
+
+        let color1, color2, timePeriodName;
+
+        if (hours >= 5 && hours < 12) {
+          // Morning - Warm sunrise
+          color1 = "rgba(255, 183, 77, 0.6)";
+          color2 = "rgba(255, 138, 101, 0.5)";
+          timePeriodName = "Morning";
+        } else if (hours >= 12 && hours < 17) {
+          // Afternoon - Bright blue
+          color1 = "rgba(52, 152, 219, 0.6)";
+          color2 = "rgba(41, 128, 185, 0.4)";
+          timePeriodName = "Afternoon";
+        } else if (hours >= 17 && hours < 20) {
+          // Evening - Sunset colors
+          color1 = "rgba(231, 76, 60, 0.6)";
+          color2 = "rgba(155, 89, 182, 0.5)";
+          timePeriodName = "Evening";
+        } else {
+          // Night - Deep blue
+          color1 = "rgba(0, 47, 85, 0.6)";
+          color2 = "rgba(0, 58, 105, 0.4)";
+          timePeriodName = "Night";
+        }
+
+        // FIXED: Update CSS custom properties (this actually works!)
+        document.documentElement.style.setProperty("--header-color1", color1);
+        document.documentElement.style.setProperty("--header-color2", color2);
+
+        // Update time period display
+        const timePeriodElement = document.getElementById("timePeriod");
+        if (timePeriodElement) {
+          timePeriodElement.textContent = `Current period: ${timePeriodName} (${hours}:${now
+            .getMinutes()
+            .toString()
+            .padStart(2, "0")})`;
+        }
+
+        console.log(
+          `Time: ${now.toLocaleTimeString()} - Period: ${timePeriodName}`
+        );
+      }
+
+      function updateDateTime() {
+        const now = testTime || new Date();
+        const timeString = now.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        const dateString = now.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+
+        const datetimeElement = document.getElementById("datetime");
+        const currentTimeElement =
+          document.getElementById("currentTimeDisplay");
+
+        if (datetimeElement) {
+          datetimeElement.innerHTML = `${timeString}<br><small style="font-size: 0.6em; opacity: 0.8;">${dateString}</small>`;
+        }
+
+        if (currentTimeElement) {
+          currentTimeElement.textContent = `${timeString} - ${dateString}`;
+        }
+
+        // Update header background
+        updateHeaderBackground(now);
+      }
+
+      // Test functions for demonstration
+      function setTestTime(hours, minutes) {
+        testTime = new Date();
+        testTime.setHours(hours, minutes, 0, 0);
+        updateDateTime();
+      }
+
+      function resetToCurrentTime() {
+        testTime = null;
+        updateDateTime();
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", function () {
+        updateDateTime();
+
+        // Update every second for smooth time display
+        setInterval(updateDateTime, 1000);
+      });
+    </script>
     <script src="./app.js"></script>
-</body>
+  </body>
 </html>

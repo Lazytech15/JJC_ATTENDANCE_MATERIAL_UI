@@ -13,6 +13,14 @@ class AttendanceApp {
       retryDelay: 30000 // 30 seconds
     }
     this.electronAPI = window.electronAPI // Use the exposed API
+    
+    // Duplicate prevention tracking
+    this.lastScanData = {
+      input: null,
+      timestamp: 0,
+      duplicatePreventionWindow: 60000 // 1 minute
+    }
+    
     this.init()
   }
 
@@ -43,6 +51,26 @@ class AttendanceApp {
     }
   }
 
+  // Check if the current scan is a duplicate
+  isDuplicateScan(input) {
+    const currentTime = Date.now()
+    const timeDifference = currentTime - this.lastScanData.timestamp
+    
+    // Check if the same input was scanned within the prevention window
+    if (this.lastScanData.input === input && timeDifference < this.lastScanData.duplicatePreventionWindow) {
+      console.log(`Duplicate scan detected: "${input}" scanned ${timeDifference}ms ago (within ${this.lastScanData.duplicatePreventionWindow}ms window)`)
+      return true
+    }
+    
+    return false
+  }
+
+  // Update the last scan data
+  updateLastScanData(input) {
+    this.lastScanData.input = input
+    this.lastScanData.timestamp = Date.now()
+  }
+
   // Start automatic attendance sync
   startAutoSync() {
     if (this.autoSyncInterval) {
@@ -57,9 +85,9 @@ class AttendanceApp {
       this.performAttendanceSync(true) // Silent sync
     }, this.syncSettings.interval)
 
-    // Also perform an initial sync after 10 seconds
+    // Also perform an initial sync after 10 seconds with download toast
     setTimeout(() => {
-      this.performAttendanceSync(true)
+      this.performAttendanceSync(true, 0, true) // Silent sync with initial download toast
     }, 10000)
   }
 
@@ -72,8 +100,8 @@ class AttendanceApp {
     }
   }
 
-  // Perform attendance sync with retry logic
-  async performAttendanceSync(silent = false, retryCount = 0) {
+  // Enhanced perform attendance sync with download toast messages
+  async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
     if (!this.electronAPI) {
       if (!silent) {
         this.showStatus('Demo mode: Sync simulated successfully!', 'success')
@@ -92,7 +120,10 @@ class AttendanceApp {
         return { success: true, message: 'No records to sync' }
       }
 
-      if (!silent) {
+      // Show download toast for initial sync or when explicitly requested
+      if (showDownloadToast || (!silent && retryCount === 0)) {
+        this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, 'info')
+      } else if (!silent) {
         this.showStatus(`Syncing ${countResult.count} attendance records...`, 'info')
       }
 
@@ -100,8 +131,8 @@ class AttendanceApp {
       const syncResult = await this.electronAPI.syncAttendanceToServer()
       
       if (syncResult.success) {
-        if (!silent) {
-          this.showStatus(syncResult.message, 'success')
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast('✅ Attendance data uploaded successfully!', 'success')
         }
         console.log('Attendance sync successful:', syncResult.message)
         
@@ -123,22 +154,22 @@ class AttendanceApp {
         console.log(`Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`)
         
         setTimeout(() => {
-          this.performAttendanceSync(silent, retryCount + 1)
+          this.performAttendanceSync(silent, retryCount + 1, showDownloadToast)
         }, this.syncSettings.retryDelay)
         
-        if (!silent) {
-          this.showStatus(`Sync failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`, 'warning')
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(`⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`, 'warning')
         }
       } else {
-        if (!silent) {
-          this.showStatus(`Sync failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`, 'error')
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(`❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`, 'error')
         }
         return { success: false, message: error.message }
       }
     }
   }
 
-  // Enhanced save and sync functionality
+  // Enhanced save and sync functionality with download toasts
   async saveAndSync() {
     const syncNowBtn = document.getElementById('syncNowBtn')
     const originalText = syncNowBtn.textContent
@@ -149,6 +180,7 @@ class AttendanceApp {
     
     if (!this.electronAPI) {
       this.showSettingsStatus('Demo mode: Settings saved and sync completed successfully!', 'success')
+      this.showDownloadToast('📊 Demo: Employee data downloaded successfully!', 'success')
       await this.loadSyncInfo()
       syncNowBtn.textContent = originalText
       syncNowBtn.disabled = false
@@ -204,22 +236,27 @@ class AttendanceApp {
       // Restart auto-sync with new interval
       this.startAutoSync()
 
-      // Update button text to show employee sync phase
-      syncNowBtn.textContent = '🔄 Syncing Employees...'
+      // Update button text and show download toast for employee sync phase
+      syncNowBtn.textContent = '📥 Downloading Employees...'
+      this.showDownloadToast('🔄 Connecting to server and downloading employee data...', 'info')
 
       // Then sync the employees
       const employeeSyncResult = await this.electronAPI.syncEmployees()
       
       if (!employeeSyncResult.success) {
         this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, 'warning')
+        this.showDownloadToast('❌ Failed to download employee data from server', 'error')
         return
       }
 
-      // Update button text to show attendance sync phase
-      syncNowBtn.textContent = '📊 Syncing Attendance...'
+      // Show success toast for employee download
+      this.showDownloadToast('✅ Employee data downloaded successfully!', 'success')
 
-      // Finally sync attendance
-      const attendanceSyncResult = await this.performAttendanceSync(false)
+      // Update button text to show attendance sync phase
+      syncNowBtn.textContent = '📊 Uploading Attendance...'
+
+      // Finally sync attendance with download toast
+      const attendanceSyncResult = await this.performAttendanceSync(false, 0, true)
       
       if (attendanceSyncResult && attendanceSyncResult.success) {
         this.showSettingsStatus('Settings saved and all data synced successfully!', 'success')
@@ -233,10 +270,38 @@ class AttendanceApp {
     } catch (error) {
       console.error('Save and sync error:', error)
       this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, 'error')
+      this.showDownloadToast('❌ Connection to server failed', 'error')
     } finally {
       syncNowBtn.textContent = originalText
       syncNowBtn.disabled = false
     }
+  }
+
+  // New method for download-specific toast messages
+  showDownloadToast(message, type = 'info') {
+    // Create or get download-specific toast element
+    let downloadToast = document.getElementById('downloadToast')
+    
+    if (!downloadToast) {
+      downloadToast = document.createElement('div')
+      downloadToast.id = 'downloadToast'
+      downloadToast.className = 'download-toast'
+      document.body.appendChild(downloadToast)
+    }
+
+    downloadToast.textContent = message
+    downloadToast.className = `download-toast ${type} show`
+
+    // Clear any existing timeout
+    if (downloadToast.hideTimeout) {
+      clearTimeout(downloadToast.hideTimeout)
+    }
+
+    // Auto-hide after appropriate duration based on type
+    const duration = type === 'error' ? 6000 : type === 'warning' ? 5000 : 4000
+    downloadToast.hideTimeout = setTimeout(() => {
+      downloadToast.classList.remove('show')
+    }, duration)
   }
 
   setupEventListeners() {
@@ -262,7 +327,7 @@ class AttendanceApp {
 
           setTimeout(() => {
             canScan = true;
-          }, 2000);
+          }, 1500);
         }
       }
     });
@@ -337,7 +402,7 @@ class AttendanceApp {
     const syncAttendanceBtn = document.getElementById('syncAttendanceBtn')
     if (syncAttendanceBtn) {
       syncAttendanceBtn.addEventListener("click", () => {
-        this.performAttendanceSync(false) // Not silent
+        this.performAttendanceSync(false, 0, true) // Not silent, with download toast
       })
     }
 
@@ -364,8 +429,29 @@ class AttendanceApp {
     if (this.electronAPI) {
       // Set up listener for sync attendance events
       this.electronAPI.onSyncAttendanceToServer(() => {
-        this.performAttendanceSync(false)
+        this.performAttendanceSync(false, 0, true) // Show download toast
       })
+    }
+  }
+
+  // Enhanced sync employees with download toast
+  async syncEmployees() {
+    try {
+      // Show download toast when syncing employees
+      this.showDownloadToast('📥 Downloading employee data from server...', 'info')
+      
+      const result = await this.electronAPI.syncEmployees()
+
+      if (result.success) {
+        this.showDownloadToast('✅ Employee data downloaded successfully!', 'success')
+        this.showStatus(result.message, "success")
+      } else {
+        this.showDownloadToast('❌ Failed to download employee data', 'error')
+        console.warn("Sync warning:", result.error)
+      }
+    } catch (error) {
+      console.error("Sync error:", error)
+      this.showDownloadToast('❌ Connection to server failed', 'error')
     }
   }
 
@@ -618,6 +704,43 @@ class AttendanceApp {
     }
   }
 
+  // Show loading screen to prevent duplicate scans
+  showLoadingScreen() {
+    // Create loading screen if it doesn't exist
+    let loadingScreen = document.getElementById('loadingScreen')
+    
+    if (!loadingScreen) {
+      loadingScreen = document.createElement('div')
+      loadingScreen.id = 'loadingScreen'
+      loadingScreen.className = 'loading-screen'
+      loadingScreen.innerHTML = `
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <div class="loading-text">Processing attendance...</div>
+          <div class="loading-subtext">Please wait</div>
+        </div>
+      `
+      document.body.appendChild(loadingScreen)
+    }
+
+    loadingScreen.style.display = 'flex'
+    // Add fade-in effect
+    setTimeout(() => {
+      loadingScreen.classList.add('show')
+    }, 5)
+  }
+
+  // Hide loading screen
+  hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loadingScreen')
+    if (loadingScreen) {
+      loadingScreen.classList.remove('show')
+      setTimeout(() => {
+        loadingScreen.style.display = 'none'
+      }, 250) // Wait for fade-out animation
+    }
+  }
+
   async handleScan() {
     // Clear any pending timeouts
     if (this.barcodeTimeout) {
@@ -633,9 +756,25 @@ class AttendanceApp {
       return
     }
 
-    // Show processing state
+    // Check for duplicate scan
+    if (this.isDuplicateScan(input)) {
+      this.showStatus("Duplicate scan detected - please wait before scanning again", "warning")
+      this.focusInput()
+      return
+    }
+
+    // Update last scan data to prevent duplicates
+    this.updateLastScanData(input)
+
+    // Show 2-second loading screen
+    this.showLoadingScreen()
+
+    // Disable input and button during processing
+    const barcodeInput = document.getElementById("barcodeInput")
     const submitButton = document.getElementById("manualSubmit")
     const originalText = submitButton.textContent
+    
+    barcodeInput.disabled = true
     submitButton.textContent = "Processing..."
     submitButton.disabled = true
 
@@ -646,6 +785,10 @@ class AttendanceApp {
       })
 
       if (result.success) {
+        // Wait for loading screen (0.5 seconds minimum)
+        await new Promise(resolve => setTimeout(resolve, 200))
+        
+        this.hideLoadingScreen()
         this.showEmployeeDisplay(result.data)
         this.clearInput()
         await this.loadTodayAttendance()
@@ -657,15 +800,22 @@ class AttendanceApp {
         }, 3000)
         
       } else {
+        // Wait for loading screen (2 seconds minimum)
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        this.hideLoadingScreen()
         this.showStatus(result.error || "Employee not found", "error")
         this.focusInput()
       }
     } catch (error) {
       console.error("Clock error:", error)
+      // Wait for loading screen (2 seconds minimum)
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      this.hideLoadingScreen()
       this.showStatus("System error occurred", "error")
       this.focusInput()
     } finally {
-      // Restore submit button
+      // Restore input and button
+      barcodeInput.disabled = false
       submitButton.textContent = originalText
       submitButton.disabled = false
     }
@@ -779,7 +929,7 @@ class AttendanceApp {
     // Show display
     display.style.display = "block"
 
-    // Auto-hide after 15 seconds
+    // Auto-hide after 10 seconds
     if (this.employeeDisplayTimeout) {
       clearTimeout(this.employeeDisplayTimeout)
     }
@@ -787,7 +937,7 @@ class AttendanceApp {
     this.employeeDisplayTimeout = setTimeout(() => {
       display.style.display = "none"
       this.focusInput()
-    }, 15000)
+    }, 10000)
   }
 
   formatClockType(clockType, sessionType) {
@@ -819,7 +969,16 @@ class AttendanceApp {
   }
 
   async loadInitialData() {
-    await Promise.all([this.loadTodayAttendance(), this.syncEmployees()])
+    // Show download toast for initial data loading
+    this.showDownloadToast('🔄 Loading initial data...', 'info')
+    
+    try {
+      await Promise.all([this.loadTodayAttendance(), this.syncEmployees()])
+      this.showDownloadToast('✅ Initial data loaded successfully!', 'success')
+    } catch (error) {
+      console.error('Error loading initial data:', error)
+      this.showDownloadToast('❌ Failed to load initial data', 'error')
+    }
   }
 
   async loadTodayAttendance() {
@@ -1022,20 +1181,6 @@ class AttendanceApp {
     return '🔘'
   }
 
-  async syncEmployees() {
-    try {
-      const result = await this.electronAPI.syncEmployees()
-
-      if (result.success) {
-        this.showStatus(result.message, "success")
-      } else {
-        console.warn("Sync warning:", result.error)
-      }
-    } catch (error) {
-      console.error("Sync error:", error)
-    }
-  }
-
   showStatus(message, type = "info") {
     const statusElement = document.getElementById("statusMessage")
     statusElement.textContent = message
@@ -1064,6 +1209,12 @@ class AttendanceApp {
     
     // Clean up image load attempts
     this.imageLoadAttempts.clear()
+    
+    // Clean up download toast
+    const downloadToast = document.getElementById('downloadToast')
+    if (downloadToast && downloadToast.hideTimeout) {
+      clearTimeout(downloadToast.hideTimeout)
+    }
     
     console.log('AttendanceApp destroyed and cleaned up')
   }

@@ -30,7 +30,8 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "node-fetch": "^2.6.7",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "yauzl": "^3.2.0"
   },
   "build": {
     "appId": "com.jjc.attendance-system",
@@ -67,7 +68,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"
