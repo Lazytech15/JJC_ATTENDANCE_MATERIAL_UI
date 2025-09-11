@@ -1,19 +1,24 @@
-const Attendance = require("../../database/models/attendance")
+const Attendance = require("../../database/models/attendancedb")
 const Employee = require("../../database/models/employee")
 const { 
   determineClockType, 
   getPendingClockOut, 
   getTodaysCompletedSessions,
-  calculateHoursWithStats,  // Use the enhanced version with stats
-  getEmployeeStatistics     // New function for detailed reporting
+  calculateHoursWithStats,
+  getEmployeeStatistics
 } = require("../../services/timeCalculator")
-const { getDatabase } = require("../../database/setup")
+const { 
+  getDatabase,
+  updateDailyAttendanceSummary,
+  getDailyAttendanceSummary,
+  rebuildDailyAttendanceSummary
+} = require("../../database/setup")
 const { broadcastUpdate } = require("../../services/websocket")
 const profileService = require("../../services/profileService")
 const dateService = require("../../services/dateService")
 const settingsRoutes = require("./settings")
 
-// Fix the determineClockType call in the clockAttendance function
+// Enhanced clockAttendance function with daily summary updates
 async function clockAttendance(event, { input, inputType = "barcode" }) {
   try {
     // Find employee by barcode or ID number
@@ -50,8 +55,6 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       // Calculate hours for the pending session WITH STATISTICS
       const clockType = pendingClockOut.expectedClockOut
       console.log(`Processing clock-out: ${clockType}`)
-      console.log(`Clock-in time for calculation: ${pendingClockOut.clockTime}`)
-      console.log(`Clock-out time for calculation: ${currentDateTime}`)
 
       // Record the clock-out first to get the attendance ID and clock_out ID
       const attendanceRecord = await Attendance.clockIn(
@@ -59,46 +62,47 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
         clockType, 
         profileService, 
         await getServerUrl(),
-        pendingClockOut.clockTime
+        pendingClockOut.clockTime,
+        input
       )
 
-      // ENHANCED: Use calculateHoursWithStats instead of regular calculateHours
+      // Use calculateHoursWithStats for enhanced calculation
       const hoursResult = calculateHoursWithStats(
         clockType, 
         currentDateTime, 
         pendingClockOut.clockTime,
-        employee.uid,           // Pass employee UID for statistics
-        pendingClockOut.id,     // Pass attendance ID for statistics
-        attendanceRecord.id,    // Pass clock-out ID for statistics
-        db                      // Pass database connection
+        employee.uid,
+        pendingClockOut.id,
+        attendanceRecord.id,
+        db,
+        input
       )
       
       console.log(`Hours calculation result with statistics:`, hoursResult)
 
-      // Update the hours if they weren't calculated correctly in the database layer
+      // Update the hours if they weren't calculated correctly
       if ((attendanceRecord.regular_hours === 0 && attendanceRecord.overtime_hours === 0) && 
           (hoursResult.regularHours > 0 || hoursResult.overtimeHours > 0)) {
-        console.log(`Updating attendance record with calculated hours...`)
+        const updateQuery = db.prepare(`
+          UPDATE attendance 
+          SET regular_hours = ?, overtime_hours = ?
+          WHERE id = ?
+        `)
+        updateQuery.run(hoursResult.regularHours, hoursResult.overtimeHours, attendanceRecord.id)
         
-        try {
-          const updateQuery = db.prepare(`
-            UPDATE attendance 
-            SET regular_hours = ?, overtime_hours = ?
-            WHERE id = ?
-          `)
-          updateQuery.run(hoursResult.regularHours, hoursResult.overtimeHours, attendanceRecord.id)
-          
-          attendanceRecord.regular_hours = hoursResult.regularHours
-          attendanceRecord.overtime_hours = hoursResult.overtimeHours
-          
-          console.log(`✓ Updated attendance record with Regular=${hoursResult.regularHours}, Overtime=${hoursResult.overtimeHours}`)
-          console.log(`✓ Statistics automatically saved to attendance_statistics table`)
-        } catch (updateError) {
-          console.error('Error updating attendance record with hours:', updateError)
-        }
+        attendanceRecord.regular_hours = hoursResult.regularHours
+        attendanceRecord.overtime_hours = hoursResult.overtimeHours
+        
+        console.log(`✓ Updated attendance record with Regular=${hoursResult.regularHours}, Overtime=${hoursResult.overtimeHours}`)
       }
 
-      // Broadcast clock-out message with enhanced statistics
+      // ENHANCED: Update daily attendance summary after successful clock-out
+      setTimeout(() => {
+        updateDailyAttendanceSummary(employee.uid, today, db)
+        console.log(`✓ Daily attendance summary updated for employee ${employee.uid}`)
+      }, 100)
+
+      // Broadcast clock-out message
       broadcastUpdate("attendance_update", {
         type: "clock_out",
         sessionType: getSessionType(clockType),
@@ -113,8 +117,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
           type: pendingClockOut.clockType,
           time: pendingClockOut.clockTime.toISOString()
         },
-        // ENHANCED: Include statistics flag for UI notifications
-        hasDetailedStats: true
+        hasDetailedStats: true,
+        dailySummaryUpdated: true
       })
 
       return {
@@ -132,8 +136,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
             type: pendingClockOut.clockType,
             time: pendingClockOut.clockTime.toISOString()
           },
-          // ENHANCED: Flag that detailed statistics are available
-          statisticsRecorded: true
+          statisticsRecorded: true,
+          dailySummaryUpdated: true
         },
       }
     }
@@ -154,19 +158,19 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
 
     console.log(`Last clock record: ${lastClockType} at ${lastClockTime}`)
 
-    // FIXED: Pass all required parameters to determineClockType
+    // Determine next clock type
     const clockType = determineClockType(
       lastClockType, 
       currentDateTime, 
       lastClockTime, 
-      employee.uid,  // Pass employee UID for the new 17:00 rule
-      db             // Pass database connection for the new 17:00 rule
+      employee.uid,
+      db
     )
     console.log(`Determined clock type: ${clockType}`)
 
-    // ENHANCED: Better validation for clock-out scenarios
+    // Handle clock-out validation
     if (isValidClockOut(clockType)) {
-      // Double-check that we don't have a pending clock-in that wasn't found
+      // Double-check for missed pending clock-ins
       const doubleCheckPendingQuery = db.prepare(`
         SELECT 
           id, clock_type, clock_time, date
@@ -190,7 +194,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       if (missedPendingClock) {
         console.log(`Found missed pending clock-in: ${missedPendingClock.clock_type} at ${missedPendingClock.clock_time}`)
         
-        // Create the expected clock-out data
+        // Process the missed clock-out
         const expectedClockOut = {
           id: missedPendingClock.id,
           clockType: missedPendingClock.clock_type,
@@ -199,13 +203,13 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
           expectedClockOut: missedPendingClock.clock_type.replace('_in', '_out')
         }
         
-        // Process this as a pending clock-out resolution
         const attendanceRecord = await Attendance.clockIn(
           employee, 
           expectedClockOut.expectedClockOut, 
           profileService, 
           await getServerUrl(),
-          expectedClockOut.clockTime
+          expectedClockOut.clockTime,
+          input
         )
 
         const hoursResult = calculateHoursWithStats(
@@ -215,7 +219,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
           employee.uid,
           expectedClockOut.id,
           attendanceRecord.id,
-          db
+          db,
+          input
         )
         
         // Update hours in database
@@ -232,7 +237,12 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
           attendanceRecord.overtime_hours = hoursResult.overtimeHours
         }
 
-        // Broadcast successful resolution
+        // ENHANCED: Update daily attendance summary
+        setTimeout(() => {
+          updateDailyAttendanceSummary(employee.uid, today, db)
+        }, 100)
+
+        // Broadcast successful recovery
         broadcastUpdate("attendance_update", {
           type: "clock_out",
           sessionType: getSessionType(expectedClockOut.expectedClockOut),
@@ -248,7 +258,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
             time: expectedClockOut.clockTime.toISOString()
           },
           hasDetailedStats: true,
-          wasRecoveredSession: true
+          wasRecoveredSession: true,
+          dailySummaryUpdated: true
         })
 
         return {
@@ -267,17 +278,13 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
               type: expectedClockOut.clockType,
               time: expectedClockOut.clockTime.toISOString()
             },
-            statisticsRecorded: true
+            statisticsRecorded: true,
+            dailySummaryUpdated: true
           },
         }
       }
       
-      // If we still get here, it means there's truly no pending clock-in
-      console.error(`Unexpected clock-out type without pending clock-in: ${clockType}`)
-      console.error(`Last clock type: ${lastClockType}`)
-      console.error(`Current time: ${currentDateTime.toISOString()}`)
-      
-      // Provide more helpful error message based on the situation
+      // Error case: invalid clock-out without pending session
       let errorMessage = "Cannot clock out without an active session. "
       
       if (lastClockType && lastClockType.endsWith('_out')) {
@@ -304,9 +311,14 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
 
     // Process normal clock-in
     const completedSessions = getTodaysCompletedSessions(employee.uid, today, db)
-    const attendanceRecord = await Attendance.clockIn(employee, clockType, profileService, await getServerUrl())
+    const attendanceRecord = await Attendance.clockIn(employee, clockType, profileService, await getServerUrl(), null, input)
 
     console.log(`Successfully clocked in with type: ${clockType}`)
+
+    // ENHANCED: Update daily attendance summary after clock-in
+    setTimeout(() => {
+      updateDailyAttendanceSummary(employee.uid, today, db)
+    }, 100)
 
     broadcastUpdate("attendance_update", {
       type: "clock_in",
@@ -317,7 +329,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       regularHours: 0,
       overtimeHours: 0,
       attendanceRecord: attendanceRecord,
-      todaysCompletedSessions: completedSessions.length
+      todaysCompletedSessions: completedSessions.length,
+      dailySummaryUpdated: true
     })
 
     return {
@@ -331,7 +344,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
         overtimeHours: 0,
         isOvertimeSession: isOvertimeSession(clockType),
         isNewClockIn: true,
-        todaysCompletedSessions: completedSessions.length
+        todaysCompletedSessions: completedSessions.length,
+        dailySummaryUpdated: true
       },
     }
 
@@ -340,74 +354,132 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
     return { 
       success: false, 
       error: error.message,
-      stack: error.stack // Include stack trace for debugging
+      stack: error.stack
     }
   }
 }
 
-// ENHANCED: New function to get detailed employee statistics for reporting
-async function getEmployeeDetailedStatistics(event, { employeeUid, date = null }) {
+// ENHANCED: New function to get readable daily attendance summary
+async function getDailyAttendanceSummaryData(event, { startDate = null, endDate = null, employeeUid = null, includeIncomplete = true }) {
   try {
+    const today = dateService.getCurrentDate()
+    const actualStartDate = startDate || today
+    const actualEndDate = endDate || today
+    
+    console.log(`Getting daily attendance summary from ${actualStartDate} to ${actualEndDate}`)
+    if (employeeUid) console.log(`Filtering by employee UID: ${employeeUid}`)
+    
     const db = getDatabase()
-    const targetDate = date || dateService.getCurrentDate()
+    let summaryData = getDailyAttendanceSummary(actualStartDate, actualEndDate, employeeUid, db)
     
-    console.log(`Getting detailed statistics for employee ${employeeUid} on ${targetDate}`)
-    
-    // Use the enhanced statistics function from timeCalculator
-    const statistics = getEmployeeStatistics(employeeUid, targetDate, db)
-    
-    if (!statistics) {
-      return {
-        success: false,
-        error: "No statistics found for the specified employee and date"
-      }
+    // Filter incomplete records if requested
+    if (!includeIncomplete) {
+      summaryData = summaryData.filter(record => !record.is_incomplete)
     }
-
-    // Get basic attendance records for comparison
-    const basicAttendance = Attendance.getEmployeeAttendance(employeeUid, targetDate, targetDate)
+    
+    // Calculate summary statistics
+    const statistics = {
+      totalRecords: summaryData.length,
+      totalEmployees: new Set(summaryData.map(record => record.employee_uid)).size,
+      totalRegularHours: summaryData.reduce((sum, record) => sum + (record.regular_hours || 0), 0),
+      totalOvertimeHours: summaryData.reduce((sum, record) => sum + (record.overtime_hours || 0), 0),
+      totalHours: summaryData.reduce((sum, record) => sum + (record.total_hours || 0), 0),
+      incompleteRecords: summaryData.filter(record => record.is_incomplete).length,
+      overtimeRecords: summaryData.filter(record => record.has_overtime).length,
+      eveningSessionRecords: summaryData.filter(record => record.has_evening_session).length,
+      lateEntryRecords: summaryData.filter(record => record.has_late_entry).length,
+      averageHoursPerRecord: summaryData.length > 0 ? 
+        (summaryData.reduce((sum, record) => sum + (record.total_hours || 0), 0) / summaryData.length) : 0,
+      departmentBreakdown: {}
+    }
+    
+    // Calculate department breakdown
+    summaryData.forEach(record => {
+      const dept = record.department || 'Unknown'
+      if (!statistics.departmentBreakdown[dept]) {
+        statistics.departmentBreakdown[dept] = {
+          employeeCount: 0,
+          totalHours: 0,
+          overtimeHours: 0
+        }
+      }
+      statistics.departmentBreakdown[dept].employeeCount++
+      statistics.departmentBreakdown[dept].totalHours += record.total_hours || 0
+      statistics.departmentBreakdown[dept].overtimeHours += record.overtime_hours || 0
+    })
     
     return {
       success: true,
       data: {
-        basicAttendance: basicAttendance,
-        detailedStatistics: statistics,
-        comparisonData: {
-          basicTotalHours: basicAttendance.reduce((sum, record) => 
-            sum + (record.regular_hours || 0) + (record.overtime_hours || 0), 0),
-          statisticsTotalHours: statistics.dailyTotals.totalHours,
-          sessionsCount: statistics.sessionsCount,
-          hasDiscrepancy: Math.abs(
-            basicAttendance.reduce((sum, record) => sum + (record.regular_hours || 0) + (record.overtime_hours || 0), 0) - 
-            statistics.dailyTotals.totalHours
-          ) > 0.01 // Allow for small floating point differences
+        summaryRecords: summaryData,
+        statistics: statistics,
+        dateRange: {
+          startDate: actualStartDate,
+          endDate: actualEndDate
+        },
+        filters: {
+          employeeUid: employeeUid,
+          includeIncomplete: includeIncomplete
         }
       }
     }
     
   } catch (error) {
-    console.error("Error getting detailed employee statistics:", error)
+    console.error("Error getting daily attendance summary:", error)
     return { success: false, error: error.message }
   }
 }
 
-// ENHANCED: New function to generate comprehensive attendance reports with statistics
-async function generateAttendanceReport(event, { startDate, endDate, includeStatistics = true, employeeUids = [] }) {
+// ENHANCED: New function to rebuild attendance summaries
+async function rebuildAttendanceSummaries(event, { startDate, endDate }) {
+  try {
+    console.log(`Rebuilding attendance summaries from ${startDate} to ${endDate}`)
+    
+    const db = getDatabase()
+    const result = rebuildDailyAttendanceSummary(startDate, endDate, db)
+    
+    // Broadcast update about the rebuild
+    broadcastUpdate("system_update", {
+      type: "summary_rebuild",
+      startDate: startDate,
+      endDate: endDate,
+      result: result
+    })
+    
+    return {
+      success: true,
+      data: {
+        message: `Successfully rebuilt ${result.successCount} attendance summaries`,
+        details: result,
+        dateRange: { startDate, endDate }
+      }
+    }
+    
+  } catch (error) {
+    console.error("Error rebuilding attendance summaries:", error)
+    return { success: false, error: error.message }
+  }
+}
+
+// ENHANCED: Function to get readable attendance data for specific employee
+async function getEmployeeReadableAttendance(event, { employeeUid, startDate, endDate }) {
   try {
     const db = getDatabase()
     
-    console.log(`Generating attendance report from ${startDate} to ${endDate}`)
-    console.log(`Include statistics: ${includeStatistics}`)
-    console.log(`Employee UIDs filter: ${employeeUids.length > 0 ? employeeUids.join(', ') : 'All employees'}`)
-    
     // Get basic attendance data
-    let attendance = Attendance.getAttendanceByDateRange(startDate, endDate)
+    const attendance = Attendance.getEmployeeAttendance(employeeUid, startDate, endDate)
     
-    // Filter by employee UIDs if specified
-    if (employeeUids.length > 0) {
-      attendance = attendance.filter(record => employeeUids.includes(record.employee_uid))
+    // Get daily summary data for the same period
+    const summaryData = getDailyAttendanceSummary(startDate, endDate, employeeUid, db)
+    
+    // Get employee info
+    const employee = Employee.findById(employeeUid)
+    
+    if (!employee) {
+      return { success: false, error: "Employee not found" }
     }
     
-    // Enhance attendance data with session information
+    // Combine data for comprehensive view
     const enhancedAttendance = attendance.map(record => ({
       ...record,
       sessionType: getSessionType(record.clock_type),
@@ -415,127 +487,55 @@ async function generateAttendanceReport(event, { startDate, endDate, includeStat
       totalHours: (record.regular_hours || 0) + (record.overtime_hours || 0),
     }))
 
-    let reportData = {
-      dateRange: { startDate, endDate },
-      totalRecords: enhancedAttendance.length,
-      attendance: enhancedAttendance,
-      summary: {
-        totalRegularHours: enhancedAttendance.reduce((sum, record) => sum + (record.regular_hours || 0), 0),
-        totalOvertimeHours: enhancedAttendance.reduce((sum, record) => sum + (record.overtime_hours || 0), 0),
-        uniqueEmployees: new Set(enhancedAttendance.map(record => record.employee_uid)).size,
-        uniqueDates: new Set(enhancedAttendance.map(record => record.date)).size,
-        sessionBreakdown: {
-          morning: enhancedAttendance.filter(record => record.clock_type?.startsWith("morning")).length,
-          afternoon: enhancedAttendance.filter(record => record.clock_type?.startsWith("afternoon")).length,
-          evening: enhancedAttendance.filter(record => record.clock_type?.startsWith("evening")).length,
-          overtime: enhancedAttendance.filter(record => record.clock_type?.startsWith("overtime")).length,
+    // Calculate summary
+    const summary = {
+      totalRegularHours: enhancedAttendance.reduce((sum, record) => sum + (record.regular_hours || 0), 0),
+      totalOvertimeHours: enhancedAttendance.reduce((sum, record) => sum + (record.overtime_hours || 0), 0),
+      totalDays: enhancedAttendance.length > 0 ? new Set(enhancedAttendance.map(record => record.date)).size : 0,
+      eveningSessions: enhancedAttendance.filter(record => record.clock_type?.startsWith("evening")).length,
+      overtimeSessions: enhancedAttendance.filter(record => isOvertimeSession(record.clock_type)).length,
+    }
+    summary.totalHours = summary.totalRegularHours + summary.totalOvertimeHours
+
+    const currentStatus = await getEmployeeStatus(employeeUid)
+
+    return { 
+      success: true, 
+      data: {
+        employee: employee,
+        attendance: enhancedAttendance,
+        dailySummaries: summaryData,
+        summary: summary,
+        currentStatus: currentStatus.success ? currentStatus.data : null,
+        readableData: {
+          totalWorkingDays: summaryData.length,
+          averageHoursPerDay: summaryData.length > 0 ? 
+            (summaryData.reduce((sum, record) => sum + (record.total_hours || 0), 0) / summaryData.length) : 0,
+          daysWithOvertime: summaryData.filter(record => record.has_overtime).length,
+          incompleteDays: summaryData.filter(record => record.is_incomplete).length,
+          lateDays: summaryData.filter(record => record.has_late_entry).length
         }
       }
     }
-
-    // Add detailed statistics if requested
-    if (includeStatistics) {
-      console.log('Including detailed statistics in report...')
-      
-      // Get all unique employee-date combinations that have statistics
-      const statsQuery = db.prepare(`
-        SELECT DISTINCT employee_uid, date, COUNT(*) as session_count
-        FROM attendance_statistics 
-        WHERE date BETWEEN ? AND ?
-        ${employeeUids.length > 0 ? `AND employee_uid IN (${employeeUids.map(() => '?').join(',')})` : ''}
-        GROUP BY employee_uid, date
-        ORDER BY employee_uid, date
-      `)
-      
-      const params = [startDate, endDate, ...employeeUids]
-      const statisticsAvailable = statsQuery.all(...params)
-      
-      console.log(`Found statistics for ${statisticsAvailable.length} employee-date combinations`)
-      
-      // Get detailed statistics for each combination
-      const detailedStatistics = []
-      for (const statRecord of statisticsAvailable) {
-        const empStats = getEmployeeStatistics(statRecord.employee_uid, statRecord.date, db)
-        if (empStats) {
-          detailedStatistics.push(empStats)
-        }
-      }
-      
-      reportData.statisticsData = {
-        available: statisticsAvailable.length > 0,
-        employeeDateCombinations: statisticsAvailable.length,
-        totalStatisticsRecords: statisticsAvailable.reduce((sum, record) => sum + record.session_count, 0),
-        detailedStatistics: detailedStatistics,
-        aggregatedStatistics: calculateAggregatedStatistics(detailedStatistics)
-      }
-    }
-
-    return {
-      success: true,
-      data: reportData
-    }
-    
   } catch (error) {
-    console.error("Error generating attendance report:", error)
+    console.error("Error getting employee readable attendance:", error)
     return { success: false, error: error.message }
   }
 }
 
-// Helper function to calculate aggregated statistics across multiple employees/dates
-function calculateAggregatedStatistics(detailedStatistics) {
-  if (detailedStatistics.length === 0) {
-    return null
-  }
-
-  const aggregated = {
-    totalEmployees: new Set(detailedStatistics.map(stat => stat.employee.uid)).size,
-    totalDates: new Set(detailedStatistics.map(stat => stat.date)).size,
-    totalSessions: detailedStatistics.reduce((sum, stat) => sum + stat.dailyTotals.sessionsCount, 0),
-    totalRegularHours: detailedStatistics.reduce((sum, stat) => sum + stat.dailyTotals.totalRegularHours, 0),
-    totalOvertimeHours: detailedStatistics.reduce((sum, stat) => sum + stat.dailyTotals.totalOvertimeHours, 0),
-    specialRules: {
-      earlyMorningRuleApplications: 0,
-      overnightShifts: 0,
-      gracePeriodApplications: 0
-    },
-    sessionTypeBreakdown: {
-      morning: 0,
-      afternoon: 0,
-      evening: 0,
-      overtime: 0
-    }
-  }
-
-  // Count special rule applications and session types
-  detailedStatistics.forEach(empStat => {
-    empStat.sessions.forEach(session => {
-      if (session.early_morning_rule_applied) aggregated.specialRules.earlyMorningRuleApplications++
-      if (session.overnight_shift) aggregated.specialRules.overnightShifts++
-      if (session.grace_period_applied) aggregated.specialRules.gracePeriodApplications++
-      
-      // Count session types
-      if (session.session_type === 'morning') aggregated.sessionTypeBreakdown.morning++
-      else if (session.session_type === 'afternoon') aggregated.sessionTypeBreakdown.afternoon++
-      else if (session.session_type === 'evening') aggregated.sessionTypeBreakdown.evening++
-      else if (session.session_type === 'overtime') aggregated.sessionTypeBreakdown.overtime++
-    })
-  })
-
-  aggregated.totalHours = aggregated.totalRegularHours + aggregated.totalOvertimeHours
-
-  return aggregated
-}
-
-// ENHANCED: Updated function to include statistics information
+// ENHANCED: Updated getTodayAttendance with daily summary information
 async function getTodayAttendance() {
   try {
     const attendance = Attendance.getTodayAttendance()
     const currentlyClocked = Attendance.getCurrentlyClocked()
     const stats = Attendance.getTodayStatistics()
     const db = getDatabase()
-
-    // Check how many attendance records have corresponding statistics
     const today = dateService.getCurrentDate()
+
+    // Get today's daily summaries
+    const todaySummaries = getDailyAttendanceSummary(today, today, null, db)
+
+    // Check statistics data
     const statsCountQuery = db.prepare(`
       SELECT COUNT(DISTINCT employee_uid) as employees_with_stats,
              COUNT(*) as total_stat_records
@@ -570,6 +570,7 @@ async function getTodayAttendance() {
       data: {
         attendance: enhancedAttendance,
         currentlyClocked: enhancedCurrentlyClocked,
+        dailySummaries: todaySummaries,
         statistics: {
           ...stats,
           overtimeEmployees: enhancedCurrentlyClocked.filter(record => 
@@ -581,11 +582,17 @@ async function getTodayAttendance() {
           pendingClockOuts: enhancedCurrentlyClocked.filter(record =>
             record.hasPendingClockOut
           ).length,
-          // ENHANCED: Add statistics tracking info
           statisticsData: {
             employeesWithDetailedStats: statsCount.employees_with_stats || 0,
             totalDetailedStatRecords: statsCount.total_stat_records || 0,
             statisticsAvailable: (statsCount.total_stat_records || 0) > 0
+          },
+          dailySummaryData: {
+            totalSummaryRecords: todaySummaries.length,
+            completedSummaries: todaySummaries.filter(record => !record.is_incomplete).length,
+            incompleteSummaries: todaySummaries.filter(record => record.is_incomplete).length,
+            overtimeSummaries: todaySummaries.filter(record => record.has_overtime).length,
+            totalHoursFromSummaries: todaySummaries.reduce((sum, record) => sum + (record.total_hours || 0), 0)
           }
         },
       },
@@ -596,7 +603,145 @@ async function getTodayAttendance() {
   }
 }
 
-// Keep existing helper functions
+// ENHANCED: New function to get attendance report with daily summaries
+async function generateAttendanceReportWithSummaries(event, { startDate, endDate, includeStatistics = true, employeeUids = [], format = "detailed" }) {
+  try {
+    const db = getDatabase()
+    
+    console.log(`Generating attendance report with summaries from ${startDate} to ${endDate}`)
+    console.log(`Format: ${format}, Include statistics: ${includeStatistics}`)
+    
+    // Get daily summaries (this is the main readable data)
+    const summaryData = getDailyAttendanceSummary(startDate, endDate, null, db)
+    
+    // Filter by employee UIDs if specified
+    let filteredSummaries = summaryData
+    if (employeeUids.length > 0) {
+      filteredSummaries = summaryData.filter(record => employeeUids.includes(record.employee_uid))
+    }
+    
+    // Get basic attendance data for comparison if requested
+    let attendance = []
+    if (format === "detailed" || includeStatistics) {
+      attendance = Attendance.getAttendanceByDateRange(startDate, endDate)
+      if (employeeUids.length > 0) {
+        attendance = attendance.filter(record => employeeUids.includes(record.employee_uid))
+      }
+    }
+
+    // Calculate comprehensive statistics
+    const summary = {
+      dateRange: { startDate, endDate },
+      totalSummaryRecords: filteredSummaries.length,
+      uniqueEmployees: new Set(filteredSummaries.map(record => record.employee_uid)).size,
+      uniqueDates: new Set(filteredSummaries.map(record => record.date)).size,
+      totalRegularHours: filteredSummaries.reduce((sum, record) => sum + (record.regular_hours || 0), 0),
+      totalOvertimeHours: filteredSummaries.reduce((sum, record) => sum + (record.overtime_hours || 0), 0),
+      totalHours: filteredSummaries.reduce((sum, record) => sum + (record.total_hours || 0), 0),
+      
+      // Status breakdowns
+      statusBreakdown: {
+        completed: filteredSummaries.filter(record => !record.is_incomplete).length,
+        incomplete: filteredSummaries.filter(record => record.is_incomplete).length,
+        withOvertime: filteredSummaries.filter(record => record.has_overtime).length,
+        withEveningSessions: filteredSummaries.filter(record => record.has_evening_session).length,
+        withLateEntries: filteredSummaries.filter(record => record.has_late_entry).length,
+      },
+      
+      // Department breakdown
+      departmentStats: {},
+      
+      // Average calculations
+      averageHoursPerDay: filteredSummaries.length > 0 ? 
+        (filteredSummaries.reduce((sum, record) => sum + (record.total_hours || 0), 0) / filteredSummaries.length) : 0,
+      averageRegularHoursPerDay: filteredSummaries.length > 0 ?
+        (filteredSummaries.reduce((sum, record) => sum + (record.regular_hours || 0), 0) / filteredSummaries.length) : 0,
+      averageOvertimeHoursPerDay: filteredSummaries.length > 0 ?
+        (filteredSummaries.reduce((sum, record) => sum + (record.overtime_hours || 0), 0) / filteredSummaries.length) : 0,
+    }
+    
+    // Calculate department statistics
+    filteredSummaries.forEach(record => {
+      const dept = record.department || 'Unknown'
+      if (!summary.departmentStats[dept]) {
+        summary.departmentStats[dept] = {
+          employeeCount: new Set(),
+          recordCount: 0,
+          totalHours: 0,
+          regularHours: 0,
+          overtimeHours: 0,
+          incompleteCount: 0,
+          overtimeCount: 0
+        }
+      }
+      
+      const deptStats = summary.departmentStats[dept]
+      deptStats.employeeCount.add(record.employee_uid)
+      deptStats.recordCount++
+      deptStats.totalHours += record.total_hours || 0
+      deptStats.regularHours += record.regular_hours || 0
+      deptStats.overtimeHours += record.overtime_hours || 0
+      if (record.is_incomplete) deptStats.incompleteCount++
+      if (record.has_overtime) deptStats.overtimeCount++
+    })
+    
+    // Convert Sets to counts
+    Object.keys(summary.departmentStats).forEach(dept => {
+      summary.departmentStats[dept].employeeCount = summary.departmentStats[dept].employeeCount.size
+    })
+
+    let reportData = {
+      summary: summary,
+      readableSummaries: filteredSummaries,
+      format: format,
+      filters: { employeeUids, includeStatistics }
+    }
+
+    // Add detailed attendance data if requested
+    if (format === "detailed") {
+      const enhancedAttendance = attendance.map(record => ({
+        ...record,
+        sessionType: getSessionType(record.clock_type),
+        isOvertimeSession: isOvertimeSession(record.clock_type),
+        totalHours: (record.regular_hours || 0) + (record.overtime_hours || 0),
+      }))
+      
+      reportData.detailedAttendance = enhancedAttendance
+    }
+
+    // Add statistics if requested
+    if (includeStatistics) {
+      const statsQuery = db.prepare(`
+        SELECT DISTINCT employee_uid, date, COUNT(*) as session_count
+        FROM attendance_statistics 
+        WHERE date BETWEEN ? AND ?
+        ${employeeUids.length > 0 ? `AND employee_uid IN (${employeeUids.map(() => '?').join(',')})` : ''}
+        GROUP BY employee_uid, date
+        ORDER BY employee_uid, date
+      `)
+      
+      const params = [startDate, endDate, ...employeeUids]
+      const statisticsAvailable = statsQuery.all(...params)
+      
+      reportData.statisticsData = {
+        available: statisticsAvailable.length > 0,
+        employeeDateCombinations: statisticsAvailable.length,
+        totalStatisticsRecords: statisticsAvailable.reduce((sum, record) => sum + record.session_count, 0),
+      }
+    }
+
+    return {
+      success: true,
+      data: reportData
+    }
+    
+  } catch (error) {
+    console.error("Error generating attendance report with summaries:", error)
+    return { success: false, error: error.message }
+  }
+}
+
+// Keep existing helper functions and other functions...
 async function getServerUrl() {
   try {
     const settingsResult = await settingsRoutes.getSettings()
@@ -627,7 +772,7 @@ function isOvertimeSession(clockType) {
   return clockType.startsWith("evening") || clockType.startsWith("overtime")
 }
 
-// Keep existing functions...
+// Keep other existing functions...
 async function getEmployeeStatus(employeeUid) {
   try {
     const db = getDatabase()
@@ -675,44 +820,16 @@ async function getEmployeeStatus(employeeUid) {
   }
 }
 
-// Keep other existing functions unchanged...
 async function getEmployeeAttendance(event, { employeeUid, startDate, endDate }) {
   try {
-    const attendance = Attendance.getEmployeeAttendance(employeeUid, startDate, endDate)
-    
-    const enhancedAttendance = attendance.map(record => ({
-      ...record,
-      sessionType: getSessionType(record.clock_type),
-      isOvertimeSession: isOvertimeSession(record.clock_type),
-      totalHours: (record.regular_hours || 0) + (record.overtime_hours || 0),
-    }))
-
-    const summary = {
-      totalRegularHours: enhancedAttendance.reduce((sum, record) => sum + (record.regular_hours || 0), 0),
-      totalOvertimeHours: enhancedAttendance.reduce((sum, record) => sum + (record.overtime_hours || 0), 0),
-      totalDays: enhancedAttendance.length > 0 ? new Set(enhancedAttendance.map(record => record.date)).size : 0,
-      eveningSessions: enhancedAttendance.filter(record => record.clock_type?.startsWith("evening")).length,
-      overtimeSessions: enhancedAttendance.filter(record => isOvertimeSession(record.clock_type)).length,
-    }
-
-    summary.totalHours = summary.totalRegularHours + summary.totalOvertimeHours
-
-    const currentStatus = await getEmployeeStatus(employeeUid)
-
-    return { 
-      success: true, 
-      data: {
-        attendance: enhancedAttendance,
-        summary: summary,
-        currentStatus: currentStatus.success ? currentStatus.data : null
-      }
-    }
+    return await getEmployeeReadableAttendance(event, { employeeUid, startDate, endDate })
   } catch (error) {
     console.error("Error getting employee attendance:", error)
     return { success: false, error: error.message }
   }
 }
 
+// Keep other existing functions unchanged...
 async function getTodayStatistics() {
   try {
     const stats = Attendance.getTodayStatistics()
@@ -813,6 +930,49 @@ async function getOvertimeSummary(event, { startDate, endDate }) {
   }
 }
 
+// Enhanced function exports
+async function getEmployeeDetailedStatistics(event, { employeeUid, date = null }) {
+  try {
+    const db = getDatabase()
+    const targetDate = date || dateService.getCurrentDate()
+    
+    console.log(`Getting detailed statistics for employee ${employeeUid} on ${targetDate}`)
+    
+    const statistics = getEmployeeStatistics(employeeUid, targetDate, db)
+    
+    if (!statistics) {
+      return {
+        success: false,
+        error: "No statistics found for the specified employee and date"
+      }
+    }
+
+    const basicAttendance = Attendance.getEmployeeAttendance(employeeUid, targetDate, targetDate)
+    
+    return {
+      success: true,
+      data: {
+        basicAttendance: basicAttendance,
+        detailedStatistics: statistics,
+        comparisonData: {
+          basicTotalHours: basicAttendance.reduce((sum, record) => 
+            sum + (record.regular_hours || 0) + (record.overtime_hours || 0), 0),
+          statisticsTotalHours: statistics.dailyTotals.totalHours,
+          sessionsCount: statistics.sessionsCount,
+          hasDiscrepancy: Math.abs(
+            basicAttendance.reduce((sum, record) => sum + (record.regular_hours || 0) + (record.overtime_hours || 0), 0) - 
+            statistics.dailyTotals.totalHours
+          ) > 0.01
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error("Error getting detailed employee statistics:", error)
+    return { success: false, error: error.message }
+  }
+}
+
 module.exports = {
   clockAttendance,
   getTodayAttendance,
@@ -820,7 +980,11 @@ module.exports = {
   getTodayStatistics,
   getOvertimeSummary,
   getEmployeeStatus,
-  // ENHANCED: New functions for detailed statistics and reporting
   getEmployeeDetailedStatistics,
-  generateAttendanceReport,
+  
+  // ENHANCED: New functions for daily summary functionality
+  getDailyAttendanceSummaryData,
+  rebuildAttendanceSummaries,
+  getEmployeeReadableAttendance,
+  generateAttendanceReportWithSummaries,
 }

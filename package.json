@@ -30,8 +30,11 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "node-fetch": "^2.6.7",
+    "services": "^0.0.3",
     "ws": "^8.14.2",
-    "yauzl": "^3.2.0"
+    "xlsx": "^0.18.5",
+    "yauzl": "^3.2.0",
+    "zod": "^3.25.67"
   },
   "build": {
     "appId": "com.jjc.attendance-system",

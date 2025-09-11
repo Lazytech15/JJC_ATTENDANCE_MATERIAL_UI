@@ -1,3 +1,4 @@
+// Import SheetJS library
 class AttendanceApp {
   constructor() {
     this.ws = null
@@ -10,18 +11,25 @@ class AttendanceApp {
       enabled: true,
       interval: 5 * 60 * 1000, // Default 5 minutes
       retryAttempts: 3,
-      retryDelay: 30000 // 30 seconds
+      retryDelay: 30000, // 30 seconds
     }
     this.electronAPI = window.electronAPI // Use the exposed API
-    
+
     // Duplicate prevention tracking
     this.lastScanData = {
       input: null,
       timestamp: 0,
-      duplicatePreventionWindow: 60000 // 1 minute
+      duplicatePreventionWindow: 60000, // 1 minute
     }
-    
+
     this.init()
+
+    this.currentDateRange = {
+      startDate: null,
+      endDate: null
+    }
+    this.summaryData = []
+    this.initializeDateRangeControls()
   }
 
   async init() {
@@ -42,12 +50,12 @@ class AttendanceApp {
       const result = await this.electronAPI.getSettings()
       if (result.success && result.data) {
         // Update sync interval from settings
-        const syncInterval = parseInt(result.data.sync_interval) || (5 * 60 * 1000)
+        const syncInterval = Number.parseInt(result.data.sync_interval) || 5 * 60 * 1000
         this.syncSettings.interval = syncInterval
-        console.log('Loaded sync settings - interval:', syncInterval, 'ms')
+        console.log("Loaded sync settings - interval:", syncInterval, "ms")
       }
     } catch (error) {
-      console.error('Error loading sync settings:', error)
+      console.error("Error loading sync settings:", error)
     }
   }
 
@@ -55,13 +63,15 @@ class AttendanceApp {
   isDuplicateScan(input) {
     const currentTime = Date.now()
     const timeDifference = currentTime - this.lastScanData.timestamp
-    
+
     // Check if the same input was scanned within the prevention window
     if (this.lastScanData.input === input && timeDifference < this.lastScanData.duplicatePreventionWindow) {
-      console.log(`Duplicate scan detected: "${input}" scanned ${timeDifference}ms ago (within ${this.lastScanData.duplicatePreventionWindow}ms window)`)
+      console.log(
+        `Duplicate scan detected: "${input}" scanned ${timeDifference}ms ago (within ${this.lastScanData.duplicatePreventionWindow}ms window)`,
+      )
       return true
     }
-    
+
     return false
   }
 
@@ -79,8 +89,8 @@ class AttendanceApp {
 
     if (!this.syncSettings.enabled) return
 
-    console.log('Starting auto-sync with interval:', this.syncSettings.interval, 'ms')
-    
+    console.log("Starting auto-sync with interval:", this.syncSettings.interval, "ms")
+
     this.autoSyncInterval = setInterval(() => {
       this.performAttendanceSync(true) // Silent sync
     }, this.syncSettings.interval)
@@ -96,7 +106,7 @@ class AttendanceApp {
     if (this.autoSyncInterval) {
       clearInterval(this.autoSyncInterval)
       this.autoSyncInterval = null
-      console.log('Auto-sync stopped')
+      console.log("Auto-sync stopped")
     }
   }
 
@@ -104,65 +114,72 @@ class AttendanceApp {
   async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
     if (!this.electronAPI) {
       if (!silent) {
-        this.showStatus('Demo mode: Sync simulated successfully!', 'success')
+        this.showStatus("Demo mode: Sync simulated successfully!", "success")
       }
-      return { success: true, message: 'Demo sync' }
+      return { success: true, message: "Demo sync" }
     }
 
     try {
       // First check if there are records to sync
       const countResult = await this.electronAPI.getUnsyncedAttendanceCount()
-      
+
       if (!countResult.success || countResult.count === 0) {
         if (!silent) {
-          this.showStatus('No attendance records to sync', 'info')
+          this.showStatus("No attendance records to sync", "info")
         }
-        return { success: true, message: 'No records to sync' }
+        return { success: true, message: "No records to sync" }
       }
 
       // Show download toast for initial sync or when explicitly requested
       if (showDownloadToast || (!silent && retryCount === 0)) {
-        this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, 'info')
+        this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, "info")
       } else if (!silent) {
-        this.showStatus(`Syncing ${countResult.count} attendance records...`, 'info')
+        this.showStatus(`Syncing ${countResult.count} attendance records...`, "info")
       }
 
       // Perform the sync
       const syncResult = await this.electronAPI.syncAttendanceToServer()
-      
+
       if (syncResult.success) {
         if (showDownloadToast || !silent) {
-          this.showDownloadToast('✅ Attendance data uploaded successfully!', 'success')
+          this.showDownloadToast("✅ Attendance data uploaded successfully!", "success")
         }
-        console.log('Attendance sync successful:', syncResult.message)
-        
+        console.log("Attendance sync successful:", syncResult.message)
+
         // Update sync info display if settings modal is open
-        if (document.getElementById('settingsModal').classList.contains('show')) {
+        if (document.getElementById("settingsModal").classList.contains("show")) {
           await this.loadSyncInfo()
         }
-        
+
         return syncResult
       } else {
         throw new Error(syncResult.message)
       }
-      
     } catch (error) {
-      console.error('Attendance sync error:', error)
-      
+      console.error("Attendance sync error:", error)
+
       // Retry logic
       if (retryCount < this.syncSettings.retryAttempts) {
-        console.log(`Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`)
-        
+        console.log(
+          `Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+        )
+
         setTimeout(() => {
           this.performAttendanceSync(silent, retryCount + 1, showDownloadToast)
         }, this.syncSettings.retryDelay)
-        
+
         if (showDownloadToast || !silent) {
-          this.showDownloadToast(`⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`, 'warning')
+          this.showDownloadToast(
+            `⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+            "warning",
+          )
         }
       } else {
         if (showDownloadToast || !silent) {
-          this.showDownloadToast(`❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`, 'error')
+          this.showDownloadToast(
+            `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+            "error",
+          )
         }
         return { success: false, message: error.message }
       }
@@ -171,16 +188,16 @@ class AttendanceApp {
 
   // Enhanced save and sync functionality with download toasts
   async saveAndSync() {
-    const syncNowBtn = document.getElementById('syncNowBtn')
+    const syncNowBtn = document.getElementById("syncNowBtn")
     const originalText = syncNowBtn.textContent
-    
+
     // Show loading state
-    syncNowBtn.textContent = '💾 Saving & Syncing...'
+    syncNowBtn.textContent = "💾 Saving & Syncing..."
     syncNowBtn.disabled = true
-    
+
     if (!this.electronAPI) {
-      this.showSettingsStatus('Demo mode: Settings saved and sync completed successfully!', 'success')
-      this.showDownloadToast('📊 Demo: Employee data downloaded successfully!', 'success')
+      this.showSettingsStatus("Demo mode: Settings saved and sync completed successfully!", "success")
+      this.showDownloadToast("📊 Demo: Employee data downloaded successfully!", "success")
       await this.loadSyncInfo()
       syncNowBtn.textContent = originalText
       syncNowBtn.disabled = false
@@ -189,88 +206,87 @@ class AttendanceApp {
 
     try {
       // First, save the settings
-      const settingsForm = document.getElementById('settingsForm')
+      const settingsForm = document.getElementById("settingsForm")
       if (!settingsForm) {
-        throw new Error('Settings form not found')
+        throw new Error("Settings form not found")
       }
 
       const formData = new FormData(settingsForm)
-      
+
       // Get server URL with proper null checking
-      const serverUrlInput = formData.get('serverUrl') || document.getElementById('serverUrl')?.value
+      const serverUrlInput = formData.get("serverUrl") || document.getElementById("serverUrl")?.value
       if (!serverUrlInput) {
-        this.showSettingsStatus('Server URL is required', 'error')
+        this.showSettingsStatus("Server URL is required", "error")
         return
       }
 
       // Clean the base URL and ensure it doesn't already have the API endpoint
-      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, '') // Remove trailing slash
-      if (baseUrl.endsWith('/api/tables/emp_list/data')) {
-        baseUrl = baseUrl.replace('/api/tables/emp_list/data', '')
+      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, "") // Remove trailing slash
+      if (baseUrl.endsWith("/api/tables/emp_list/data")) {
+        baseUrl = baseUrl.replace("/api/tables/emp_list/data", "")
       }
-      
+
       const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`
-      
+
       // Get other form values with fallbacks
-      const syncIntervalInput = formData.get('syncInterval') || document.getElementById('syncInterval')?.value || '5'
-      const gracePeriodInput = formData.get('gracePeriod') || document.getElementById('gracePeriod')?.value || '5'
-      
+      const syncIntervalInput = formData.get("syncInterval") || document.getElementById("syncInterval")?.value || "5"
+      const gracePeriodInput = formData.get("gracePeriod") || document.getElementById("gracePeriod")?.value || "5"
+
       const settings = {
         server_url: fullServerUrl,
-        sync_interval: (parseInt(syncIntervalInput) * 60000).toString(),
-        grace_period: gracePeriodInput
+        sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
+        grace_period: gracePeriodInput,
       }
 
-      console.log('Saving settings:', settings) // Debug log
+      console.log("Saving settings:", settings) // Debug log
 
       const saveResult = await this.electronAPI.updateSettings(settings)
-      
+
       if (!saveResult.success) {
-        this.showSettingsStatus(saveResult.error || 'Error saving settings', 'error')
+        this.showSettingsStatus(saveResult.error || "Error saving settings", "error")
         return
       }
 
       // Update local sync settings
-      this.syncSettings.interval = parseInt(settings.sync_interval)
-      
+      this.syncSettings.interval = Number.parseInt(settings.sync_interval)
+
       // Restart auto-sync with new interval
       this.startAutoSync()
 
       // Update button text and show download toast for employee sync phase
-      syncNowBtn.textContent = '📥 Downloading Employees...'
-      this.showDownloadToast('🔄 Connecting to server and downloading employee data...', 'info')
+      syncNowBtn.textContent = "📥 Downloading Employees..."
+      this.showDownloadToast("🔄 Connecting to server and downloading employee data...", "info")
 
       // Then sync the employees
       const employeeSyncResult = await this.electronAPI.syncEmployees()
-      
+
       if (!employeeSyncResult.success) {
-        this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, 'warning')
-        this.showDownloadToast('❌ Failed to download employee data from server', 'error')
+        this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, "warning")
+        this.showDownloadToast("❌ Failed to download employee data from server", "error")
         return
       }
 
       // Show success toast for employee download
-      this.showDownloadToast('✅ Employee data downloaded successfully!', 'success')
+      this.showDownloadToast("✅ Employee data downloaded successfully!", "success")
 
       // Update button text to show attendance sync phase
-      syncNowBtn.textContent = '📊 Uploading Attendance...'
+      syncNowBtn.textContent = "📊 Uploading Attendance..."
 
       // Finally sync attendance with download toast
       const attendanceSyncResult = await this.performAttendanceSync(false, 0, true)
-      
+
       if (attendanceSyncResult && attendanceSyncResult.success) {
-        this.showSettingsStatus('Settings saved and all data synced successfully!', 'success')
+        this.showSettingsStatus("Settings saved and all data synced successfully!", "success")
         await this.loadSyncInfo()
         // Also refresh the main attendance data
         await this.loadTodayAttendance()
       } else {
-        this.showSettingsStatus('Settings saved, employees synced, but attendance sync had issues', 'warning')
+        this.showSettingsStatus("Settings saved, employees synced, but attendance sync had issues", "warning")
       }
-      
     } catch (error) {
-      console.error('Save and sync error:', error)
-      this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, 'error')
-      this.showDownloadToast('❌ Connection to server failed', 'error')
+      console.error("Save and sync error:", error)
+      this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, "error")
+      this.showDownloadToast("❌ Connection to server failed", "error")
     } finally {
       syncNowBtn.textContent = originalText
       syncNowBtn.disabled = false
@@ -278,14 +294,14 @@ class AttendanceApp {
   }
 
   // New method for download-specific toast messages
-  showDownloadToast(message, type = 'info') {
+  showDownloadToast(message, type = "info") {
     // Create or get download-specific toast element
-    let downloadToast = document.getElementById('downloadToast')
-    
+    let downloadToast = document.getElementById("downloadToast")
+
     if (!downloadToast) {
-      downloadToast = document.createElement('div')
-      downloadToast.id = 'downloadToast'
-      downloadToast.className = 'download-toast'
+      downloadToast = document.createElement("div")
+      downloadToast.id = "downloadToast"
+      downloadToast.className = "download-toast"
       document.body.appendChild(downloadToast)
     }
 
@@ -298,9 +314,9 @@ class AttendanceApp {
     }
 
     // Auto-hide after appropriate duration based on type
-    const duration = type === 'error' ? 6000 : type === 'warning' ? 5000 : 4000
+    const duration = type === "error" ? 6000 : type === "warning" ? 5000 : 4000
     downloadToast.hideTimeout = setTimeout(() => {
-      downloadToast.classList.remove('show')
+      downloadToast.classList.remove("show")
     }, duration)
   }
 
@@ -315,26 +331,26 @@ class AttendanceApp {
     const settingsForm = document.getElementById("settingsForm")
     const syncNowBtn = document.getElementById("syncNowBtn")
 
-    let canScan = true;
+    let canScan = true
 
     barcodeInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
-        e.preventDefault();
+        e.preventDefault()
 
         if (canScan) {
-          canScan = false; 
-          this.handleScan(); 
+          canScan = false
+          this.handleScan()
 
           setTimeout(() => {
-            canScan = true;
-          }, 1500);
+            canScan = true
+          }, 1500)
         }
       }
-    });
+    })
 
     barcodeInput.addEventListener("input", (e) => {
       const inputType = document.querySelector('input[name="inputType"]:checked').value
-      
+
       // Clear any existing timeout
       if (this.barcodeTimeout) {
         clearTimeout(this.barcodeTimeout)
@@ -343,7 +359,7 @@ class AttendanceApp {
       if (inputType === "barcode") {
         this.barcodeTimeout = setTimeout(() => {
           const currentValue = e.target.value.trim()
-          if (currentValue.length >= 8) { 
+          if (currentValue.length >= 8) {
             this.handleScan()
           }
         }, 2000)
@@ -353,14 +369,14 @@ class AttendanceApp {
     // Handle paste events (some barcode scanners simulate paste)
     barcodeInput.addEventListener("paste", (e) => {
       const inputType = document.querySelector('input[name="inputType"]:checked').value
-      
+
       if (inputType === "barcode") {
         setTimeout(() => {
           const pastedValue = e.target.value.trim()
           if (pastedValue.length >= 8) {
             this.handleScan()
           }
-        },2000)
+        }, 2000)
       }
     })
 
@@ -399,7 +415,7 @@ class AttendanceApp {
     })
 
     // Add manual attendance sync button functionality
-    const syncAttendanceBtn = document.getElementById('syncAttendanceBtn')
+    const syncAttendanceBtn = document.getElementById("syncAttendanceBtn")
     if (syncAttendanceBtn) {
       syncAttendanceBtn.addEventListener("click", () => {
         this.performAttendanceSync(false, 0, true) // Not silent, with download toast
@@ -415,7 +431,7 @@ class AttendanceApp {
 
     // Handle input type changes
     const inputTypeRadios = document.querySelectorAll('input[name="inputType"]')
-    inputTypeRadios.forEach(radio => {
+    inputTypeRadios.forEach((radio) => {
       radio.addEventListener("change", () => {
         this.focusInput()
         // Clear any pending timeouts when switching input types
@@ -432,26 +448,31 @@ class AttendanceApp {
         this.performAttendanceSync(false, 0, true) // Show download toast
       })
     }
+
+    const downloadBtn = document.getElementById("downloadExcelBtn")
+    if (downloadBtn) {
+      downloadBtn.addEventListener("click", () => this.downloadExcel())
+    }
   }
 
   // Enhanced sync employees with download toast
   async syncEmployees() {
     try {
       // Show download toast when syncing employees
-      this.showDownloadToast('📥 Downloading employee data from server...', 'info')
-      
+      this.showDownloadToast("📥 Downloading employee data from server...", "info")
+
       const result = await this.electronAPI.syncEmployees()
 
       if (result.success) {
-        this.showDownloadToast('✅ Employee data downloaded successfully!', 'success')
+        this.showDownloadToast("✅ Employee data downloaded successfully!", "success")
         this.showStatus(result.message, "success")
       } else {
-        this.showDownloadToast('❌ Failed to download employee data', 'error')
+        this.showDownloadToast("❌ Failed to download employee data", "error")
         console.warn("Sync warning:", result.error)
       }
     } catch (error) {
       console.error("Sync error:", error)
-      this.showDownloadToast('❌ Connection to server failed', 'error')
+      this.showDownloadToast("❌ Connection to server failed", "error")
     }
   }
 
@@ -461,77 +482,107 @@ class AttendanceApp {
     modal.classList.add("show")
     this.loadSettings()
     this.loadSyncInfo()
-    this.loadAttendanceSyncInfo() // Load attendance sync info
+    this.loadAttendanceSyncInfo()
+    this.loadDailySummary()
+    this.initializeSettingsTabs()
   }
 
   closeSettings() {
     const modal = document.getElementById("settingsModal")
     modal.classList.remove("show")
     // Clear any status messages
-    const statusElement = document.getElementById('settingsStatusMessage')
-    statusElement.style.display = 'none'
+    const statusElement = document.getElementById("settingsStatusMessage")
+    statusElement.style.display = "none"
+  }
+
+  initializeSettingsTabs() {
+    const tabs = document.querySelectorAll(".settings-tab")
+    const panels = document.querySelectorAll(".settings-panel")
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        // Remove active class from all tabs and panels
+        tabs.forEach((t) => t.classList.remove("active"))
+        panels.forEach((p) => p.classList.remove("active"))
+
+        // Add active class to clicked tab
+        tab.classList.add("active")
+
+        // Show corresponding panel
+        const targetPanel = document.getElementById(tab.dataset.tab + "Panel")
+        if (targetPanel) {
+          targetPanel.classList.add("active")
+        }
+
+        // Load data for specific tabs
+        if (tab.dataset.tab === "reports") {
+          this.loadDailySummary()
+        } else if (tab.dataset.tab === "sync") {
+          this.loadSyncInfo()
+          this.loadAttendanceSyncInfo()
+        }
+      })
+    })
   }
 
   async loadSettings() {
     if (!this.electronAPI) {
       // Demo values
-      document.getElementById('serverUrl').value = 'URL'
-      document.getElementById('syncInterval').value = '5'
-      document.getElementById('gracePeriod').value = '5'
+      document.getElementById("serverUrl").value = "URL"
+      document.getElementById("syncInterval").value = "5"
+      document.getElementById("gracePeriod").value = "5"
       return
     }
 
     try {
       const result = await this.electronAPI.getSettings()
-      
+
       if (result.success) {
         const settings = result.data
-        
-        document.getElementById('serverUrl').value = settings.server_url || ''
-        document.getElementById('syncInterval').value = Math.floor((settings.sync_interval || 300000) / 60000)
-        document.getElementById('gracePeriod').value = settings.grace_period || 5
+
+        document.getElementById("serverUrl").value = settings.server_url || ""
+        document.getElementById("syncInterval").value = Math.floor((settings.sync_interval || 300000) / 60000)
+        document.getElementById("gracePeriod").value = settings.grace_period || 5
       }
     } catch (error) {
-      console.error('Error loading settings:', error)
-      this.showSettingsStatus('Error loading settings', 'error')
+      console.error("Error loading settings:", error)
+      this.showSettingsStatus("Error loading settings", "error")
     }
   }
 
   async loadSyncInfo() {
     if (!this.electronAPI) {
-      document.getElementById('employeeCount').textContent = 'Employees in database: 25 (Demo)'
-      document.getElementById('lastSync').textContent = 'Last sync: Just now (Demo)'
-      document.getElementById('profileStatus').textContent = 'Profile images: 20/25 downloaded (Demo)'
-      document.getElementById('syncInfo').style.display = 'block'
+      document.getElementById("employeeCount").textContent = "Employees in database: 25 (Demo)"
+      document.getElementById("lastSync").textContent = "Last sync: Just now (Demo)"
+      document.getElementById("profileStatus").textContent = "Profile images: 20/25 downloaded (Demo)"
+      document.getElementById("syncInfo").style.display = "block"
       return
     }
 
     try {
       const employeesResult = await this.electronAPI.getEmployees()
-      
+
       if (employeesResult.success) {
-        document.getElementById('employeeCount').textContent = 
-          `Employees in database: ${employeesResult.data.length}`
-        
+        document.getElementById("employeeCount").textContent = `Employees in database: ${employeesResult.data.length}`
+
         const settingsResult = await this.electronAPI.getSettings()
         if (settingsResult.success && settingsResult.data.last_sync) {
-          const lastSync = new Date(parseInt(settingsResult.data.last_sync))
-          document.getElementById('lastSync').textContent = 
-            `Last sync: ${lastSync.toLocaleString()}`
+          const lastSync = new Date(Number.parseInt(settingsResult.data.last_sync))
+          document.getElementById("lastSync").textContent = `Last sync: ${lastSync.toLocaleString()}`
         } else {
-          document.getElementById('lastSync').textContent = 'Last sync: Never'
+          document.getElementById("lastSync").textContent = "Last sync: Never"
         }
-        
+
         const profileResult = await this.electronAPI.checkProfileImages()
         if (profileResult.success) {
-          document.getElementById('profileStatus').textContent = 
+          document.getElementById("profileStatus").textContent =
             `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`
         }
-        
-        document.getElementById('syncInfo').style.display = 'block'
+
+        document.getElementById("syncInfo").style.display = "block"
       }
     } catch (error) {
-      console.error('Error loading sync info:', error)
+      console.error("Error loading sync info:", error)
     }
   }
 
@@ -539,7 +590,7 @@ class AttendanceApp {
   async loadAttendanceSyncInfo() {
     if (!this.electronAPI) {
       // Demo values
-      const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
+      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo")
       if (attendanceSyncInfo) {
         attendanceSyncInfo.innerHTML = `
           <div class="sync-info-item">
@@ -558,12 +609,12 @@ class AttendanceApp {
 
     try {
       const unsyncedResult = await this.electronAPI.getUnsyncedAttendanceCount()
-      const attendanceSyncInfo = document.getElementById('attendanceSyncInfo')
-      
+      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo")
+
       if (attendanceSyncInfo && unsyncedResult.success) {
         const syncIntervalMinutes = Math.floor(this.syncSettings.interval / 60000)
-        const syncStatus = this.syncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : 'Disabled'
-        
+        const syncStatus = this.syncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : "Disabled"
+
         attendanceSyncInfo.innerHTML = `
           <div class="sync-info-item">
             <strong>Unsynced Records:</strong> ${unsyncedResult.count}
@@ -575,41 +626,41 @@ class AttendanceApp {
             <strong>Next sync:</strong> <span id="nextSyncTime">Calculating...</span>
           </div>
         `
-        
+
         // Update next sync time if auto-sync is enabled
         if (this.syncSettings.enabled && this.autoSyncInterval) {
           this.updateNextSyncTime()
         }
       }
     } catch (error) {
-      console.error('Error loading attendance sync info:', error)
+      console.error("Error loading attendance sync info:", error)
     }
   }
 
   // Update next sync countdown
   updateNextSyncTime() {
     // This is a simplified version - in a real app you might want to track the exact next sync time
-    const nextSyncElement = document.getElementById('nextSyncTime')
+    const nextSyncElement = document.getElementById("nextSyncTime")
     if (nextSyncElement) {
       const minutes = Math.floor(this.syncSettings.interval / 60000)
       nextSyncElement.textContent = `~${minutes} minutes`
     }
   }
 
-  showSettingsStatus(message, type = 'info') {
-    const statusElement = document.getElementById('settingsStatusMessage')
+  showSettingsStatus(message, type = "info") {
+    const statusElement = document.getElementById("settingsStatusMessage")
     statusElement.textContent = message
     statusElement.className = `status-message ${type}`
-    statusElement.style.display = 'block'
-    statusElement.style.position = 'relative'
-    statusElement.style.top = 'auto'
-    statusElement.style.right = 'auto'
-    statusElement.style.transform = 'none'
-    statusElement.style.marginBottom = '16px'
-    statusElement.style.borderRadius = '8px'
-    
+    statusElement.style.display = "block"
+    statusElement.style.position = "relative"
+    statusElement.style.top = "auto"
+    statusElement.style.right = "auto"
+    statusElement.style.transform = "none"
+    statusElement.style.marginBottom = "16px"
+    statusElement.style.borderRadius = "8px"
+
     setTimeout(() => {
-      statusElement.style.display = 'none'
+      statusElement.style.display = "none"
     }, 4000)
   }
 
@@ -707,12 +758,12 @@ class AttendanceApp {
   // Show loading screen to prevent duplicate scans
   showLoadingScreen() {
     // Create loading screen if it doesn't exist
-    let loadingScreen = document.getElementById('loadingScreen')
-    
+    let loadingScreen = document.getElementById("loadingScreen")
+
     if (!loadingScreen) {
-      loadingScreen = document.createElement('div')
-      loadingScreen.id = 'loadingScreen'
-      loadingScreen.className = 'loading-screen'
+      loadingScreen = document.createElement("div")
+      loadingScreen.id = "loadingScreen"
+      loadingScreen.className = "loading-screen"
       loadingScreen.innerHTML = `
         <div class="loading-content">
           <div class="loading-spinner"></div>
@@ -723,20 +774,20 @@ class AttendanceApp {
       document.body.appendChild(loadingScreen)
     }
 
-    loadingScreen.style.display = 'flex'
+    loadingScreen.style.display = "flex"
     // Add fade-in effect
     setTimeout(() => {
-      loadingScreen.classList.add('show')
+      loadingScreen.classList.add("show")
     }, 5)
   }
 
   // Hide loading screen
   hideLoadingScreen() {
-    const loadingScreen = document.getElementById('loadingScreen')
+    const loadingScreen = document.getElementById("loadingScreen")
     if (loadingScreen) {
-      loadingScreen.classList.remove('show')
+      loadingScreen.classList.remove("show")
       setTimeout(() => {
-        loadingScreen.style.display = 'none'
+        loadingScreen.style.display = "none"
       }, 250) // Wait for fade-out animation
     }
   }
@@ -773,7 +824,7 @@ class AttendanceApp {
     const barcodeInput = document.getElementById("barcodeInput")
     const submitButton = document.getElementById("manualSubmit")
     const originalText = submitButton.textContent
-    
+
     barcodeInput.disabled = true
     submitButton.textContent = "Processing..."
     submitButton.disabled = true
@@ -786,22 +837,21 @@ class AttendanceApp {
 
       if (result.success) {
         // Wait for loading screen (0.5 seconds minimum)
-        await new Promise(resolve => setTimeout(resolve, 200))
-        
+        await new Promise((resolve) => setTimeout(resolve, 200))
+
         this.hideLoadingScreen()
         this.showEmployeeDisplay(result.data)
         this.clearInput()
         await this.loadTodayAttendance()
         this.showStatus("Attendance recorded successfully", "success")
-        
+
         // Trigger automatic sync after successful attendance recording
         setTimeout(() => {
           this.performAttendanceSync(true) // Silent sync
         }, 3000)
-        
       } else {
         // Wait for loading screen (2 seconds minimum)
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise((resolve) => setTimeout(resolve, 2000))
         this.hideLoadingScreen()
         this.showStatus(result.error || "Employee not found", "error")
         this.focusInput()
@@ -809,7 +859,7 @@ class AttendanceApp {
     } catch (error) {
       console.error("Clock error:", error)
       // Wait for loading screen (2 seconds minimum)
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
       this.hideLoadingScreen()
       this.showStatus("System error occurred", "error")
       this.focusInput()
@@ -830,7 +880,7 @@ class AttendanceApp {
     imgElement.onload = null
 
     const attemptKey = `${employee_uid}_${imgElement.id}`
-    
+
     // Clean up previous attempts for this element
     this.imageLoadAttempts.delete(attemptKey)
     this.imageLoadAttempts.set(attemptKey, 0)
@@ -838,13 +888,13 @@ class AttendanceApp {
     const fallbackChain = [
       `profiles/${employee_uid}.jpg`,
       `profiles/${employee_uid}.png`,
-      'assets/profile.png',
-      this.getDefaultImageDataURL() // Base64 fallback
+      "assets/profile.png",
+      this.getDefaultImageDataURL(), // Base64 fallback
     ]
 
     const tryNextImage = () => {
       const attempts = this.imageLoadAttempts.get(attemptKey) || 0
-      
+
       if (attempts >= fallbackChain.length) {
         // All fallbacks failed, use default
         imgElement.src = this.getDefaultImageDataURL()
@@ -871,13 +921,13 @@ class AttendanceApp {
       imgElement.src = fallbackChain[attempts]
     }
 
-    imgElement.alt = altText || 'Profile Image'
+    imgElement.alt = altText || "Profile Image"
     tryNextImage()
   }
 
   // Generate a simple default profile image as data URL
   getDefaultImageDataURL() {
-    return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y0ZjRmNCIgcng9IjUwIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIzNSIgcj0iMTUiIGZpbGw9IiNjY2MiLz48cGF0aCBkPSJNMjAgNzVhMzAgMzAgMCAwIDEgNjAgMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg=='
+    return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y0ZjRmNCIgcng9IjUwIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIzNSIgcj0iMTUiIGZpbGw9IiNjY2MiLz48cGF0aCBkPSJNMjAgNzVhMzAgMzAgMCAwIDEgNjAgMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg=="
   }
 
   showEmployeeDisplay(data) {
@@ -892,35 +942,35 @@ class AttendanceApp {
 
     const photo = document.getElementById("employeePhoto")
     photo.style.display = "block"
-    
+
     // Use the improved image loading method
     this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${employee.last_name}`)
 
     // Update clock info with enhanced display
     const clockTypeElement = document.getElementById("clockType")
     clockTypeElement.textContent = this.formatClockType(clockType, sessionType)
-    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${isOvertimeSession ? 'overtime' : ''}`
+    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${isOvertimeSession ? "overtime" : ""}`
 
     document.getElementById("clockTime").textContent = new Date(clockTime).toLocaleTimeString()
 
     // Enhanced hours display
     const hoursInfo = document.getElementById("hoursInfo")
     const totalHours = (regularHours || 0) + (overtimeHours || 0)
-    
+
     if (isOvertimeSession) {
       hoursInfo.innerHTML = `
         <div class="hours-breakdown overtime-session">
           <div class="regular-hours">Regular: ${regularHours || 0}h</div>
           <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
           <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
-          <div class="session-indicator">🌙 ${sessionType || 'Overtime Session'}</div>
+          <div class="session-indicator">🌙 ${sessionType || "Overtime Session"}</div>
         </div>
       `
     } else {
       hoursInfo.innerHTML = `
         <div class="hours-breakdown">
           <div class="regular-hours">Regular: ${regularHours || 0}h</div>
-          <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
+          <div class="overtime-hours">Overtime: ${overtimeHours.toFixed(2)}h</div>
           <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
         </div>
       `
@@ -943,9 +993,9 @@ class AttendanceApp {
   formatClockType(clockType, sessionType) {
     // Use enhanced session type from backend if available
     if (sessionType) {
-      const isIn = clockType.endsWith('_in')
-      const emoji = isIn ? '🟢' : '🔴'
-      const action = isIn ? 'In' : 'Out'
+      const isIn = clockType.endsWith("_in")
+      const emoji = isIn ? "🟢" : "🔴"
+      const action = isIn ? "In" : "Out"
       return `${emoji} ${sessionType} ${action}`
     }
 
@@ -953,7 +1003,7 @@ class AttendanceApp {
     const types = {
       morning_in: "🟢 Morning In",
       morning_out: "🔴 Morning Out",
-      afternoon_in: "🟢 Afternoon In", 
+      afternoon_in: "🟢 Afternoon In",
       afternoon_out: "🔴 Afternoon Out",
       evening_in: "🟢 Evening In (Overtime)",
       evening_out: "🔴 Evening Out (Overtime)",
@@ -970,14 +1020,14 @@ class AttendanceApp {
 
   async loadInitialData() {
     // Show download toast for initial data loading
-    this.showDownloadToast('🔄 Loading initial data...', 'info')
-    
+    this.showDownloadToast("🔄 Loading initial data...", "info")
+
     try {
       await Promise.all([this.loadTodayAttendance(), this.syncEmployees()])
-      this.showDownloadToast('✅ Initial data loaded successfully!', 'success')
+      this.showDownloadToast("✅ Initial data loaded successfully!", "success")
     } catch (error) {
-      console.error('Error loading initial data:', error)
-      this.showDownloadToast('❌ Failed to load initial data', 'error')
+      console.error("Error loading initial data:", error)
+      this.showDownloadToast("❌ Failed to load initial data", "error")
     }
   }
 
@@ -989,9 +1039,332 @@ class AttendanceApp {
         this.updateCurrentlyClocked(result.data.currentlyClocked)
         this.updateTodayActivity(result.data.attendance)
         this.updateStatistics(result.data.statistics)
+        this.loadDailySummary()
       }
     } catch (error) {
       console.error("Error loading attendance:", error)
+    }
+  }
+
+ initializeDateRangeControls() {
+    // Set default end date to today
+    const today = new Date().toISOString().split('T')[0]
+    document.getElementById('endDate').value = today
+    
+    // Set default start date to 7 days ago
+    const weekAgo = new Date()
+    weekAgo.setDate(weekAgo.getDate() - 7)
+    document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0]
+
+    // Add event listeners
+    document.getElementById('applyDateFilter').addEventListener('click', () => this.applyDateFilter())
+    document.getElementById('clearDateFilter').addEventListener('click', () => this.clearDateFilter())
+    
+    // Quick date range buttons
+    document.querySelectorAll('[data-range]').forEach(btn => {
+      btn.addEventListener('click', (e) => this.setQuickDateRange(e.target.dataset.range))
+    })
+
+    // Auto-apply filter when dates change
+    document.getElementById('startDate').addEventListener('change', () => this.applyDateFilter())
+    document.getElementById('endDate').addEventListener('change', () => this.applyDateFilter())
+  }
+
+  setQuickDateRange(range) {
+    const today = new Date()
+    const startDateInput = document.getElementById('startDate')
+    const endDateInput = document.getElementById('endDate')
+    
+    let startDate, endDate = new Date(today)
+
+    switch(range) {
+      case 'today':
+        startDate = new Date(today)
+        break
+      case 'yesterday':
+        startDate = new Date(today)
+        startDate.setDate(today.getDate() - 1)
+        endDate = new Date(startDate)
+        break
+      case 'week':
+        startDate = new Date(today)
+        startDate.setDate(today.getDate() - today.getDay()) // Start of week (Sunday)
+        break
+      case 'month':
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1)
+        break
+      case 'last7':
+        startDate = new Date(today)
+        startDate.setDate(today.getDate() - 6) // Include today
+        break
+      case 'last30':
+        startDate = new Date(today)
+        startDate.setDate(today.getDate() - 29) // Include today
+        break
+      default:
+        return
+    }
+
+    startDateInput.value = startDate.toISOString().split('T')[0]
+    endDateInput.value = endDate.toISOString().split('T')[0]
+    
+    this.applyDateFilter()
+  }
+
+  applyDateFilter() {
+    const startDate = document.getElementById('startDate').value
+    const endDate = document.getElementById('endDate').value
+
+    // Validation
+    if (startDate && endDate && startDate > endDate) {
+      this.showStatus('Start date cannot be after end date', 'error')
+      return
+    }
+
+    this.currentDateRange.startDate = startDate || null
+    this.currentDateRange.endDate = endDate || null
+
+    this.loadDailySummary()
+  }
+
+  clearDateFilter() {
+    document.getElementById('startDate').value = ''
+    document.getElementById('endDate').value = ''
+    this.currentDateRange.startDate = null
+    this.currentDateRange.endDate = null
+    
+    this.loadDailySummary()
+  }
+
+  async loadDailySummary() {
+    try {
+      const result = await this.electronAPI.getDailySummary(
+        this.currentDateRange.startDate,
+        this.currentDateRange.endDate
+      )
+
+      if (result.success) {
+        this.summaryData = result.data
+        this.updateDailySummaryTable(result.data)
+        this.updateSummaryStats(result.data)
+      } else {
+        console.error("Failed to load daily summary:", result.error)
+        this.showStatus('Failed to load daily summary', 'error')
+      }
+    } catch (error) {
+      console.error("Error loading daily summary:", error)
+      const tbody = document.getElementById("summaryTableBody")
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="20" class="loading">Error loading summary</td></tr>'
+      }
+    }
+  }
+
+  updateSummaryStats(summaryData) {
+    const totalRecordsEl = document.getElementById('totalRecords')
+    const dateRangeTextEl = document.getElementById('dateRangeText')
+    const totalHoursEl = document.getElementById('totalHours')
+
+    // Update total records
+    if (totalRecordsEl) {
+      totalRecordsEl.textContent = summaryData.length.toLocaleString()
+    }
+
+    // Update date range text
+    if (dateRangeTextEl) {
+      let rangeText = 'All Records'
+      if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
+        const start = this.currentDateRange.startDate ? 
+          new Date(this.currentDateRange.startDate).toLocaleDateString() : 'Beginning'
+        const end = this.currentDateRange.endDate ? 
+          new Date(this.currentDateRange.endDate).toLocaleDateString() : 'Latest'
+        rangeText = `${start} - ${end}`
+      }
+      dateRangeTextEl.textContent = rangeText
+    }
+
+    // Calculate and update total hours
+    if (totalHoursEl) {
+      const totalHours = summaryData.reduce((sum, record) => {
+        return sum + (parseFloat(record.total_hours) || 0)
+      }, 0)
+      totalHoursEl.textContent = totalHours.toFixed(1) + ' hrs'
+    }
+  }
+
+  updateDailySummaryTable(summaryData) {
+    const tbody = document.getElementById("summaryTableBody")
+
+    if (!summaryData || summaryData.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="20" class="loading">No summary data available for the selected date range</td></tr>'
+      return
+    }
+
+    tbody.innerHTML = summaryData
+      .map((record) => {
+        const status = this.getEmployeeStatus(record)
+
+        return `
+        <tr>
+          <td>${record.employee_name || "Unknown"}</td>
+          <td>${record.first_name || ""}</td>
+          <td>${record.last_name || ""}</td>
+          <td>${record.department || "N/A"}</td>
+          <td>${record.id_number || "N/A"}</td>
+          <td>${record.date || ""}</td>
+          <td>${this.formatDateTime(record.first_clock_in)}</td>
+          <td>${this.formatDateTime(record.last_clock_out)}</td>
+          <td>${this.formatDateTime(record.morning_in)}</td>
+          <td>${this.formatDateTime(record.morning_out)}</td>
+          <td>${this.formatDateTime(record.afternoon_in)}</td>
+          <td>${this.formatDateTime(record.afternoon_out)}</td>
+          <td>${this.formatDateTime(record.evening_in)}</td>
+          <td>${this.formatDateTime(record.evening_out)}</td>
+          <td>${this.formatDateTime(record.overtime_in)}</td>
+          <td>${this.formatDateTime(record.overtime_out)}</td>
+          <td>${(record.regular_hours || 0).toFixed(2)}</td>
+          <td>${(record.overtime_hours || 0).toFixed(2)}</td>
+          <td>${(record.total_hours || 0).toFixed(2)}</td>
+          <td><span class="status-badge ${status.class}">${status.text}</span></td>
+        </tr>
+      `
+      })
+      .join("")
+  }
+
+  formatDateTime(dateTimeString) {
+    if (!dateTimeString) return "-"
+
+    try {
+      const date = new Date(dateTimeString)
+      return (
+        date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }) +
+        " - " +
+        date.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+      )
+    } catch (error) {
+      return "-"
+    }
+  }
+
+  getEmployeeStatus(record) {
+    if (record.has_overtime) {
+      return { class: "overtime", text: "Overtime" }
+    } else if (record.is_incomplete) {
+      return { class: "incomplete", text: "Incomplete" }
+    } else {
+      return { class: "complete", text: "Complete" }
+    }
+  }
+
+  async downloadExcel() {
+    try {
+      // Use the current filtered data instead of fetching again
+      const summaryData = this.summaryData
+
+      if (!summaryData || summaryData.length === 0) {
+        this.showStatus("No data available for export", "error")
+        return
+      }
+
+      const excelData = summaryData.map((record) => ({
+        "Employee Name": record.employee_name || "Unknown",
+        "First Name": record.first_name || "",
+        "Last Name": record.last_name || "",
+        Department: record.department || "N/A",
+        "ID Number": record.id_number || "N/A",
+        "ID Barcode": record.id_barcode || "N/A",
+        Date: record.date,
+        "First Clock In": this.formatDateTime(record.first_clock_in),
+        "Last Clock Out": this.formatDateTime(record.last_clock_out),
+        "Morning In": this.formatDateTime(record.morning_in),
+        "Morning Out": this.formatDateTime(record.morning_out),
+        "Afternoon In": this.formatDateTime(record.afternoon_in),
+        "Afternoon Out": this.formatDateTime(record.afternoon_out),
+        "Evening In": this.formatDateTime(record.evening_in),
+        "Evening Out": this.formatDateTime(record.evening_out),
+        "Overtime In": this.formatDateTime(record.overtime_in),
+        "Overtime Out": this.formatDateTime(record.overtime_out),
+        "Regular Hours": (record.regular_hours || 0).toFixed(2),
+        "Overtime Hours": (record.overtime_hours || 0).toFixed(2),
+        "Total Hours": (record.total_hours || 0).toFixed(2),
+        "Morning Hours": (record.morning_hours || 0).toFixed(2),
+        "Afternoon Hours": (record.afternoon_hours || 0).toFixed(2),
+        "Evening Hours": (record.evening_hours || 0).toFixed(2),
+        "Overtime Session Hours": (record.overtime_session_hours || 0).toFixed(2),
+        "Is Incomplete": record.is_incomplete ? "Yes" : "No",
+        "Has Late Entry": record.has_late_entry ? "Yes" : "No",
+        "Has Overtime": record.has_overtime ? "Yes" : "No",
+        "Has Evening Session": record.has_evening_session ? "Yes" : "No",
+        "Total Sessions": record.total_sessions || 0,
+        "Completed Sessions": record.completed_sessions || 0,
+        "Pending Sessions": record.pending_sessions || 0,
+        "Total Minutes Worked": record.total_minutes_worked || 0,
+        "Break Time Minutes": record.break_time_minutes || 0,
+        Status: this.getEmployeeStatus(record).text,
+      }))
+
+      // Create Excel file using SheetJS
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(excelData)
+
+      // Auto-size columns
+      const colWidths = Object.keys(excelData[0] || {}).map((key) => ({
+        wch: Math.max(key.length, 15),
+      }))
+      ws["!cols"] = colWidths
+
+      XLSX.utils.book_append_sheet(wb, ws, "Daily Attendance Summary")
+
+      // Generate filename with date range
+      let filename = "Daily_Attendance_Summary"
+      
+      if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
+        const start = this.currentDateRange.startDate || "all"
+        const end = this.currentDateRange.endDate || "latest"
+        filename += `_${start}_to_${end}`
+      } else {
+        const today = new Date().toISOString().split("T")[0]
+        filename += `_${today}`
+      }
+      
+      filename += ".xlsx"
+
+      // Download file
+      XLSX.writeFile(wb, filename)
+
+      // Show success message with record count
+      const recordCount = summaryData.length
+      const dateRangeText = this.currentDateRange.startDate || this.currentDateRange.endDate 
+        ? `for selected date range` 
+        : `for all dates`
+      
+      this.showStatus(`Excel file downloaded successfully! ${recordCount} records exported ${dateRangeText}`, "success")
+      
+    } catch (error) {
+      console.error("Error downloading Excel:", error)
+      this.showStatus("Error downloading Excel file", "error")
+    }
+  }
+
+  showStatus(message, type) {
+    const statusEl = document.getElementById('settingsStatusMessage')
+    if (statusEl) {
+      statusEl.textContent = message
+      statusEl.className = `status-message ${type}`
+      statusEl.style.display = 'block'
+      
+      setTimeout(() => {
+        statusEl.style.display = 'none'
+      }, 5000)
     }
   }
 
@@ -1062,15 +1435,15 @@ class AttendanceApp {
       .map((emp) => {
         const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`)
         imageIds.push({ id: empId, uid: emp.employee_uid, name: `${emp.first_name} ${emp.last_name}` })
-        
+
         // Determine session type and styling
         const sessionType = emp.sessionType || this.getSessionTypeFromClockType(emp.last_clock_type)
         const isOvertime = emp.isOvertimeSession || this.isOvertimeClockType(emp.last_clock_type)
-        const badgeClass = isOvertime ? 'overtime' : 'in'
+        const badgeClass = isOvertime ? "overtime" : "in"
         const sessionIcon = this.getSessionIcon(emp.last_clock_type)
-        
+
         return `
-            <div class="employee-item ${isOvertime ? 'overtime-employee' : ''}">
+            <div class="employee-item ${isOvertime ? "overtime-employee" : ""}">
                 <img class="employee-avatar" 
                      id="${empId}"
                      alt="${emp.first_name} ${emp.last_name}">
@@ -1107,31 +1480,31 @@ class AttendanceApp {
 
     const attendanceSlice = attendance.slice(0, 10)
     const imageIds = []
-    
+
     container.innerHTML = attendanceSlice
       .map((record, index) => {
         const recordId = this.generateUniqueId(`activity-${record.employee_uid}-${index}`)
-        imageIds.push({ 
-          id: recordId, 
-          uid: record.employee_uid, 
-          name: `${record.first_name} ${record.last_name}` 
+        imageIds.push({
+          id: recordId,
+          uid: record.employee_uid,
+          name: `${record.first_name} ${record.last_name}`,
         })
-        
+
         // Enhanced display for overtime sessions
         const sessionType = record.sessionType || this.getSessionTypeFromClockType(record.clock_type)
         const isOvertime = record.isOvertimeSession || this.isOvertimeClockType(record.clock_type)
         const badgeClass = record.clock_type.includes("in") ? "in" : "out"
-        const finalBadgeClass = `${badgeClass} ${isOvertime ? 'overtime' : ''}`
-        
+        const finalBadgeClass = `${badgeClass} ${isOvertime ? "overtime" : ""}`
+
         return `
-            <div class="attendance-item ${isOvertime ? 'overtime-record' : ''}">
+            <div class="attendance-item ${isOvertime ? "overtime-record" : ""}">
                 <img class="attendance-avatar" 
                      id="${recordId}"
                      alt="${record.first_name} ${record.last_name}">
                 <div class="attendance-details">
                     <div class="attendance-name">${record.first_name} ${record.last_name}</div>
                     <div class="attendance-time">${new Date(record.clock_time).toLocaleTimeString()}</div>
-                    ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ''}
+                    ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ""}
                 </div>
                 <div class="clock-badge ${finalBadgeClass}">
                     ${this.formatClockType(record.clock_type, sessionType)}
@@ -1154,31 +1527,31 @@ class AttendanceApp {
 
   // Helper function to determine if clock type is overtime
   isOvertimeClockType(clockType) {
-    return clockType && (clockType.startsWith('evening') || clockType.startsWith('overtime'))
+    return clockType && (clockType.startsWith("evening") || clockType.startsWith("overtime"))
   }
 
   // Helper function to get session type from clock type
   getSessionTypeFromClockType(clockType) {
-    if (!clockType) return 'Unknown'
-    
-    if (clockType.startsWith('morning')) return 'Morning'
-    if (clockType.startsWith('afternoon')) return 'Afternoon'
-    if (clockType.startsWith('evening')) return 'Evening'
-    if (clockType.startsWith('overtime')) return 'Overtime'
-    
-    return 'Unknown'
+    if (!clockType) return "Unknown"
+
+    if (clockType.startsWith("morning")) return "Morning"
+    if (clockType.startsWith("afternoon")) return "Afternoon"
+    if (clockType.startsWith("evening")) return "Evening"
+    if (clockType.startsWith("overtime")) return "Overtime"
+
+    return "Unknown"
   }
 
   // Helper function to get session icon
   getSessionIcon(clockType) {
-    if (!clockType) return '🔘'
-    
-    if (clockType.startsWith('morning')) return '🌅'
-    if (clockType.startsWith('afternoon')) return '☀️'
-    if (clockType.startsWith('evening')) return '🌙'
-    if (clockType.startsWith('overtime')) return '⭐'
-    
-    return '🔘'
+    if (!clockType) return "🔘"
+
+    if (clockType.startsWith("morning")) return "🌅"
+    if (clockType.startsWith("afternoon")) return "☀️"
+    if (clockType.startsWith("evening")) return "🌙"
+    if (clockType.startsWith("overtime")) return "⭐"
+
+    return "🔘"
   }
 
   showStatus(message, type = "info") {
@@ -1194,29 +1567,29 @@ class AttendanceApp {
   // Clean up when app is being destroyed
   destroy() {
     this.stopAutoSync()
-    
+
     if (this.employeeDisplayTimeout) {
       clearTimeout(this.employeeDisplayTimeout)
     }
-    
+
     if (this.barcodeTimeout) {
       clearTimeout(this.barcodeTimeout)
     }
-    
+
     if (this.ws) {
       this.ws.close()
     }
-    
+
     // Clean up image load attempts
     this.imageLoadAttempts.clear()
-    
+
     // Clean up download toast
-    const downloadToast = document.getElementById('downloadToast')
+    const downloadToast = document.getElementById("downloadToast")
     if (downloadToast && downloadToast.hideTimeout) {
       clearTimeout(downloadToast.hideTimeout)
     }
-    
-    console.log('AttendanceApp destroyed and cleaned up')
+
+    console.log("AttendanceApp destroyed and cleaned up")
   }
 }
 
@@ -1227,8 +1600,8 @@ document.addEventListener("DOMContentLoaded", () => {
 })
 
 // Clean up on page unload
-window.addEventListener('beforeunload', () => {
-  if (window.attendanceApp && typeof window.attendanceApp.destroy === 'function') {
+window.addEventListener("beforeunload", () => {
+  if (window.attendanceApp && typeof window.attendanceApp.destroy === "function") {
     window.attendanceApp.destroy()
   }
 })

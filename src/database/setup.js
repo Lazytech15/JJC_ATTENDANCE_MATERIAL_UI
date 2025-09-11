@@ -141,13 +141,14 @@ function createTables() {
     `)
     console.log('✓ Employees table created')
 
-    // Attendance table with updated clock_type constraints
+    // Attendance table with updated clock_type constraints and id_barcode field
     console.log('Creating attendance table...')
     db.exec(`
       CREATE TABLE IF NOT EXISTS attendance (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         employee_uid INTEGER,
         id_number TEXT,
+        scanned_barcode TEXT,
         clock_type TEXT CHECK(clock_type IN (
           'morning_in', 'morning_out', 
           'afternoon_in', 'afternoon_out',
@@ -166,7 +167,7 @@ function createTables() {
     `)
     console.log('✓ Attendance table created')
 
-    // NEW: Attendance Statistics table for detailed calculations
+    // Attendance Statistics table for detailed calculations
     console.log('Creating attendance_statistics table...')
     db.exec(`
       CREATE TABLE IF NOT EXISTS attendance_statistics (
@@ -174,6 +175,8 @@ function createTables() {
         employee_uid INTEGER,
         attendance_id INTEGER,
         clock_out_id INTEGER,
+        id_number TEXT,
+        scanned_barcode TEXT,
         session_type TEXT CHECK(session_type IN (
           'morning', 'afternoon', 'evening', 'overtime', 'continuous'
         )),
@@ -222,6 +225,71 @@ function createTables() {
       )
     `)
     console.log('✓ Attendance statistics table created')
+
+    // NEW: Daily Attendance Summary table for readable attendance data
+    console.log('Creating daily_attendance_summary table...')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS daily_attendance_summary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_uid INTEGER,
+        id_number TEXT,
+        id_barcode TEXT,
+        employee_name TEXT NOT NULL,
+        first_name TEXT,
+        last_name TEXT,
+        department TEXT,
+        
+        -- Time tracking
+        date TEXT NOT NULL,
+        first_clock_in DATETIME,
+        last_clock_out DATETIME,
+        
+        -- Session details
+        morning_in DATETIME,
+        morning_out DATETIME,
+        afternoon_in DATETIME,
+        afternoon_out DATETIME,
+        evening_in DATETIME,
+        evening_out DATETIME,
+        overtime_in DATETIME,
+        overtime_out DATETIME,
+        
+        -- Hours calculation
+        regular_hours REAL DEFAULT 0,
+        overtime_hours REAL DEFAULT 0,
+        total_hours REAL DEFAULT 0,
+        
+        -- Session hours breakdown
+        morning_hours REAL DEFAULT 0,
+        afternoon_hours REAL DEFAULT 0,
+        evening_hours REAL DEFAULT 0,
+        overtime_session_hours REAL DEFAULT 0,
+        
+        -- Status flags
+        is_incomplete INTEGER DEFAULT 0, -- Has pending clock-out
+        has_late_entry INTEGER DEFAULT 0,
+        has_overtime INTEGER DEFAULT 0,
+        has_evening_session INTEGER DEFAULT 0,
+        
+        -- Metadata
+        total_sessions INTEGER DEFAULT 0,
+        completed_sessions INTEGER DEFAULT 0,
+        pending_sessions INTEGER DEFAULT 0,
+        
+        -- Time calculations
+        total_minutes_worked INTEGER DEFAULT 0,
+        break_time_minutes INTEGER DEFAULT 0, -- Future: track lunch breaks
+        
+        -- Sync and audit
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        -- Constraints
+        FOREIGN KEY (employee_uid) REFERENCES employees (uid),
+        UNIQUE(employee_uid, date)
+      )
+    `)
+    console.log('✓ Daily attendance summary table created')
 
     // Settings table
     console.log('Creating settings table...')
@@ -285,8 +353,10 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_type ON attendance (clock_type)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance (employee_uid, date)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (id_barcode)",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_id_number ON attendance (id_number)",
       
-      // NEW: Indexes for statistics table
+      // Indexes for statistics table
       "CREATE INDEX IF NOT EXISTS idx_stats_employee_uid ON attendance_statistics (employee_uid)",
       "CREATE INDEX IF NOT EXISTS idx_stats_date ON attendance_statistics (date)",
       "CREATE INDEX IF NOT EXISTS idx_stats_attendance_id ON attendance_statistics (attendance_id)",
@@ -294,7 +364,20 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_stats_employee_date ON attendance_statistics (employee_uid, date)",
       "CREATE INDEX IF NOT EXISTS idx_stats_session_type ON attendance_statistics (session_type)",
       "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
-      "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)"
+      "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)",
+      
+      // NEW: Indexes for daily attendance summary table
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_uid ON daily_attendance_summary (employee_uid)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_attendance_summary (date)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_date ON daily_attendance_summary (employee_uid, date)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_number ON daily_attendance_summary (id_number)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_barcode ON daily_attendance_summary (id_barcode)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_department ON daily_attendance_summary (department)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_overtime ON daily_attendance_summary (has_overtime) WHERE has_overtime = 1",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_incomplete ON daily_attendance_summary (is_incomplete) WHERE is_incomplete = 1",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_total_hours ON daily_attendance_summary (total_hours)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_name ON daily_attendance_summary (employee_name)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_last_updated ON daily_attendance_summary (last_updated)"
     ]
 
     indexes.forEach((indexQuery, i) => {
@@ -468,11 +551,426 @@ function runMigrations() {
       insertVersion.run(4, "Added attendance_statistics table for detailed calculation tracking")
     }
 
+    // Migration 5: Add id_barcode column to attendance table
+    if (currentVersion < 5) {
+      console.log('Running migration 5: Adding id_barcode column to attendance table...')
+      try {
+        // Check if column already exists
+        const tableInfo = db.prepare("PRAGMA table_info(attendance)").all()
+        const barcodeColumn = tableInfo.find(col => col.name === 'id_barcode')
+        
+        if (!barcodeColumn) {
+          db.exec(`ALTER TABLE attendance ADD COLUMN id_barcode TEXT`)
+          console.log('✓ Migration 5: id_barcode column added to attendance table')
+          
+          // Add index for the new column
+          db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (id_barcode)")
+          console.log('✓ Migration 5: Index created for id_barcode column')
+        } else {
+          console.log('- Migration 5: id_barcode column already exists')
+        }
+      } catch (error) {
+        console.error('Error in migration 5:', error)
+        console.log('- Migration 5: Failed to add id_barcode column')
+      }
+      
+      const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+      insertVersion.run(5, "Added id_barcode column to attendance table for storing scanned barcode data")
+      
+      console.log('✓ Migration 5: id_barcode column migration completed')
+    }
+
+    // Migration 6: Add id_barcode column to attendance_statistics table
+    if (currentVersion < 6) {
+      console.log('Running migration 6: Adding id_barcode column to attendance_statistics table...')
+      try {
+        // Check if column already exists
+        const tableInfo = db.prepare("PRAGMA table_info(attendance_statistics)").all()
+        const barcodeColumn = tableInfo.find(col => col.name === 'id_barcode')
+        
+        if (!barcodeColumn) {
+          db.exec(`ALTER TABLE attendance_statistics ADD COLUMN id_barcode TEXT`)
+          console.log('✓ Migration 6: id_barcode column added to attendance_statistics table')
+          
+          // Add index for the new column
+          db.exec("CREATE INDEX IF NOT EXISTS idx_stats_id_barcode ON attendance_statistics (id_barcode)")
+          console.log('✓ Migration 6: Index created for id_barcode column in statistics table')
+        } else {
+          console.log('- Migration 6: id_barcode column already exists in attendance_statistics')
+        }
+      } catch (error) {
+        console.error('Error in migration 6:', error)
+        console.log('- Migration 6: Failed to add id_barcode column to attendance_statistics')
+      }
+      
+      const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+      insertVersion.run(6, "Added id_barcode column to attendance_statistics table for tracking barcode data in statistics")
+      
+      console.log('✓ Migration 6: id_barcode column migration for statistics completed')
+    }
+
+    // NEW: Migration 7: Create daily_attendance_summary table
+    if (currentVersion < 7) {
+      console.log('Running migration 7: Creating daily_attendance_summary table...')
+      
+      try {
+        // The table creation is handled in createTables(), but we need to ensure indexes
+        const summaryIndexes = [
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_uid ON daily_attendance_summary (employee_uid)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_attendance_summary (date)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_date ON daily_attendance_summary (employee_uid, date)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_number ON daily_attendance_summary (id_number)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_barcode ON daily_attendance_summary (id_barcode)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_department ON daily_attendance_summary (department)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_overtime ON daily_attendance_summary (has_overtime) WHERE has_overtime = 1",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_incomplete ON daily_attendance_summary (is_incomplete) WHERE is_incomplete = 1",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_total_hours ON daily_attendance_summary (total_hours)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_name ON daily_attendance_summary (employee_name)",
+          "CREATE INDEX IF NOT EXISTS idx_daily_summary_last_updated ON daily_attendance_summary (last_updated)"
+        ]
+
+        summaryIndexes.forEach(indexQuery => {
+          try {
+            db.exec(indexQuery)
+          } catch (error) {
+            console.log(`- Index already exists: ${indexQuery.split(' ')[5]}`)
+          }
+        })
+
+        console.log('✓ Migration 7: Daily attendance summary table and indexes created')
+      } catch (error) {
+        console.log('- Migration 7: Daily attendance summary table already exists')
+      }
+
+      const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+      insertVersion.run(7, "Added daily_attendance_summary table for readable attendance data")
+      
+      console.log('✓ Migration 7: Daily attendance summary table migration completed')
+    }
+
     console.log('✓ All migrations completed successfully')
 
   } catch (error) {
     console.error('Error running migrations:', error)
     throw error
+  }
+}
+
+// NEW: Function to update daily attendance summary
+function updateDailyAttendanceSummary(employeeUid, date, db = null) {
+  if (!db) {
+    db = getDatabase()
+  }
+  
+  try {
+    console.log(`Updating daily attendance summary for employee ${employeeUid} on ${date}`)
+    
+    // Get employee information
+    const employee = db.prepare(`
+      SELECT uid, id_number, id_barcode, first_name, last_name, department
+      FROM employees 
+      WHERE uid = ?
+    `).get(employeeUid)
+    
+    if (!employee) {
+      console.log(`Employee ${employeeUid} not found`)
+      return false
+    }
+    
+    // Get all attendance records for this employee and date
+    const attendanceRecords = db.prepare(`
+      SELECT * FROM attendance 
+      WHERE employee_uid = ? AND date = ?
+      ORDER BY clock_time ASC
+    `).all(employeeUid, date)
+    
+    if (attendanceRecords.length === 0) {
+      console.log(`No attendance records found for employee ${employeeUid} on ${date}`)
+      return false
+    }
+    
+    // Process attendance records to extract session times and calculate totals
+    const sessionTimes = {
+      morning_in: null, morning_out: null,
+      afternoon_in: null, afternoon_out: null,
+      evening_in: null, evening_out: null,
+      overtime_in: null, overtime_out: null
+    }
+    
+    let totalRegularHours = 0
+    let totalOvertimeHours = 0
+    let totalSessions = 0
+    let completedSessions = 0
+    let pendingSessions = 0
+    let hasLateEntry = false
+    let hasOvertime = false
+    let hasEveningSession = false
+    
+    // Process each attendance record
+    attendanceRecords.forEach(record => {
+      const clockType = record.clock_type
+      
+      // Store session times
+      if (sessionTimes.hasOwnProperty(clockType)) {
+        sessionTimes[clockType] = record.clock_time
+      }
+      
+      // Accumulate hours
+      totalRegularHours += record.regular_hours || 0
+      totalOvertimeHours += record.overtime_hours || 0
+      
+      // Track session counts and flags
+      if (clockType.endsWith('_in')) {
+        totalSessions++
+        // Check if there's a corresponding _out
+        const outType = clockType.replace('_in', '_out')
+        const hasOut = attendanceRecords.some(r => r.clock_type === outType && r.clock_time > record.clock_time)
+        if (hasOut) {
+          completedSessions++
+        } else {
+          pendingSessions++
+        }
+      }
+      
+      // Set flags
+      if (record.is_late) hasLateEntry = true
+      if (clockType.startsWith('overtime') || clockType.startsWith('evening')) {
+        hasOvertime = true
+        if (clockType.startsWith('evening')) hasEveningSession = true
+      }
+    })
+    
+    // Calculate session-specific hours (approximation based on session types)
+    const sessionHours = {
+      morning_hours: 0,
+      afternoon_hours: 0,
+      evening_hours: 0,
+      overtime_session_hours: 0
+    }
+    
+    // Simple approximation - distribute total hours based on sessions present
+    const morningSession = sessionTimes.morning_in && sessionTimes.morning_out
+    const afternoonSession = sessionTimes.afternoon_in && sessionTimes.afternoon_out
+    const eveningSession = sessionTimes.evening_in && sessionTimes.evening_out
+    const overtimeSession = sessionTimes.overtime_in && sessionTimes.overtime_out
+    
+    if (morningSession || afternoonSession) {
+      // Regular sessions get regular hours
+      const regularSessionCount = (morningSession ? 1 : 0) + (afternoonSession ? 1 : 0)
+      if (morningSession) sessionHours.morning_hours = totalRegularHours / regularSessionCount
+      if (afternoonSession) sessionHours.afternoon_hours = totalRegularHours / regularSessionCount
+    }
+    
+    if (eveningSession) {
+      sessionHours.evening_hours = totalOvertimeHours * 0.7 // Approximate evening hours
+    }
+    
+    if (overtimeSession) {
+      sessionHours.overtime_session_hours = totalOvertimeHours * 0.3 // Approximate overtime hours
+    }
+    
+    // Get first and last times
+    const firstClockIn = attendanceRecords.find(r => r.clock_type.endsWith('_in'))?.clock_time
+    const lastClockOut = [...attendanceRecords].reverse().find(r => r.clock_type.endsWith('_out'))?.clock_time
+    
+    // Calculate total minutes worked (approximation)
+    let totalMinutesWorked = 0
+    if (firstClockIn && lastClockOut) {
+      const firstTime = new Date(firstClockIn)
+      const lastTime = new Date(lastClockOut)
+      totalMinutesWorked = Math.round((lastTime - firstTime) / 60000) // Convert to minutes
+      
+      // Subtract lunch break time (approximate 1 hour if both morning and afternoon sessions exist)
+      if (morningSession && afternoonSession) {
+        totalMinutesWorked = Math.max(0, totalMinutesWorked - 60)
+      }
+    }
+    
+    // Prepare data for insert/update
+    const summaryData = {
+      employee_uid: employee.uid,
+      id_number: employee.id_number,
+      id_barcode: employee.id_barcode,
+      employee_name: `${employee.first_name} ${employee.last_name}`,
+      first_name: employee.first_name,
+      last_name: employee.last_name,
+      department: employee.department,
+      date: date,
+      first_clock_in: firstClockIn,
+      last_clock_out: lastClockOut,
+      ...sessionTimes,
+      regular_hours: totalRegularHours,
+      overtime_hours: totalOvertimeHours,
+      total_hours: totalRegularHours + totalOvertimeHours,
+      ...sessionHours,
+      is_incomplete: pendingSessions > 0 ? 1 : 0,
+      has_late_entry: hasLateEntry ? 1 : 0,
+      has_overtime: hasOvertime ? 1 : 0,
+      has_evening_session: hasEveningSession ? 1 : 0,
+      total_sessions: totalSessions,
+      completed_sessions: completedSessions,
+      pending_sessions: pendingSessions,
+      total_minutes_worked: totalMinutesWorked,
+      break_time_minutes: (morningSession && afternoonSession) ? 60 : 0,
+      last_updated: new Date().toISOString()
+    }
+    
+    // Insert or update the summary record
+    const upsertQuery = db.prepare(`
+      INSERT INTO daily_attendance_summary (
+        employee_uid, id_number, id_barcode, employee_name, first_name, last_name, department,
+        date, first_clock_in, last_clock_out,
+        morning_in, morning_out, afternoon_in, afternoon_out,
+        evening_in, evening_out, overtime_in, overtime_out,
+        regular_hours, overtime_hours, total_hours,
+        morning_hours, afternoon_hours, evening_hours, overtime_session_hours,
+        is_incomplete, has_late_entry, has_overtime, has_evening_session,
+        total_sessions, completed_sessions, pending_sessions,
+        total_minutes_worked, break_time_minutes, last_updated
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?
+      )
+      ON CONFLICT (employee_uid, date) DO UPDATE SET
+        id_number = excluded.id_number,
+        id_barcode = excluded.id_barcode,
+        employee_name = excluded.employee_name,
+        first_name = excluded.first_name,
+        last_name = excluded.last_name,
+        department = excluded.department,
+        first_clock_in = excluded.first_clock_in,
+        last_clock_out = excluded.last_clock_out,
+        morning_in = excluded.morning_in,
+        morning_out = excluded.morning_out,
+        afternoon_in = excluded.afternoon_in,
+        afternoon_out = excluded.afternoon_out,
+        evening_in = excluded.evening_in,
+        evening_out = excluded.evening_out,
+        overtime_in = excluded.overtime_in,
+        overtime_out = excluded.overtime_out,
+        regular_hours = excluded.regular_hours,
+        overtime_hours = excluded.overtime_hours,
+        total_hours = excluded.total_hours,
+        morning_hours = excluded.morning_hours,
+        afternoon_hours = excluded.afternoon_hours,
+        evening_hours = excluded.evening_hours,
+        overtime_session_hours = excluded.overtime_session_hours,
+        is_incomplete = excluded.is_incomplete,
+        has_late_entry = excluded.has_late_entry,
+        has_overtime = excluded.has_overtime,
+        has_evening_session = excluded.has_evening_session,
+        total_sessions = excluded.total_sessions,
+        completed_sessions = excluded.completed_sessions,
+        pending_sessions = excluded.pending_sessions,
+        total_minutes_worked = excluded.total_minutes_worked,
+        break_time_minutes = excluded.break_time_minutes,
+        last_updated = excluded.last_updated
+    `)
+    
+    upsertQuery.run(
+      summaryData.employee_uid, summaryData.id_number, summaryData.id_barcode,
+      summaryData.employee_name, summaryData.first_name, summaryData.last_name, summaryData.department,
+      summaryData.date, summaryData.first_clock_in, summaryData.last_clock_out,
+      summaryData.morning_in, summaryData.morning_out, summaryData.afternoon_in, summaryData.afternoon_out,
+      summaryData.evening_in, summaryData.evening_out, summaryData.overtime_in, summaryData.overtime_out,
+      summaryData.regular_hours, summaryData.overtime_hours, summaryData.total_hours,
+      summaryData.morning_hours, summaryData.afternoon_hours, summaryData.evening_hours, summaryData.overtime_session_hours,
+      summaryData.is_incomplete, summaryData.has_late_entry, summaryData.has_overtime, summaryData.has_evening_session,
+      summaryData.total_sessions, summaryData.completed_sessions, summaryData.pending_sessions,
+      summaryData.total_minutes_worked, summaryData.break_time_minutes, summaryData.last_updated
+    )
+    
+    console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
+    return true
+    
+  } catch (error) {
+    console.error(`Error updating daily attendance summary for employee ${employeeUid} on ${date}:`, error)
+    return false
+  }
+}
+
+// NEW: Function to get daily attendance summary data
+function getDailyAttendanceSummary(startDate = null, endDate = null, employeeUid = null, db = null) {
+  if (!db) {
+    db = getDatabase()
+  }
+  
+  try {
+    let query = 'SELECT * FROM daily_attendance_summary WHERE 1=1'
+    const params = []
+    
+    if (startDate) {
+      query += ' AND date >= ?'
+      params.push(startDate)
+    }
+    
+    if (endDate) {
+      query += ' AND date <= ?'
+      params.push(endDate)
+    }
+    
+    if (employeeUid) {
+      query += ' AND employee_uid = ?'
+      params.push(employeeUid)
+    }
+    
+    query += ' ORDER BY date DESC, employee_name ASC'
+    
+    const summaryData = db.prepare(query).all(...params)
+    
+    return summaryData
+    
+  } catch (error) {
+    console.error('Error getting daily attendance summary:', error)
+    return []
+  }
+}
+
+// NEW: Function to rebuild daily attendance summary for a date range
+function rebuildDailyAttendanceSummary(startDate, endDate, db = null) {
+  if (!db) {
+    db = getDatabase()
+  }
+  
+  try {
+    console.log(`Rebuilding daily attendance summary from ${startDate} to ${endDate}`)
+    
+    // Get all unique employee-date combinations in the range
+    const employeeDateQuery = db.prepare(`
+      SELECT DISTINCT employee_uid, date
+      FROM attendance 
+      WHERE date BETWEEN ? AND ?
+      ORDER BY employee_uid, date
+    `)
+    
+    const employeeDateCombinations = employeeDateQuery.all(startDate, endDate)
+    
+    let successCount = 0
+    let failCount = 0
+    
+    employeeDateCombinations.forEach(({ employee_uid, date }) => {
+      const success = updateDailyAttendanceSummary(employee_uid, date, db)
+      if (success) {
+        successCount++
+      } else {
+        failCount++
+      }
+    })
+    
+    console.log(`✓ Daily attendance summary rebuild completed: ${successCount} successful, ${failCount} failed`)
+    
+    return { successCount, failCount, totalProcessed: employeeDateCombinations.length }
+    
+  } catch (error) {
+    console.error('Error rebuilding daily attendance summary:', error)
+    return { successCount: 0, failCount: 0, totalProcessed: 0 }
   }
 }
 
@@ -523,4 +1021,8 @@ module.exports = {
   setupDatabase,
   getDatabase,
   closeDatabase,
+  // NEW: Export the daily summary functions
+  updateDailyAttendanceSummary,
+  getDailyAttendanceSummary,
+  rebuildDailyAttendanceSummary,
 }
