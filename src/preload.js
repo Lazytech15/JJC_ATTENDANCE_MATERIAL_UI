@@ -27,10 +27,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getExportStatistics: (dateRange) => ipcRenderer.invoke("get-export-statistics", dateRange),
 
   // Attendance sync operations
-  syncAttendanceToServer: () => ipcRenderer.invoke("sync-attendance-to-server"),
+  syncAttendanceToServer: () => ipcRenderer.invoke("sync-attendance-to-server"),  
   getUnsyncedAttendanceCount: () => ipcRenderer.invoke("get-unsynced-attendance-count"),
   getAllAttendanceForSync: () => ipcRenderer.invoke("get-all-attendance-for-sync"),
   markAttendanceAsSynced: (attendanceIds) => ipcRenderer.invoke("mark-attendance-as-synced", attendanceIds),
+
+  // Summary sync operations (ENHANCED)
+  getAllDailySummaryForSync: () => ipcRenderer.invoke("get-All-daily-summary-for-sync"),
+  syncDailySummaryToServer: () => ipcRenderer.invoke("sync-daily-summary-to-server"),
+  getUnsyncedDailySummaryCount: () => ipcRenderer.invoke("get-unsynced-daily-summary-count"),
+  forceSyncAllDailySummary: () => ipcRenderer.invoke("force-sync-all-daily-summary"),
+  getDailySummaryLastSyncTime: () => ipcRenderer.invoke("get-daily-summary-last-sync-time"),
+
+  // NEW: Additional summary sync operations for enhanced functionality
+  markSummaryDataChanged: () => ipcRenderer.invoke("mark-summary-data-changed"),
+  getSummaryDataChangeStatus: () => ipcRenderer.invoke("get-summary-data-change-status"),
+  resetSummaryDataChangeStatus: () => ipcRenderer.invoke("reset-summary-data-change-status"),
 
   // Profile operations
   checkProfileImages: () => ipcRenderer.invoke("check-profile-images"),
@@ -49,6 +61,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onSyncAttendanceToServer: (callback) => {
     ipcRenderer.on("sync-attendance-to-server", callback)
     return () => ipcRenderer.removeAllListeners("sync-attendance-to-server")
+  },
+
+  // NEW: Summary sync event listener
+  onSyncSummaryToServer: (callback) => {
+    ipcRenderer.on("sync-summary-to-server", callback)
+    return () => ipcRenderer.removeAllListeners("sync-summary-to-server")
+  },
+
+  // NEW: Data change event listeners
+  onAttendanceDataChanged: (callback) => {
+    ipcRenderer.on("attendance-data-changed", callback)
+    return () => ipcRenderer.removeAllListeners("attendance-data-changed")
+  },
+
+  onSummaryDataChanged: (callback) => {
+    ipcRenderer.on("summary-data-changed", callback)
+    return () => ipcRenderer.removeAllListeners("summary-data-changed")
   },
 
   // Utility functions

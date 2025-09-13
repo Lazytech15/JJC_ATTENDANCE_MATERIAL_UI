@@ -19,23 +19,45 @@ async function syncEmployees() {
 async function checkProfileImages() {
   try {
     const employees = Employee.getAll()
-    let downloadedCount = 0
-
-    for (const employee of employees) {
-      const hasProfile = await ProfileService.profileExists(employee.id_number)
-      if (hasProfile) {
-        downloadedCount++
+    
+    if (!employees || employees.length === 0) {
+      return {
+        success: true,
+        total: 0,
+        downloaded: 0,
+        percentage: 0,
+        downloadedUids: [],
+        missingUids: [],
+        profileDetails: {}
       }
     }
 
-    return {
-      success: true,
-      total: employees.length,
-      downloaded: downloadedCount,
-    }
+    // Extract employee UIDs for bulk checking
+    // Use the appropriate field - could be uid, id_number, or id depending on your schema
+    const employeeUids = employees.map(emp => {
+      // Adjust this based on your employee schema
+      // Common fields are: emp.uid, emp.id_number, emp.id
+      return emp.uid || emp.id_number || emp.id || emp.employee_uid || emp.id_number
+    }).filter(uid => uid != null) // Remove any null/undefined values
+
+    console.log(`Checking profiles for ${employeeUids.length} employees:`, employeeUids)
+
+    // Use the bulk profile checking method from ProfileService
+    const result = await ProfileService.checkProfileImages(employeeUids)
+
+    return result
+
   } catch (error) {
     console.error("Error checking profile images:", error)
-    return { success: false, error: error.message }
+    return { 
+      success: false, 
+      error: error.message,
+      total: 0,
+      downloaded: 0,
+      percentage: 0,
+      downloadedUids: [],
+      missingUids: []
+    }
   }
 }
 

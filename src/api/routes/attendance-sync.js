@@ -1,5 +1,8 @@
 const { getDatabase } = require("../../database/setup")
 const fetch = require('node-fetch')
+// Import the daily summary sync functions
+const { syncDailySummaryToServer } = require('./summary-sync')
+
 
 async function syncAttendanceToServer() {
   const db = getDatabase()
@@ -41,16 +44,31 @@ async function syncAttendanceToServer() {
     const unsyncedRecords = attendanceStmt.all()
     
     if (unsyncedRecords.length === 0) {
-      return {
-        success: true,
-        message: 'No records to sync',
-        syncedCount: 0
+      // Even if no attendance records to sync, try to sync daily summary
+      console.log('No attendance records to sync, checking daily summary...')
+      
+      try {
+        const summaryResult = await syncDailySummaryToServer()
+        return {
+          success: true,
+          message: `No attendance records to sync. Daily summary sync: ${summaryResult.message}`,
+          syncedCount: 0,
+          summarySyncResult: summaryResult
+        }
+      } catch (summaryError) {
+        console.error('Error syncing daily summary:', summaryError)
+        return {
+          success: true,
+          message: 'No attendance records to sync, but daily summary sync failed',
+          syncedCount: 0,
+          summaryError: summaryError.message
+        }
       }
     }
     
     console.log(`Found ${unsyncedRecords.length} unsynced attendance records`)
     
-    // Send data to server
+    // Send attendance data to server
     const response = await fetch(syncEndpoint, {
       method: 'POST',
       headers: {
@@ -67,9 +85,9 @@ async function syncAttendanceToServer() {
     }
     
     const result = await response.json()
-    console.log('Server response:', result)
+    console.log('Attendance sync server response:', result)
     
-    // Mark records as synced
+    // Mark attendance records as synced
     const updateStmt = db.prepare("UPDATE attendance SET is_synced = 1 WHERE id = ?")
     
     const updateTransaction = db.transaction((records) => {
@@ -80,19 +98,51 @@ async function syncAttendanceToServer() {
     
     updateTransaction(unsyncedRecords)
     
+    // After successful attendance sync, also sync daily summary
+    let summaryResult = null
+    try {
+      console.log('Syncing daily summary after attendance sync...')
+      summaryResult = await syncDailySummaryToServer()
+      console.log('Daily summary sync completed:', summaryResult.message)
+    } catch (summaryError) {
+      console.error('Error syncing daily summary after attendance sync:', summaryError)
+      summaryResult = {
+        success: false,
+        message: `Daily summary sync failed: ${summaryError.message}`,
+        syncedCount: 0
+      }
+    }
+    
     return {
       success: true,
-      message: `Successfully synced ${unsyncedRecords.length} attendance records`,
+      message: `Successfully synced ${unsyncedRecords.length} attendance records. ${summaryResult ? summaryResult.message : 'Daily summary sync skipped.'}`,
       syncedCount: unsyncedRecords.length,
-      serverResponse: result
+      serverResponse: result,
+      summarySyncResult: summaryResult
     }
     
   } catch (error) {
     console.error('Error syncing attendance:', error)
+    
+    // Even if attendance sync fails, try to sync daily summary
+    let summaryResult = null
+    try {
+      console.log('Attempting daily summary sync despite attendance sync failure...')
+      summaryResult = await syncDailySummaryToServer()
+    } catch (summaryError) {
+      console.error('Daily summary sync also failed:', summaryError)
+      summaryResult = {
+        success: false,
+        message: `Daily summary sync failed: ${summaryError.message}`,
+        syncedCount: 0
+      }
+    }
+    
     return {
       success: false,
-      message: `Failed to sync attendance: ${error.message}`,
-      syncedCount: 0
+      message: `Failed to sync attendance: ${error.message}. ${summaryResult ? summaryResult.message : ''}`,
+      syncedCount: 0,
+      summarySyncResult: summaryResult
     }
   }
 }
@@ -180,9 +230,40 @@ async function markAttendanceAsSynced(attendanceIds) {
   }
 }
 
+// New function to sync both attendance and daily summary in one call
+async function syncAllDataToServer() {
+  console.log('Starting comprehensive sync of all data...')
+  
+  try {
+    // First sync attendance
+    const attendanceResult = await syncAttendanceToServer()
+    
+    return {
+      success: attendanceResult.success,
+      message: `Comprehensive sync completed. ${attendanceResult.message}`,
+      attendanceSync: {
+        success: attendanceResult.success,
+        syncedCount: attendanceResult.syncedCount,
+        message: attendanceResult.message
+      },
+      summarySync: attendanceResult.summarySyncResult || { success: false, message: 'Not attempted' }
+    }
+    
+  } catch (error) {
+    console.error('Error in comprehensive sync:', error)
+    return {
+      success: false,
+      message: `Comprehensive sync failed: ${error.message}`,
+      attendanceSync: { success: false, syncedCount: 0 },
+      summarySync: { success: false, syncedCount: 0 }
+    }
+  }
+}
+
 module.exports = {
   syncAttendanceToServer,
   getUnsyncedAttendanceCount,
   getAllAttendanceForSync,
-  markAttendanceAsSynced
+  markAttendanceAsSynced,
+  syncAllDataToServer // Export the new comprehensive sync function
 }

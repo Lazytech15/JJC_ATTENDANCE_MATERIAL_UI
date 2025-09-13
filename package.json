@@ -1,5 +1,5 @@
 {
-  "name": "jjc-attendance-tracking",
+  "name": "jjc-attendance-management-system",
   "version": "1.0.0",
   "description": "Offline and dynamic tracking of employee attendance via barcode scanner",
   "main": "src/main.js",
@@ -31,6 +31,7 @@
     "express": "^5.1.0",
     "node-fetch": "^2.6.7",
     "services": "^0.0.3",
+    "sqlite3": "^5.1.7",
     "ws": "^8.14.2",
     "xlsx": "^0.18.5",
     "yauzl": "^3.2.0",
@@ -38,7 +39,7 @@
   },
   "build": {
     "appId": "com.jjc.attendance-system",
-    "productName": "JJC Attendance Tracking",
+    "productName": "JJC Attendance Management System",
     "directories": {
       "output": "dist"
     },

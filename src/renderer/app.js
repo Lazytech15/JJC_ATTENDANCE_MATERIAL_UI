@@ -7,11 +7,18 @@ class AttendanceApp {
     this.imageCounter = 0 // Counter for unique IDs
     this.barcodeTimeout = null // Add timeout for barcode handling
     this.autoSyncInterval = null // Auto-sync interval
+    this.summaryAutoSyncInterval = null // Summary auto-sync interval
     this.syncSettings = {
       enabled: true,
       interval: 5 * 60 * 1000, // Default 5 minutes
       retryAttempts: 3,
       retryDelay: 30000, // 30 seconds
+    }
+    this.summarySyncSettings = {
+      enabled: true,
+      interval: 10 * 60 * 1000, // Default 10 minutes for summary
+      retryAttempts: 3,
+      retryDelay: 45000, // 45 seconds
     }
     this.electronAPI = window.electronAPI // Use the exposed API
 
@@ -21,6 +28,10 @@ class AttendanceApp {
       timestamp: 0,
       duplicatePreventionWindow: 60000, // 1 minute
     }
+
+    // Track when daily summary needs to be synced
+    this.pendingSummarySync = false
+    this.lastSummaryDataChange = null
 
     this.init()
 
@@ -38,7 +49,8 @@ class AttendanceApp {
     this.connectWebSocket()
     await this.loadInitialData()
     await this.loadSyncSettings() // Load sync settings from database
-    this.startAutoSync() // Start automatic sync
+    this.startAutoSync() // Start automatic attendance sync
+    this.startSummaryAutoSync() // Start automatic summary sync
     this.focusInput()
   }
 
@@ -52,7 +64,13 @@ class AttendanceApp {
         // Update sync interval from settings
         const syncInterval = Number.parseInt(result.data.sync_interval) || 5 * 60 * 1000
         this.syncSettings.interval = syncInterval
-        console.log("Loaded sync settings - interval:", syncInterval, "ms")
+        
+        // Load summary sync interval (default to double the attendance sync interval)
+        const summarySyncInterval = Number.parseInt(result.data.summary_sync_interval) || (syncInterval * 2)
+        this.summarySyncSettings.interval = summarySyncInterval
+        
+        console.log("Loaded sync settings - attendance interval:", syncInterval, "ms")
+        console.log("Loaded sync settings - summary interval:", summarySyncInterval, "ms")
       }
     } catch (error) {
       console.error("Error loading sync settings:", error)
@@ -101,6 +119,26 @@ class AttendanceApp {
     }, 10000)
   }
 
+  // Start automatic summary sync
+  startSummaryAutoSync() {
+    if (this.summaryAutoSyncInterval) {
+      clearInterval(this.summaryAutoSyncInterval)
+    }
+
+    if (!this.summarySyncSettings.enabled) return
+
+    console.log("Starting summary auto-sync with interval:", this.summarySyncSettings.interval, "ms")
+
+    this.summaryAutoSyncInterval = setInterval(() => {
+      this.performSummarySync(true) // Silent sync
+    }, this.summarySyncSettings.interval)
+
+    // Also perform an initial sync after 15 seconds
+    setTimeout(() => {
+      this.performSummarySync(true, 0, true) // Silent sync with initial download toast
+    }, 15000)
+  }
+
   // Stop automatic sync
   stopAutoSync() {
     if (this.autoSyncInterval) {
@@ -108,47 +146,307 @@ class AttendanceApp {
       this.autoSyncInterval = null
       console.log("Auto-sync stopped")
     }
+    
+    if (this.summaryAutoSyncInterval) {
+      clearInterval(this.summaryAutoSyncInterval)
+      this.summaryAutoSyncInterval = null
+      console.log("Summary auto-sync stopped")
+    }
   }
 
   // Enhanced perform attendance sync with download toast messages
   async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
+  if (!this.electronAPI) {
+    if (!silent) {
+      this.showStatus("Demo mode: Sync simulated successfully!", "success")
+    }
+    return { success: true, message: "Demo sync" }
+  }
+
+  try {
+    // First check if there are attendance records to sync
+    const countResult = await this.electronAPI.getUnsyncedAttendanceCount()
+
+    if (!countResult.success || countResult.count === 0) {
+      if (!silent) {
+        this.showStatus("No attendance records to sync", "info")
+      }
+      
+      // Even if no attendance records, check for summary records
+      return await this.performSummarySync(silent, retryCount, showDownloadToast)
+    }
+
+    // Show download toast for initial sync or when explicitly requested
+    if (showDownloadToast || (!silent && retryCount === 0)) {
+      this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, "info")
+    } else if (!silent) {
+      this.showStatus(`Syncing ${countResult.count} attendance records...`, "info")
+    }
+
+    // Perform the attendance sync
+    const syncResult = await this.electronAPI.syncAttendanceToServer()
+
+    if (syncResult.success) {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast("✅ Attendance data uploaded successfully!", "success")
+      }
+      console.log("Attendance sync successful:", syncResult.message)
+
+      // Update sync info display if settings modal is open
+      if (document.getElementById("settingsModal").classList.contains("show")) {
+        await this.loadSyncInfo()
+      }
+
+      // After successful attendance sync, perform summary sync
+      console.log("Triggering summary sync after attendance sync")
+      const summaryResult = await this.performSummarySync(true, 0, false) // Silent summary sync
+      
+      return {
+        success: true,
+        message: syncResult.message,
+        attendanceSync: syncResult,
+        summarySync: summaryResult
+      }
+    } else {
+      throw new Error(syncResult.message)
+    }
+  } catch (error) {
+    console.error("Attendance sync error:", error)
+
+    // Retry logic
+    if (retryCount < this.syncSettings.retryAttempts) {
+      console.log(
+        `Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+      )
+
+      setTimeout(() => {
+        this.performAttendanceSync(silent, retryCount + 1, showDownloadToast)
+      }, this.syncSettings.retryDelay)
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+          "warning",
+        )
+      }
+    } else {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+          "error",
+        )
+      }
+      return { success: false, message: error.message }
+    }
+  }
+}
+
+async performSummarySync(silent = false, retryCount = 0, showDownloadToast = false) {
+  if (!this.electronAPI) {
+    if (!silent) {
+      this.showStatus("Demo mode: Summary sync simulated successfully!", "success")
+    }
+    return { success: true, message: "Demo summary sync" }
+  }
+
+  try {
+    // Check if there are summary records to sync
+    const countResult = await this.electronAPI.getUnsyncedDailySummaryCount()
+
+    if (!countResult.success || countResult.count === 0) {
+      if (!silent) {
+        this.showStatus("No daily summary records to sync", "info")
+      }
+      return { success: true, message: "No summary records to sync" }
+    }
+
+    // Show download toast for initial sync or when explicitly requested
+    if (showDownloadToast || (!silent && retryCount === 0)) {
+      this.showDownloadToast(`📊 Uploading ${countResult.count} daily summary records to server...`, "info")
+    } else if (!silent) {
+      this.showStatus(`Syncing ${countResult.count} daily summary records...`, "info")
+    }
+
+    // Perform the summary sync
+    const syncResult = await this.electronAPI.syncDailySummaryToServer()
+
+    if (syncResult.success) {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast("✅ Daily summary data uploaded successfully!", "success")
+      }
+      console.log("Daily summary sync successful:", syncResult.message)
+
+      // Update sync info display if settings modal is open
+      if (document.getElementById("settingsModal").classList.contains("show")) {
+        await this.loadSyncInfo()
+      }
+
+      // Reset pending summary sync flag if it exists
+      if (this.pendingSummarySync) {
+        this.pendingSummarySync = false
+      }
+
+      return syncResult
+    } else {
+      throw new Error(syncResult.message)
+    }
+  } catch (error) {
+    console.error("Daily summary sync error:", error)
+
+    // Retry logic
+    if (retryCount < this.syncSettings.retryAttempts) {
+      console.log(
+        `Retrying summary sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+      )
+
+      setTimeout(() => {
+        this.performSummarySync(silent, retryCount + 1, showDownloadToast)
+      }, this.syncSettings.retryDelay)
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+          "warning",
+        )
+      }
+    } else {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Summary upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+          "error",
+        )
+      }
+      
+      // Set pending summary sync flag for later retry
+      this.pendingSummarySync = true
+      
+      return { success: false, message: error.message }
+    }
+  }
+}
+
+// Helper method to perform both syncs sequentially
+async performFullSync(silent = false, showDownloadToast = true) {
+  console.log("Starting full sync (attendance + summary)")
+  
+  try {
+    const result = await this.performAttendanceSync(silent, 0, showDownloadToast)
+    
+    if (result.success) {
+      console.log("Full sync completed successfully")
+      return result
+    } else {
+      console.error("Full sync failed:", result.message)
+      return result
+    }
+  } catch (error) {
+    console.error("Full sync error:", error)
+    return { success: false, message: error.message }
+  }
+}
+
+// Helper method to force sync all data (both attendance and summary)
+async performForceSyncAll(silent = false, showDownloadToast = true) {
+  if (!this.electronAPI) {
+    if (!silent) {
+      this.showStatus("Demo mode: Force sync simulated successfully!", "success")
+    }
+    return { success: true, message: "Demo force sync" }
+  }
+
+  try {
+    if (showDownloadToast || !silent) {
+      this.showDownloadToast("🔄 Force syncing all data to server...", "info")
+    }
+
+    // Force sync attendance data
+    const attendanceResult = await this.electronAPI.forceSyncAllAttendance()
+    
+    // Force sync summary data
+    const summaryResult = await this.electronAPI.forceSyncAllDailySummary()
+
+    if (attendanceResult.success && summaryResult.success) {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `✅ Force sync completed! ${attendanceResult.syncedCount} attendance + ${summaryResult.syncedCount} summary records uploaded`,
+          "success"
+        )
+      }
+      
+      // Update sync info display if settings modal is open
+      if (document.getElementById("settingsModal").classList.contains("show")) {
+        await this.loadSyncInfo()
+      }
+
+      return {
+        success: true,
+        message: "Force sync completed successfully",
+        attendanceSync: attendanceResult,
+        summarySync: summaryResult
+      }
+    } else {
+      const errors = []
+      if (!attendanceResult.success) errors.push(`Attendance: ${attendanceResult.message}`)
+      if (!summaryResult.success) errors.push(`Summary: ${summaryResult.message}`)
+      
+      throw new Error(errors.join('; '))
+    }
+  } catch (error) {
+    console.error("Force sync error:", error)
+    
+    if (showDownloadToast || !silent) {
+      this.showDownloadToast(`❌ Force sync failed: ${error.message}`, "error")
+    }
+    
+    return { success: false, message: error.message }
+  }
+}
+
+  // NEW: Perform summary sync with similar pattern to attendance sync
+  async performSummarySync(silent = false, retryCount = 0, showDownloadToast = false) {
     if (!this.electronAPI) {
       if (!silent) {
-        this.showStatus("Demo mode: Sync simulated successfully!", "success")
+        this.showStatus("Demo mode: Summary sync simulated successfully!", "success")
       }
-      return { success: true, message: "Demo sync" }
+      return { success: true, message: "Demo summary sync" }
     }
 
     try {
-      // First check if there are records to sync
-      const countResult = await this.electronAPI.getUnsyncedAttendanceCount()
+      // First check if there are summary records to sync
+      const countResult = await this.electronAPI.getUnsyncedDailySummaryCount()
 
       if (!countResult.success || countResult.count === 0) {
         if (!silent) {
-          this.showStatus("No attendance records to sync", "info")
+          this.showStatus("No daily summary records to sync", "info")
         }
-        return { success: true, message: "No records to sync" }
+        // Reset pending sync flag if no data to sync
+        this.pendingSummarySync = false
+        return { success: true, message: "No summary records to sync" }
       }
 
       // Show download toast for initial sync or when explicitly requested
       if (showDownloadToast || (!silent && retryCount === 0)) {
-        this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, "info")
+        this.showDownloadToast(`📊 Uploading ${countResult.count} daily summary records to server...`, "info")
       } else if (!silent) {
-        this.showStatus(`Syncing ${countResult.count} attendance records...`, "info")
+        this.showStatus(`Syncing ${countResult.count} daily summary records...`, "info")
       }
 
-      // Perform the sync
-      const syncResult = await this.electronAPI.syncAttendanceToServer()
+      // Perform the summary sync
+      const syncResult = await this.electronAPI.syncDailySummaryToServer()
 
       if (syncResult.success) {
         if (showDownloadToast || !silent) {
-          this.showDownloadToast("✅ Attendance data uploaded successfully!", "success")
+          this.showDownloadToast("✅ Daily summary data uploaded successfully!", "success")
         }
-        console.log("Attendance sync successful:", syncResult.message)
+        console.log("Summary sync successful:", syncResult.message)
+        
+        // Reset pending sync flag
+        this.pendingSummarySync = false
+        this.lastSummaryDataChange = null
 
         // Update sync info display if settings modal is open
         if (document.getElementById("settingsModal").classList.contains("show")) {
-          await this.loadSyncInfo()
+          await this.loadSummaryInfo()
         }
 
         return syncResult
@@ -156,34 +454,41 @@ class AttendanceApp {
         throw new Error(syncResult.message)
       }
     } catch (error) {
-      console.error("Attendance sync error:", error)
+      console.error("Summary sync error:", error)
 
       // Retry logic
-      if (retryCount < this.syncSettings.retryAttempts) {
+      if (retryCount < this.summarySyncSettings.retryAttempts) {
         console.log(
-          `Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+          `Retrying summary sync in ${this.summarySyncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.summarySyncSettings.retryAttempts})`,
         )
 
         setTimeout(() => {
-          this.performAttendanceSync(silent, retryCount + 1, showDownloadToast)
-        }, this.syncSettings.retryDelay)
+          this.performSummarySync(silent, retryCount + 1, showDownloadToast)
+        }, this.summarySyncSettings.retryDelay)
 
         if (showDownloadToast || !silent) {
           this.showDownloadToast(
-            `⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
+            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${this.summarySyncSettings.retryAttempts})`,
             "warning",
           )
         }
       } else {
         if (showDownloadToast || !silent) {
           this.showDownloadToast(
-            `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+            `❌ Summary upload failed after ${this.summarySyncSettings.retryAttempts} attempts: ${error.message}`,
             "error",
           )
         }
         return { success: false, message: error.message }
       }
     }
+  }
+
+  // NEW: Mark that summary data has changed and needs syncing
+  markSummaryDataChanged() {
+    this.pendingSummarySync = true
+    this.lastSummaryDataChange = Date.now()
+    console.log("Summary data marked as changed, pending sync")
   }
 
   // Enhanced save and sync functionality with download toasts
@@ -231,10 +536,12 @@ class AttendanceApp {
       // Get other form values with fallbacks
       const syncIntervalInput = formData.get("syncInterval") || document.getElementById("syncInterval")?.value || "5"
       const gracePeriodInput = formData.get("gracePeriod") || document.getElementById("gracePeriod")?.value || "5"
+      const summarySyncIntervalInput = formData.get("summarySyncInterval") || document.getElementById("summarySyncInterval")?.value || "10"
 
       const settings = {
         server_url: fullServerUrl,
         sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
+        summary_sync_interval: (Number.parseInt(summarySyncIntervalInput) * 60000).toString(),
         grace_period: gracePeriodInput,
       }
 
@@ -249,9 +556,11 @@ class AttendanceApp {
 
       // Update local sync settings
       this.syncSettings.interval = Number.parseInt(settings.sync_interval)
+      this.summarySyncSettings.interval = Number.parseInt(settings.summary_sync_interval)
 
-      // Restart auto-sync with new interval
+      // Restart auto-sync with new intervals
       this.startAutoSync()
+      this.startSummaryAutoSync()
 
       // Update button text and show download toast for employee sync phase
       syncNowBtn.textContent = "📥 Downloading Employees..."
@@ -272,16 +581,25 @@ class AttendanceApp {
       // Update button text to show attendance sync phase
       syncNowBtn.textContent = "📊 Uploading Attendance..."
 
-      // Finally sync attendance with download toast
+      // Then sync attendance with download toast
       const attendanceSyncResult = await this.performAttendanceSync(false, 0, true)
 
-      if (attendanceSyncResult && attendanceSyncResult.success) {
+      // Update button text to show summary sync phase
+      syncNowBtn.textContent = "📈 Uploading Summary..."
+
+      // Finally sync summary data
+      const summarySyncResult = await this.performSummarySync(false, 0, true)
+
+      if (attendanceSyncResult && attendanceSyncResult.success && summarySyncResult && summarySyncResult.success) {
         this.showSettingsStatus("Settings saved and all data synced successfully!", "success")
         await this.loadSyncInfo()
+        await this.loadSummaryInfo()
         // Also refresh the main attendance data
         await this.loadTodayAttendance()
+      } else if (attendanceSyncResult && attendanceSyncResult.success) {
+        this.showSettingsStatus("Settings saved, attendance synced, but summary sync had issues", "warning")
       } else {
-        this.showSettingsStatus("Settings saved, employees synced, but attendance sync had issues", "warning")
+        this.showSettingsStatus("Settings saved, employees synced, but data sync had issues", "warning")
       }
     } catch (error) {
       console.error("Save and sync error:", error)
@@ -422,6 +740,14 @@ class AttendanceApp {
       })
     }
 
+    // NEW: Add manual summary sync button functionality
+    const syncSummaryBtn = document.getElementById("syncSummaryBtn")
+    if (syncSummaryBtn) {
+      syncSummaryBtn.addEventListener("click", () => {
+        this.performSummarySync(false, 0, true) // Not silent, with download toast
+      })
+    }
+
     // Keep input focused but allow interaction with employee display
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".employee-display") && !e.target.closest("button") && !e.target.closest("input")) {
@@ -482,6 +808,7 @@ class AttendanceApp {
     modal.classList.add("show")
     this.loadSettings()
     this.loadSyncInfo()
+    this.loadSummaryInfo() // NEW: Load summary sync info
     this.loadAttendanceSyncInfo()
     this.loadDailySummary()
     this.initializeSettingsTabs()
@@ -519,6 +846,7 @@ class AttendanceApp {
           this.loadDailySummary()
         } else if (tab.dataset.tab === "sync") {
           this.loadSyncInfo()
+          this.loadSummaryInfo() // NEW: Load summary info when sync tab is opened
           this.loadAttendanceSyncInfo()
         }
       })
@@ -531,6 +859,7 @@ class AttendanceApp {
       document.getElementById("serverUrl").value = "URL"
       document.getElementById("syncInterval").value = "5"
       document.getElementById("gracePeriod").value = "5"
+      document.getElementById("summarySyncInterval").value = "10" // NEW: Demo summary sync interval
       return
     }
 
@@ -543,6 +872,8 @@ class AttendanceApp {
         document.getElementById("serverUrl").value = settings.server_url || ""
         document.getElementById("syncInterval").value = Math.floor((settings.sync_interval || 300000) / 60000)
         document.getElementById("gracePeriod").value = settings.grace_period || 5
+        // NEW: Load summary sync interval setting
+        document.getElementById("summarySyncInterval").value = Math.floor((settings.summary_sync_interval || 600000) / 60000)
       }
     } catch (error) {
       console.error("Error loading settings:", error)
@@ -583,6 +914,64 @@ class AttendanceApp {
       }
     } catch (error) {
       console.error("Error loading sync info:", error)
+    }
+  }
+
+  // NEW: Load summary sync information
+  async loadSummaryInfo() {
+    if (!this.electronAPI) {
+      // Demo values
+      const summarySyncInfo = document.getElementById("summarySyncInfo")
+      if (summarySyncInfo) {
+        summarySyncInfo.innerHTML = `
+          <div class="sync-info-item">
+            <strong>Unsynced Summary Records:</strong> 5 (Demo)
+          </div>
+          <div class="sync-info-item">
+            <strong>Summary Auto-sync:</strong> Enabled - Every 10 minutes
+          </div>
+          <div class="sync-info-item">
+            <strong>Last Summary Sync:</strong> 5 minutes ago (Demo)
+          </div>
+        `
+      }
+      return
+    }
+
+    try {
+      const unsyncedResult = await this.electronAPI.getUnsyncedDailySummaryCount()
+      const lastSyncResult = await this.electronAPI.getDailySummaryLastSyncTime()
+      const summarySyncInfo = document.getElementById("summarySyncInfo")
+
+      if (summarySyncInfo) {
+        const syncIntervalMinutes = Math.floor(this.summarySyncSettings.interval / 60000)
+        const syncStatus = this.summarySyncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : "Disabled"
+        
+        let lastSyncText = "Never"
+        if (lastSyncResult.success && lastSyncResult.lastSync && lastSyncResult.lastSync !== '1970-01-01T00:00:00.000Z') {
+          const lastSyncDate = new Date(lastSyncResult.lastSync)
+          const now = new Date()
+          const minutesAgo = Math.floor((now - lastSyncDate) / (1000 * 60))
+          lastSyncText = minutesAgo < 1 ? "Just now" : `${minutesAgo} minutes ago`
+        }
+
+        summarySyncInfo.innerHTML = `
+          <div class="sync-info-item">
+            <strong>Unsynced Summary Records:</strong> ${unsyncedResult.success ? unsyncedResult.count : 0}
+          </div>
+          <div class="sync-info-item">
+            <strong>Summary Auto-sync:</strong> ${syncStatus}
+          </div>
+          <div class="sync-info-item">
+            <strong>Last Summary Sync:</strong> ${lastSyncText}
+          </div>
+          <div class="sync-info-item">
+            <strong>Pending Sync:</strong> ${this.pendingSummarySync ? "Yes" : "No"}
+          </div>
+        `
+      }
+    } catch (error) {
+      console.error("Error loading summary sync info:", error)
     }
   }
 
@@ -745,10 +1134,19 @@ class AttendanceApp {
     switch (message.type) {
       case "attendance_update":
         this.loadTodayAttendance()
+        // Mark summary data as changed since attendance affects summary
+        this.markSummaryDataChanged()
         // Trigger sync after attendance update
         setTimeout(() => {
           this.performAttendanceSync(true) // Silent sync
         }, 2000)
+        break
+      case "summary_update": // NEW: Handle summary-specific updates
+        this.markSummaryDataChanged()
+        // Trigger summary sync
+        setTimeout(() => {
+          this.performSummarySync(true) // Silent summary sync
+        }, 3000)
         break
       default:
         console.log("Unknown WebSocket message:", message)
@@ -844,6 +1242,9 @@ class AttendanceApp {
         this.clearInput()
         await this.loadTodayAttendance()
         this.showStatus("Attendance recorded successfully", "success")
+
+        // NEW: Mark summary data as changed since new attendance affects summary
+        this.markSummaryDataChanged()
 
         // Trigger automatic sync after successful attendance recording
         setTimeout(() => {

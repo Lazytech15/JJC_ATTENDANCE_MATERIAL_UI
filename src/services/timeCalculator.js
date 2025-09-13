@@ -158,14 +158,19 @@ function apply8HourRegularRule(regularHours, overtimeHours) {
 }
 
 function calculateContinuousHours(clockInTime, clockOutTime, startingSession) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  // FIXED: Ensure parameters are Date objects
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+  
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   // Handle overnight shifts - if clock out is earlier in the day than clock in, add 24 hours
   if (clockOutMinutes < clockInMinutes) {
     clockOutMinutes += 24 * 60 // Add 24 hours worth of minutes
     console.log(`Detected overnight shift - adjusted clock out to: ${formatMinutes(clockOutMinutes)} (next day)`)
   }
+
 
   // Working hours boundaries
   const earlyMorningStart = 6 * 60 // 6:00 AM - new early morning boundary
@@ -472,29 +477,55 @@ function calculateSimpleOvertimeHours(overtimeStartTime, clockOutMinutes) {
 }
 
 function calculateContinuousOvertimeHours(startMinutes, endMinutes) {
-  const totalMinutes = endMinutes - startMinutes
+    const totalMinutes = endMinutes - startMinutes
+
+  console.log(`=== EVENING OVERTIME CALCULATION WITH NEW RULE ===`)
+  console.log(`Start: ${formatMinutes(startMinutes)} (${startMinutes} min)`)
+  console.log(`End: ${formatMinutes(endMinutes)} (${endMinutes} min)`)
+  console.log(`Total minutes: ${totalMinutes}`)
 
   if (totalMinutes <= 0) {
+    console.log(`No overtime minutes - returning 0`)
     return 0
   }
 
-  // Convert minutes to hours with 30-minute rounding
+  // Convert minutes to hours with NEW 25-55 minute rounding rule for evening sessions
   const exactHours = totalMinutes / 60
   const wholeHours = Math.floor(exactHours)
   const remainingMinutes = totalMinutes % 60
 
+  console.log(`Exact hours: ${exactHours}`)
+  console.log(`Whole hours: ${wholeHours}`)
+  console.log(`Remaining minutes: ${remainingMinutes}`)
+
   let finalHours = wholeHours
 
-  if (remainingMinutes >= 30) {
+  // NEW EVENING ROUNDING RULE:
+  // 25-55 minutes = 0.5 hours
+  // 55+ minutes = 1 hour
+  // 0-24 minutes = no addition
+  if (remainingMinutes >= 55) {
+    finalHours += 1
+    console.log(`Added 1.0 hour for ${remainingMinutes} remaining minutes (>=55 min rule)`)
+  } else if (remainingMinutes >= 25) {
     finalHours += 0.5
+    console.log(`Added 0.5 hours for ${remainingMinutes} remaining minutes (25-54 min rule)`)
+  } else if (remainingMinutes > 0) {
+    console.log(`${remainingMinutes} remaining minutes < 25 - no addition`)
   }
+
+  console.log(`Final evening overtime hours: ${finalHours}`)
+  console.log(`=== END EVENING OVERTIME CALCULATION ===`)
 
   return finalHours
 }
 
 function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionEnd, gracePeriod) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  const clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  const clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   // FIXED: Don't add grace period to clock out time for regular hours calculation
   // The grace period should only apply to lateness, not extend work time
@@ -586,8 +617,12 @@ function calculateOvertimeHours(regularEndTime, clockOutMinutes, overtimeStart, 
 }
 
 function calculateOvertimeSessionHours(clockInTime, clockOutTime, sessionGracePeriod) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  // FIXED: Ensure parameters are Date objects
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+  
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   // Handle overnight shifts - if clock out is earlier in the day than clock in, add 24 hours
   if (clockOutMinutes < clockInMinutes) {
@@ -611,14 +646,17 @@ function calculateOvertimeSessionHours(clockInTime, clockOutTime, sessionGracePe
 }
 
 function calculateEveningSessionHours(clockInTime, clockOutTime, sessionGracePeriod) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
 
-  console.log(`Evening session calculation - INITIAL:`)
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
+
+  console.log(`Evening session calculation with NEW ROUNDING RULE - INITIAL:`)
   console.log(`- Clock in: ${formatMinutes(clockInMinutes)} (${clockInMinutes} minutes)`)
   console.log(`- Clock out: ${formatMinutes(clockOutMinutes)} (${clockOutMinutes} minutes)`)
 
-  // NEW RULE: Check if this is an overnight shift (next day clock-out)
+  // Check for overnight shift
   let isOvernightShift = false
   if (clockOutMinutes < clockInMinutes) {
     clockOutMinutes += 24 * 60 // Add 24 hours worth of minutes
@@ -631,44 +669,40 @@ function calculateEveningSessionHours(clockInTime, clockOutTime, sessionGracePer
   const totalMinutesWorked = clockOutMinutes - clockInMinutes
   console.log(`- CALCULATED: Total minutes worked = ${clockOutMinutes} - ${clockInMinutes} = ${totalMinutesWorked}`)
 
-  // Evening session time boundaries
-  const eveningStart = 17 * 60 // 17:00 (1020 minutes)
-  const eveningGraceEnd = eveningStart + sessionGracePeriod // 17:15 (1035 minutes)
-  const regularOvertimeEnd = 22 * 60 // 22:00 (end of regular overtime)
-  const nightShiftEnd = 6 * 60 + 24 * 60 // 6:00 AM next day (1800 minutes)
-
-  console.log(`- Evening start: ${formatMinutes(eveningStart)} (17:00)`)
-  console.log(`- Grace period end: ${formatMinutes(eveningGraceEnd)} (17:15)`)
-  console.log(`- Regular overtime end: ${formatMinutes(regularOvertimeEnd)} (22:00)`)
-  console.log(`- Night shift end: ${formatMinutes(nightShiftEnd)} (06:00 next day)`)
-
   if (totalMinutesWorked <= 0) {
     console.log(`- Result: 0 hours (no time worked - ${totalMinutesWorked} minutes)`)
     return 0
   }
 
-  // NEW RULE: If this is an overnight shift extending to the next day,
-  // treat it as continuous hours calculation instead of session-based
+  let totalHours = 0
+
+  // Apply appropriate calculation method
   if (isOvernightShift) {
-    console.log(`=== APPLYING CONTINUOUS HOURS RULE FOR OVERNIGHT EVENING SESSION ===`)
-    return calculateEveningContinuousHours(
+    console.log(`=== APPLYING CONTINUOUS HOURS WITH NEW EVENING RULE ===`)
+    totalHours = calculateEveningContinuousHours(
       clockInTime,
       clockOutTime,
       clockInMinutes,
       clockOutMinutes,
       sessionGracePeriod,
     )
+  } else {
+    // Original session calculation for same-day evening work with NEW RULE
+    console.log(`=== APPLYING ORIGINAL SESSION CALCULATION WITH NEW RULE ===`)
+    const eveningStart = 17 * 60 // 17:00
+    const eveningGraceEnd = eveningStart + sessionGracePeriod // 17:15
+
+    totalHours = calculateOriginalEveningSession(
+      clockInMinutes,
+      clockOutMinutes,
+      eveningStart,
+      eveningGraceEnd,
+      sessionGracePeriod,
+    )
   }
 
-  // Original session-based calculation for same-day evening sessions
-  console.log(`- SAME-DAY EVENING SESSION: Using original session calculation`)
-  return calculateOriginalEveningSession(
-    clockInMinutes,
-    clockOutMinutes,
-    eveningStart,
-    eveningGraceEnd,
-    sessionGracePeriod,
-  )
+  console.log(`Evening session calculation with NEW RULE complete: ${totalHours} hours`)
+  return totalHours
 }
 
 function calculateOriginalEveningSession(
@@ -700,7 +734,7 @@ function calculateOriginalEveningSession(
 
   totalHours += firstHourCredit
 
-  // Calculate remaining hours after 18:00
+  // Calculate remaining hours after 18:00 using EVENING ROUNDING RULE
   if (clockOutMinutes > firstHourEnd) {
     const remainingStart = Math.max(clockInMinutes, firstHourEnd)
     const remainingMinutes = clockOutMinutes - remainingStart
@@ -708,30 +742,34 @@ function calculateOriginalEveningSession(
     console.log(`- Remaining time after 18:00: ${remainingMinutes} minutes`)
 
     if (remainingMinutes > 0) {
-      // Convert remaining minutes to hours with 30-minute rounding
-      const exactRemainingHours = remainingMinutes / 60
-      const wholeRemainingHours = Math.floor(exactRemainingHours)
+      // EVENING SESSION SPECIFIC RULE:
+      // 25-55 minutes = 0.5 hours
+      // 56+ minutes = 1 hour
+      // 0-24 minutes = no addition
+      const wholeHours = Math.floor(remainingMinutes / 60)
       const remainingFraction = remainingMinutes % 60
 
-      let additionalHours = wholeRemainingHours
+      let additionalHours = wholeHours
 
-      if (remainingFraction >= 30) {
+      if (remainingFraction >= 56) {
+        additionalHours += 1
+        console.log(`- Added 1.0 hour for ${remainingFraction} remaining minutes (>=56 min evening rule)`)
+      } else if (remainingFraction >= 25) {
         additionalHours += 0.5
-        console.log(`- Remaining: ${wholeRemainingHours} whole hours + 0.5 for ${remainingFraction} minutes`)
+        console.log(`- Added 0.5 hours for ${remainingFraction} remaining minutes (25-55 min evening rule)`)
       } else if (remainingFraction > 0) {
-        console.log(`- Remaining: ${wholeRemainingHours} whole hours (${remainingFraction} minutes < 30, no addition)`)
+        console.log(`- ${remainingFraction} remaining minutes < 25 - no addition (evening rule)`)
       }
 
       totalHours += additionalHours
-      console.log(`- Additional hours after 18:00: ${additionalHours}`)
+      console.log(`- Additional hours after 18:00 (with evening rule): ${additionalHours}`)
     }
   }
 
-  console.log(`- ORIGINAL SESSION CALCULATION: First hour (${firstHourCredit}) + Additional = ${totalHours}`)
+  console.log(`- EVENING SESSION WITH EVENING ROUNDING RULE: First hour (${firstHourCredit}) + Additional = ${totalHours}`)
   return totalHours
 }
 
-// NEW FUNCTION: Continuous hours calculation for overnight evening sessions
 function calculateEveningContinuousHours(
   clockInTime,
   clockOutTime,
@@ -739,20 +777,18 @@ function calculateEveningContinuousHours(
   clockOutMinutes,
   sessionGracePeriod,
 ) {
-  console.log(`=== EVENING CONTINUOUS HOURS CALCULATION ===`)
+  console.log(`=== EVENING CONTINUOUS HOURS WITH NEW ROUNDING RULE ===`)
   console.log(`This evening session extends to the next day - calculating as continuous work`)
 
   // Time boundaries for continuous calculation
   const eveningStart = 17 * 60 // 17:00
   const regularOvertimeEnd = 22 * 60 // 22:00 (end of regular overtime)
   const nightShiftEnd = 6 * 60 + 24 * 60 // 6:00 AM next day
-  const regularGracePeriod = 5 // 5 minutes grace for regular hours
 
   let totalOvertimeHours = 0
   const calculationBreakdown = []
 
-  // SEGMENT 1: Evening overtime (17:00-22:00)
-  // Apply session grace period only to the first segment
+  // SEGMENT 1: Evening overtime (17:00-22:00) with NEW ROUNDING RULE
   const eveningOvertimeStart = Math.max(clockInMinutes, eveningStart)
   const eveningOvertimeEnd = Math.min(clockOutMinutes, regularOvertimeEnd)
 
@@ -769,24 +805,24 @@ function calculateEveningContinuousHours(
       console.log(`- Grace period applied: ${gracePeriodBenefit} minutes benefit`)
     }
 
-    const eveningOvertimeMinutes = eveningOvertimeEnd - effectiveEveningStart
-    const eveningOvertimeHours = calculateContinuousOvertimeHours(effectiveEveningStart, eveningOvertimeEnd)
+    // Use NEW evening overtime calculation with 25-55 minute rule
+    const eveningOvertimeHours = calculateEveningSessionHours(effectiveEveningStart, eveningOvertimeEnd)
 
     totalOvertimeHours += eveningOvertimeHours
     calculationBreakdown.push(
       `Evening overtime (${formatMinutes(effectiveEveningStart)}-${formatMinutes(eveningOvertimeEnd)}): ${eveningOvertimeHours} hours${gracePeriodApplied ? " (with grace period)" : ""}`,
     )
 
-    console.log(`- Evening overtime segment: ${eveningOvertimeHours} hours (${eveningOvertimeMinutes} minutes)`)
+    console.log(`- Evening overtime segment with NEW RULE: ${eveningOvertimeHours} hours`)
   }
 
-  // SEGMENT 2: Night shift overtime (22:00-06:00 next day)
+  // SEGMENT 2: Night shift overtime (22:00-06:00 next day) - keep original 30-minute rule
   if (clockOutMinutes > regularOvertimeEnd) {
     const nightShiftStart = Math.max(clockInMinutes, regularOvertimeEnd)
     const nightShiftEndTime = Math.min(clockOutMinutes, nightShiftEnd)
 
     if (nightShiftEndTime > nightShiftStart) {
-      const nightShiftMinutes = nightShiftEndTime - nightShiftStart
+      // Use original 30-minute rule for night shift
       const nightShiftHours = calculateContinuousOvertimeHours(nightShiftStart, nightShiftEndTime)
 
       totalOvertimeHours += nightShiftHours
@@ -794,16 +830,16 @@ function calculateEveningContinuousHours(
         `Night shift overtime (${formatMinutes(nightShiftStart)}-${formatMinutes(nightShiftEndTime)}): ${nightShiftHours} hours`,
       )
 
-      console.log(`- Night shift segment: ${nightShiftHours} hours (${nightShiftMinutes} minutes)`)
+      console.log(`- Night shift segment (original 30-min rule): ${nightShiftHours} hours`)
     }
   }
 
-  // SEGMENT 3: Extended night work (06:00+ next day) - if applicable
+  // SEGMENT 3: Extended night work (06:00+ next day) - keep original 30-minute rule
   if (clockOutMinutes > nightShiftEnd) {
     const extendedNightStart = nightShiftEnd
     const extendedNightEnd = clockOutMinutes
 
-    const extendedNightMinutes = extendedNightEnd - extendedNightStart
+    // Use original 30-minute rule for extended night work
     const extendedNightHours = calculateContinuousOvertimeHours(extendedNightStart, extendedNightEnd)
 
     totalOvertimeHours += extendedNightHours
@@ -811,24 +847,25 @@ function calculateEveningContinuousHours(
       `Extended night work (${formatMinutes(extendedNightStart)}-${formatMinutes(extendedNightEnd)}): ${extendedNightHours} hours`,
     )
 
-    console.log(`- Extended night segment: ${extendedNightHours} hours (${extendedNightMinutes} minutes)`)
+    console.log(`- Extended night segment (original 30-min rule): ${extendedNightHours} hours`)
     console.log(`- WARNING: Work extended beyond 6:00 AM - please verify this is correct`)
   }
 
-  console.log(`=== CONTINUOUS EVENING CALCULATION SUMMARY ===`)
+  console.log(`=== EVENING CONTINUOUS CALCULATION SUMMARY WITH NEW RULE ===`)
   calculationBreakdown.forEach((line) => console.log(`- ${line}`))
   console.log(`- Total continuous overtime hours: ${totalOvertimeHours}`)
-  console.log(
-    `- Total work duration: ${formatMinutes(clockOutMinutes - clockInMinutes)} (${clockOutMinutes - clockInMinutes} minutes)`,
-  )
-  console.log(`=== END CONTINUOUS EVENING CALCULATION ===`)
+  console.log(`=== END EVENING CONTINUOUS CALCULATION ===`)
 
   return totalOvertimeHours
 }
 
 function calculateEveningSessionHoursWithStats(clockInTime, clockOutTime, sessionGracePeriod, statisticsData) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  // FIXED: Ensure parameters are Date objects
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+  
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   console.log(`Evening session calculation with stats - INITIAL:`)
   console.log(`- Clock in: ${formatMinutes(clockInMinutes)} (${clockInMinutes} minutes)`)
@@ -863,15 +900,15 @@ function calculateEveningSessionHoursWithStats(clockInTime, clockOutTime, sessio
 
   let totalHours = 0
 
-  // NEW RULE: Apply continuous hours calculation for overnight shifts
+  // Apply continuous hours calculation for overnight shifts
   if (isOvernightShift) {
     console.log(`=== APPLYING CONTINUOUS HOURS WITH STATS ===`)
     statisticsData.calculationMethod = "Evening Continuous Overtime"
     statisticsData.specialNotes = "Evening session extended to next day - calculated as continuous work"
 
     totalHours = calculateEveningContinuousHoursWithStats(
-      clockInTime,
-      clockOutTime,
+      safeClockInTime,  // Pass the safe Date objects
+      safeClockOutTime,
       clockInMinutes,
       clockOutMinutes,
       sessionGracePeriod,
@@ -1007,23 +1044,36 @@ function calculateOriginalEveningSessionWithStats(clockInMinutes, clockOutMinute
 
   totalHours += firstHourCredit
 
-  // Calculate additional hours after 18:00
+  // Calculate additional hours after 18:00 using EVENING-SPECIFIC ROUNDING RULE
   let additionalHours = 0
   if (clockOutMinutes > firstHourEnd) {
     const remainingStart = Math.max(clockInMinutes, firstHourEnd)
     const remainingMinutes = clockOutMinutes - remainingStart
 
     if (remainingMinutes > 0) {
+      console.log(`- Remaining time after 18:00: ${remainingMinutes} minutes`)
+
+      // EVENING SESSION SPECIFIC RULE:
+      // 25-55 minutes = 0.5 hours
+      // 56+ minutes = 1 hour  
+      // 0-24 minutes = no addition
       const wholeHours = Math.floor(remainingMinutes / 60)
       const remainingFraction = remainingMinutes % 60
 
       additionalHours = wholeHours
-      if (remainingFraction >= 30) {
+
+      if (remainingFraction >= 56) {
+        additionalHours += 1
+        console.log(`- Added 1.0 hour for ${remainingFraction} remaining minutes (>=56 min evening rule)`)
+      } else if (remainingFraction >= 25) {
         additionalHours += 0.5
+        console.log(`- Added 0.5 hours for ${remainingFraction} remaining minutes (25-55 min evening rule)`)
+      } else if (remainingFraction > 0) {
+        console.log(`- ${remainingFraction} remaining minutes < 25 - no addition (evening rule)`)
       }
 
       totalHours += additionalHours
-      console.log(`- Additional hours after 18:00: ${additionalHours}`)
+      console.log(`- Additional hours after 18:00 with evening rule: ${additionalHours}`)
     }
   }
 
@@ -1033,9 +1083,9 @@ function calculateOriginalEveningSessionWithStats(clockInMinutes, clockOutMinute
   statisticsData.latenessMinutes = latenessMinutes
   statisticsData.firstHourCredit = firstHourCredit
   statisticsData.additionalHours = additionalHours
-  statisticsData.specialNotes = `Session-based evening: first=${firstHourCredit}, additional=${additionalHours}, total=${totalHours}`
+  statisticsData.specialNotes = `Evening session with special rounding: first=${firstHourCredit}, additional=${additionalHours}, total=${totalHours}`
 
-  console.log(`- ORIGINAL SESSION WITH STATS: ${totalHours} hours`)
+  console.log(`- EVENING SESSION WITH SPECIAL ROUNDING: ${totalHours} hours`)
   return totalHours
 }
 
@@ -1708,8 +1758,10 @@ function calculateHoursWithStats(
  * Enhanced continuous hours calculation that tracks statistics
  */
 function calculateContinuousHoursWithStats(clockInTime, clockOutTime, startingSession, statisticsData) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = clockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   // Handle overnight shifts - if clock out is earlier in the day than clock in, add 24 hours
   if (clockOutMinutes < clockInMinutes) {
@@ -2042,8 +2094,11 @@ function calculateContinuousHoursWithStats(clockInTime, clockOutTime, startingSe
  * Enhanced overtime session calculation with statistics tracking
  */
 function calculateOvertimeSessionHoursWithStats(clockInTime, clockOutTime, sessionGracePeriod, statisticsData) {
-  const clockInMinutes = clockInTime.getHours() * 60 + clockInTime.getMinutes()
-  let clockOutMinutes = clockOutTime.getHours() * 60 + clockOutTime.getMinutes()
+
+  const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
+  const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
+  const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
+  let clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
   // Handle overnight shifts
   if (clockOutMinutes < clockInMinutes) {

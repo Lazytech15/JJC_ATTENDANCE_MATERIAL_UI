@@ -437,9 +437,33 @@ class ProfileService {
     }
   }
 
-  // UPDATED: Check profile images with better reporting
-  async checkProfileImages(employeeUids = []) {
+    async checkProfileImages(employeeUids = []) {
+      console.log(employeeUids);
     try {
+      // Ensure employeeUids is an array
+      if (!Array.isArray(employeeUids)) {
+        console.warn('employeeUids is not an array, converting...', typeof employeeUids, employeeUids)
+        if (employeeUids == null || employeeUids === undefined) {
+          employeeUids = []
+        } else if (typeof employeeUids === 'number') {
+          employeeUids = [employeeUids]
+        } else if (typeof employeeUids === 'string') {
+          // Try to parse as JSON array or comma-separated values
+          try {
+            const parsed = JSON.parse(employeeUids)
+            employeeUids = Array.isArray(parsed) ? parsed : [parsed]
+          } catch {
+            // If not JSON, try comma-separated
+            employeeUids = employeeUids.split(',').map(uid => parseInt(uid.trim())).filter(uid => !isNaN(uid))
+          }
+        } else if (employeeUids[Symbol.iterator] && typeof employeeUids[Symbol.iterator] === 'function') {
+          // Convert iterable to array
+          employeeUids = Array.from(employeeUids)
+        } else {
+          employeeUids = []
+        }
+      }
+
       let downloadedCount = 0
       const downloaded = []
       const missing = []
@@ -458,7 +482,7 @@ class ProfileService {
             profileDetails[uid] = {
               path: profilePath,
               size: stats.size,
-              modified: stats.mtime,
+              modified: stats.mtime.toISOString(), // Convert Date to string
               extension: path.extname(profilePath)
             }
           } catch (error) {
@@ -473,7 +497,7 @@ class ProfileService {
         success: true,
         downloaded: downloadedCount,
         total: employeeUids.length,
-        percentage: Math.round((downloadedCount / employeeUids.length) * 100),
+        percentage: employeeUids.length > 0 ? Math.round((downloadedCount / employeeUids.length) * 100) : 0,
         downloadedUids: downloaded,
         missingUids: missing,
         profileDetails: profileDetails
@@ -487,13 +511,13 @@ class ProfileService {
         total: 0,
         percentage: 0,
         downloadedUids: [],
-        missingUids: employeeUids
+        missingUids: Array.isArray(employeeUids) ? employeeUids : []
       }
     }
   }
 
   // UPDATED: Get all locally stored profile images with enhanced info
-  async checkAllProfileImages() {
+   async checkAllProfileImages() {
     try {
       const files = await fs.readdir(this.profilesDir)
       const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
@@ -516,8 +540,8 @@ class ProfileService {
                 path: filePath,
                 extension: ext,
                 size: stats.size,
-                modified: stats.mtime,
-                created: stats.birthtime
+                modified: stats.mtime.toISOString(), // Convert Date to string
+                created: stats.birthtime.toISOString() // Convert Date to string
               })
             } catch (error) {
               console.warn(`Could not get stats for ${file}:`, error)
@@ -529,17 +553,26 @@ class ProfileService {
       // Sort by UID
       profiles.sort((a, b) => a.uid - b.uid)
       
+      // Find oldest and newest profiles safely
+      let oldestProfile = null
+      let newestProfile = null
+      
+      if (profiles.length > 0) {
+        oldestProfile = profiles.reduce((oldest, p) => 
+          new Date(p.modified) < new Date(oldest.modified) ? p : oldest
+        )
+        newestProfile = profiles.reduce((newest, p) => 
+          new Date(p.modified) > new Date(newest.modified) ? p : newest
+        )
+      }
+      
       return {
         success: true,
         downloaded: profiles.length,
         profiles: profiles,
         totalSize: profiles.reduce((sum, p) => sum + p.size, 0),
-        oldestProfile: profiles.length > 0 ? profiles.reduce((oldest, p) => 
-          p.modified < oldest.modified ? p : oldest
-        ) : null,
-        newestProfile: profiles.length > 0 ? profiles.reduce((newest, p) => 
-          p.modified > newest.modified ? p : newest
-        ) : null
+        oldestProfile: oldestProfile,
+        newestProfile: newestProfile
       }
     } catch (error) {
       console.error("Error checking all profile images:", error)

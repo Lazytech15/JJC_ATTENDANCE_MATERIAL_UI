@@ -144,7 +144,7 @@ async function loadModules() {
 function loadRoutes() {
   const routes = {}
 
-  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb"]
+  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb", "summary-sync"]
 
   routeModules.forEach((moduleName) => {
     try {
@@ -705,9 +705,24 @@ function registerIpcHandlers(routes) {
     "getTodayStatistics",
   )
 
+  // Daily summary handlers (from attendancedb module)
   const dailysummary = routes.attendancedb || {}
-  console.log("Employee routes available:", Object.keys(dailysummary))
+  console.log("Daily summary routes available:", Object.keys(dailysummary))
   safelyRegisterHandler("get-daily-summary", dailysummary.getDailySummary, dailysummary, "getDailySummary")
+
+  // Summary sync handlers (FIXED: using bracket notation for hyphenated property)
+  const summarySync = routes["summary-sync"] || {}
+  console.log("Summary sync routes available:", Object.keys(summarySync))
+  safelyRegisterHandler("get-All-daily-summary-for-sync", summarySync.getAllDailySummaryForSync, summarySync, "getAllDailySummaryForSync")
+  safelyRegisterHandler("sync-daily-summary-to-server", summarySync.syncDailySummaryToServer, summarySync, "syncDailySummaryToServer")
+  safelyRegisterHandler("get-unsynced-daily-summary-count", summarySync.getUnsyncedDailySummaryCount, summarySync, "getUnsyncedDailySummaryCount")
+  safelyRegisterHandler("force-sync-all-daily-summary", summarySync.forceSyncAllDailySummary, summarySync, "forceSyncAllDailySummary")
+  safelyRegisterHandler("get-daily-summary-last-sync-time", summarySync.getDailySummaryLastSyncTime, summarySync, "getDailySummaryLastSyncTime")
+
+  // NEW: Additional summary sync handlers for enhanced functionality
+  safelyRegisterHandler("mark-summary-data-changed", summarySync.markSummaryDataChanged, summarySync, "markSummaryDataChanged")
+  safelyRegisterHandler("get-summary-data-change-status", summarySync.getSummaryDataChangeStatus, summarySync, "getSummaryDataChangeStatus")
+  safelyRegisterHandler("reset-summary-data-change-status", summarySync.resetSummaryDataChangeStatus, summarySync, "resetSummaryDataChangeStatus")
 
   // Settings route handlers
   const settingsRoutes = routes.settings || {}
@@ -755,15 +770,51 @@ function registerIpcHandlers(routes) {
     "markAttendanceAsSynced",
   )
 
-  // Profile service handlers
-  const profileServices = routes.profileServices || {}
-  console.log("Profile services available:", Object.keys(profileServices))
-  safelyRegisterHandler(
-    "check-profile-images",
-    profileServices.checkProfileImages,
-    profileServices,
-    "checkProfileImages",
-  )
+// Replace your existing profile services handler registration section with this:
+
+// Profile service handlers
+const profileServices = routes.profileServices || {}
+console.log("Profile services available:", Object.keys(profileServices))
+
+// FIXED: Properly wrap the checkProfileImages handler to avoid passing event object
+ipcMain.handle("check-profile-images", async (event, employeeUids) => {
+  try {
+    console.log("IPC Handler - check-profile-images called with:", typeof employeeUids, employeeUids)
+    
+    // Don't pass the event object - call the service function directly
+    if (profileServices.checkProfileImages && typeof profileServices.checkProfileImages === 'function') {
+      // If employeeUids is provided, pass it; otherwise call without parameters
+      const result = employeeUids ? 
+        await profileServices.checkProfileImages(employeeUids) : 
+        await profileServices.checkProfileImages()
+      
+      return result
+    } else {
+      console.error("checkProfileImages function not available in profileServices")
+      return {
+        success: false,
+        error: "Profile service not available",
+        downloaded: 0,
+        total: 0,
+        percentage: 0,
+        downloadedUids: [],
+        missingUids: []
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - check-profile-images:", error)
+    return {
+      success: false,
+      error: error.message,
+      downloaded: 0,
+      total: 0,
+      percentage: 0,
+      downloadedUids: [],
+      missingUids: []
+    }
+  }
+})
+
 
   console.log("✓ IPC handlers registration complete")
 }
