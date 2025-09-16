@@ -520,6 +520,7 @@ function calculateContinuousOvertimeHours(startMinutes, endMinutes) {
   return finalHours
 }
 
+
 function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionEnd, gracePeriod) {
   const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
   const safeClockOutTime = clockOutTime instanceof Date ? clockOutTime : new Date(clockOutTime)
@@ -527,8 +528,6 @@ function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionE
   const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
   const clockOutMinutes = safeClockOutTime.getHours() * 60 + safeClockOutTime.getMinutes()
 
-  // FIXED: Don't add grace period to clock out time for regular hours calculation
-  // The grace period should only apply to lateness, not extend work time
   const actualStartTime = Math.max(clockInMinutes, sessionStart)
   const actualEndTime = Math.min(clockOutMinutes, sessionEnd)
 
@@ -536,73 +535,52 @@ function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionE
     return 0
   }
 
-  // FIXED: Calculate hours based on actual time worked, respecting hour boundaries
-  const totalMinutesWorked = actualEndTime - actualStartTime
-
-  console.log(`Regular hours calculation:`)
+  console.log(`Regular hours calculation with 45-minute rule:`)
   console.log(`- Session: ${formatMinutes(sessionStart)} - ${formatMinutes(sessionEnd)}`)
   console.log(`- Clock in: ${formatMinutes(clockInMinutes)} -> Effective: ${formatMinutes(actualStartTime)}`)
   console.log(`- Clock out: ${formatMinutes(clockOutMinutes)} -> Effective: ${formatMinutes(actualEndTime)}`)
-  console.log(`- Minutes worked: ${totalMinutesWorked}`)
 
-  const sessionDurationMinutes = sessionEnd - sessionStart
-  const sessionHours = sessionDurationMinutes / 60
+  // Calculate total time worked in minutes, then round to nearest 30 minutes (0.5 hour)
+  const totalMinutesWorked = actualEndTime - actualStartTime
+  console.log(`- Total minutes worked: ${totalMinutesWorked}`)
 
-  let totalHours = 0
+  // Calculate lateness from session start
+  const lateMinutes = Math.max(0, clockInMinutes - sessionStart)
+  console.log(`- Late by: ${lateMinutes} minutes`)
 
-  // Process each hour in the session
-  for (let hourIndex = 0; hourIndex < sessionHours; hourIndex++) {
-    const hourStartTime = sessionStart + hourIndex * 60
-    const hourEndTime = sessionStart + (hourIndex + 1) * 60
+  let finalHours = 0
 
-    // Check if this hour is worked at all
-    if (actualEndTime <= hourStartTime || actualStartTime >= hourEndTime) {
-      // Hour not worked at all
-      console.log(`- Hour ${hourIndex + 1} (${formatMinutes(hourStartTime)}-${formatMinutes(hourEndTime)}): Not worked`)
-      continue
-    }
-
-    // Calculate work time within this hour
-    const hourWorkStart = Math.max(actualStartTime, hourStartTime)
-    const hourWorkEnd = Math.min(actualEndTime, hourEndTime)
-    const hourWorkMinutes = hourWorkEnd - hourWorkStart
-
-    // FIXED: Calculate how late they were for this specific hour
-    const lateForThisHour = Math.max(0, clockInMinutes - hourStartTime)
-
-    console.log(`- Hour ${hourIndex + 1} (${formatMinutes(hourStartTime)}-${formatMinutes(hourEndTime)}):`)
-    console.log(`  Work time: ${formatMinutes(hourWorkStart)}-${formatMinutes(hourWorkEnd)} (${hourWorkMinutes} min)`)
-    console.log(`  Late by: ${lateForThisHour} minutes`)
-
-    // FIXED: Only count hours if they actually worked a significant portion
-    // OR if they were on time for the hour start
-    if (lateForThisHour <= gracePeriod) {
-      // They were on time for this hour - check if they worked enough
-      if (hourWorkMinutes >= 30) {
-        // Worked at least 30 minutes - give full hour
-        totalHours += 1
-        console.log(`  Result: 1 hour (on time and worked >= 30 min)`)
-      } else if (hourWorkMinutes > 0) {
-        // Worked less than 30 minutes - give half hour
-        totalHours += 0.5
-        console.log(`  Result: 0.5 hours (on time but worked < 30 min)`)
-      }
-    } else if (lateForThisHour > gracePeriod && lateForThisHour <= 30) {
-      // 6-30 minutes late - only count if they worked at least 30 minutes
-      if (hourWorkMinutes >= 30) {
-        totalHours += 0.5
-        console.log(`  Result: 0.5 hours (late 6-30 min but worked >= 30 min)`)
-      } else {
-        console.log(`  Result: 0 hours (late 6-30 min and worked < 30 min)`)
-      }
-    } else {
-      // More than 30 minutes late
-      console.log(`  Result: 0 hours (too late)`)
-    }
+  if (lateMinutes <= gracePeriod) {
+    // On time - give full credit for time worked, rounded up to nearest 0.5 hour
+    finalHours = Math.ceil(totalMinutesWorked / 30) * 0.5
+    console.log(`- On time: ${totalMinutesWorked} minutes rounded up to nearest 0.5hr = ${finalHours} hours`)
+  } else if (lateMinutes <= 45) {
+    // Late but within 45-minute threshold - give time worked rounded to nearest 0.5 hour (not up)
+    finalHours = Math.round(totalMinutesWorked / 30) * 0.5
+    console.log(`- Late ${lateMinutes} min (≤45): ${totalMinutesWorked} minutes rounded to nearest 0.5hr = ${finalHours} hours`)
+  } else {
+    // More than 45 minutes late - deduct 1 hour from worked time
+    const penalizedMinutes = Math.max(0, totalMinutesWorked - 60)
+    finalHours = Math.round(penalizedMinutes / 30) * 0.5
+    console.log(`- Late ${lateMinutes} min (>45): ${totalMinutesWorked} - 60 penalty = ${penalizedMinutes} minutes = ${finalHours} hours`)
   }
 
-  console.log(`- Total regular hours: ${totalHours}`)
-  return totalHours
+  console.log(`- Final regular hours: ${finalHours}`)
+  return finalHours
+}
+
+// Helper function to format minutes for display
+function formatMinutes(minutes) {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+
+  // Handle next day display
+  if (hours >= 24) {
+    const displayHours = hours - 24
+    return `${displayHours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} (+1 day)`
+  }
+
+  return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
 }
 
 function calculateOvertimeHours(regularEndTime, clockOutMinutes, overtimeStart, overtimeGracePeriod) {
@@ -1090,18 +1068,18 @@ function calculateOriginalEveningSessionWithStats(clockInMinutes, clockOutMinute
 }
 
 // Updated helper function to handle 24+ hour formatting
-function formatMinutes(minutes) {
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
+// function formatMinutes(minutes) {
+//   const hours = Math.floor(minutes / 60)
+//   const mins = minutes % 60
 
-  // Handle next day display
-  if (hours >= 24) {
-    const displayHours = hours - 24
-    return `${displayHours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} (+1 day)`
-  }
+//   // Handle next day display
+//   if (hours >= 24) {
+//     const displayHours = hours - 24
+//     return `${displayHours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} (+1 day)`
+//   }
 
-  return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
-}
+//   return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
+// }
 
 function isLate(clockType, clockTime) {
   const hour = clockTime.getHours()

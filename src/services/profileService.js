@@ -2,8 +2,7 @@ const fs = require("fs").promises
 const path = require("path")
 const https = require("https")
 const http = require("http")
-const yauzl = require("yauzl") 
-const { pipeline } = require('stream/promises')
+const yauzl = require("yauzl")
 
 class ProfileService {
   constructor() {
