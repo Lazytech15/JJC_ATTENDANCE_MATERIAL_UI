@@ -21,7 +21,7 @@
   "author": "Dev. Emmmanuel S. Ablao",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^27.0.0",
+    "electron": "^39.0.0",
     "electron-builder": "^24.6.4"
   },
   "dependencies": {
@@ -31,7 +31,6 @@
     "express": "^5.1.0",
     "node-fetch": "^2.6.7",
     "services": "^0.0.3",
-    "sqlite3": "^5.1.7",
     "ws": "^8.14.2",
     "xlsx": "^0.18.5",
     "yauzl": "^3.2.0",

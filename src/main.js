@@ -279,7 +279,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    // autoHideMenuBar: true,
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false, // ✅ Secure
       contextIsolation: true, // ✅ Secure
