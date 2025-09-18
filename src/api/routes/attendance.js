@@ -60,8 +60,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       const attendanceRecord = await Attendance.clockIn(
         employee, 
         clockType, 
-        profileService, 
-        await getServerUrl(),
+        profileService.ensureProfilesDirectory(),
         pendingClockOut.clockTime,
         input
       )
@@ -206,8 +205,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
         const attendanceRecord = await Attendance.clockIn(
           employee, 
           expectedClockOut.expectedClockOut, 
-          profileService, 
-          await getServerUrl(),
+          profileService.ensureProfilesDirectory,
           expectedClockOut.clockTime,
           input
         )
@@ -311,7 +309,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
 
     // Process normal clock-in
     const completedSessions = getTodaysCompletedSessions(employee.uid, today, db)
-    const attendanceRecord = await Attendance.clockIn(employee, clockType, profileService, await getServerUrl(), null, input)
+    const attendanceRecord = await Attendance.clockIn(employee, clockType, profileService.ensureProfilesDirectory(), null, input)
 
     console.log(`Successfully clocked in with type: ${clockType}`)
 
@@ -742,19 +740,15 @@ async function generateAttendanceReportWithSummaries(event, { startDate, endDate
 }
 
 // Keep existing helper functions and other functions...
-async function getServerUrl() {
-  try {
-    const settingsResult = await settingsRoutes.getSettings()
-    return settingsResult.success ? settingsResult.data.serverUrl : "http://localhost:3000"
-  } catch (error) {
-    console.error("Error getting server URL:", error)
-    return "http://localhost:3000"
-  }
-}
-
-function isClockIn(clockType) {
-  return clockType.endsWith("_in")
-}
+// async function getProfilesDirectory() {
+//   try {
+//     const settingsResult = await settingsRoutes.getSettings()
+//     return settingsResult.success ? settingsResult.data.serverUrl : "http://localhost:3000"
+//   } catch (error) {
+//     console.error("Error getting server URL:", error)
+//     return "http://localhost:3000"
+//   }
+// }
 
 function isValidClockOut(clockType) {
   return clockType.endsWith("_out")

@@ -280,7 +280,7 @@ class Attendance {
     let profilePath = null;
     if (profileService) {
       try {
-        const existingProfilePath = profileService.getLocalProfilePath(
+        const existingProfilePath = profileService.ensureProfilesDirectory(
           employee.id_number
         );
         const profileExists = await profileService.profileExists(
@@ -431,7 +431,7 @@ class Attendance {
     // Add local profile paths to attendance records
     return attendance.map((record) => {
       try {
-        const profilePath = profileService.getLocalProfilePath(
+        const profilePath = profileService.ensureProfilesDirectory(
           record.employee_uid
         );
         const profileExists = require("fs").existsSync(profilePath);
@@ -556,7 +556,7 @@ class Attendance {
 
     return currentlyClocked.map((record) => {
       try {
-        const profilePath = profileService.getLocalProfilePath(
+        const profilePath = profileService.ensureProfilesDirectory(
           record.employee_uid
         );
         const profileExists = require("fs").existsSync(profilePath);
@@ -716,7 +716,7 @@ class Attendance {
 
     return overtimeEmployees.map((record) => {
       try {
-        const profilePath = profileService.getLocalProfilePath(
+        const profilePath = profileService.ensureProfilesDirectory(
           record.employee_uid
         );
         const profileExists = require("fs").existsSync(profilePath);

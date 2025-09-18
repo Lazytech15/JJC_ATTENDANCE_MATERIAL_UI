@@ -1,783 +1,962 @@
 // Import SheetJS library
 class AttendanceApp {
   constructor() {
-    this.ws = null
-    this.employeeDisplayTimeout = null
-    this.imageLoadAttempts = new Map() // Track image load attempts
-    this.imageCounter = 0 // Counter for unique IDs
-    this.barcodeTimeout = null // Add timeout for barcode handling
-    this.autoSyncInterval = null // Auto-sync interval
-    this.summaryAutoSyncInterval = null // Summary auto-sync interval
+    this.ws = null;
+    this.employeeDisplayTimeout = null;
+    this.imageLoadAttempts = new Map(); // Track image load attempts
+    this.imageCounter = 0; // Counter for unique IDs
+    this.barcodeTimeout = null; // Add timeout for barcode handling
+    this.autoSyncInterval = null; // Auto-sync interval
+    this.summaryAutoSyncInterval = null; // Summary auto-sync interval
     this.syncSettings = {
       enabled: true,
       interval: 5 * 60 * 1000, // Default 5 minutes
       retryAttempts: 3,
       retryDelay: 30000, // 30 seconds
-    }
+    };
     this.summarySyncSettings = {
       enabled: true,
       interval: 10 * 60 * 1000, // Default 10 minutes for summary
       retryAttempts: 3,
       retryDelay: 45000, // 45 seconds
-    }
-    this.electronAPI = window.electronAPI // Use the exposed API
+    };
+    this.electronAPI = window.electronAPI; // Use the exposed API
 
     // Duplicate prevention tracking
     this.lastScanData = {
       input: null,
       timestamp: 0,
       duplicatePreventionWindow: 60000, // 1 minute
-    }
+    };
 
     // Track when daily summary needs to be synced
-    this.pendingSummarySync = false
-    this.lastSummaryDataChange = null
+    this.pendingSummarySync = false;
+    this.lastSummaryDataChange = null;
 
-    this.init()
+    this.init();
 
     this.currentDateRange = {
       startDate: null,
-      endDate: null
-    }
-    this.summaryData = []
-    this.initializeDateRangeControls()
+      endDate: null,
+    };
+    this.summaryData = [];
+    this.initializeDateRangeControls();
   }
 
   async init() {
-    this.setupEventListeners()
-    this.startClock()
-    this.connectWebSocket()
-    await this.loadInitialData()
-    await this.loadSyncSettings() // Load sync settings from database
-    this.startAutoSync() // Start automatic attendance sync
-    this.startSummaryAutoSync() // Start automatic summary sync
-    this.focusInput()
+    this.setupEventListeners();
+    this.startClock();
+    this.connectWebSocket();
+    await this.loadInitialData();
+    await this.loadSyncSettings(); // Load sync settings from database
+    this.startAutoSync(); // Start automatic attendance sync
+    this.startSummaryAutoSync(); // Start automatic summary sync
+    this.focusInput();
   }
 
   // Load sync settings from the database
   async loadSyncSettings() {
-    if (!this.electronAPI) return
+    if (!this.electronAPI) return;
 
     try {
-      const result = await this.electronAPI.getSettings()
+      const result = await this.electronAPI.getSettings();
       if (result.success && result.data) {
         // Update sync interval from settings
-        const syncInterval = Number.parseInt(result.data.sync_interval) || 5 * 60 * 1000
-        this.syncSettings.interval = syncInterval
-        
+        const syncInterval =
+          Number.parseInt(result.data.sync_interval) || 5 * 60 * 1000;
+        this.syncSettings.interval = syncInterval;
+
         // Load summary sync interval (default to double the attendance sync interval)
-        const summarySyncInterval = Number.parseInt(result.data.summary_sync_interval) || (syncInterval * 2)
-        this.summarySyncSettings.interval = summarySyncInterval
-        
-        console.log("Loaded sync settings - attendance interval:", syncInterval, "ms")
-        console.log("Loaded sync settings - summary interval:", summarySyncInterval, "ms")
+        const summarySyncInterval =
+          Number.parseInt(result.data.summary_sync_interval) ||
+          syncInterval * 2;
+        this.summarySyncSettings.interval = summarySyncInterval;
+
+        console.log(
+          "Loaded sync settings - attendance interval:",
+          syncInterval,
+          "ms"
+        );
+        console.log(
+          "Loaded sync settings - summary interval:",
+          summarySyncInterval,
+          "ms"
+        );
       }
     } catch (error) {
-      console.error("Error loading sync settings:", error)
+      console.error("Error loading sync settings:", error);
     }
   }
 
   // Check if the current scan is a duplicate
   isDuplicateScan(input) {
-    const currentTime = Date.now()
-    const timeDifference = currentTime - this.lastScanData.timestamp
+    const currentTime = Date.now();
+    const timeDifference = currentTime - this.lastScanData.timestamp;
 
     // Check if the same input was scanned within the prevention window
-    if (this.lastScanData.input === input && timeDifference < this.lastScanData.duplicatePreventionWindow) {
+    if (
+      this.lastScanData.input === input &&
+      timeDifference < this.lastScanData.duplicatePreventionWindow
+    ) {
       console.log(
-        `Duplicate scan detected: "${input}" scanned ${timeDifference}ms ago (within ${this.lastScanData.duplicatePreventionWindow}ms window)`,
-      )
-      return true
+        `Duplicate scan detected: "${input}" scanned ${timeDifference}ms ago (within ${this.lastScanData.duplicatePreventionWindow}ms window)`
+      );
+      return true;
     }
 
-    return false
+    return false;
   }
 
   // Update the last scan data
   updateLastScanData(input) {
-    this.lastScanData.input = input
-    this.lastScanData.timestamp = Date.now()
+    this.lastScanData.input = input;
+    this.lastScanData.timestamp = Date.now();
   }
 
   // Start automatic attendance sync
   startAutoSync() {
     if (this.autoSyncInterval) {
-      clearInterval(this.autoSyncInterval)
+      clearInterval(this.autoSyncInterval);
     }
 
-    if (!this.syncSettings.enabled) return
+    if (!this.syncSettings.enabled) return;
 
-    console.log("Starting auto-sync with interval:", this.syncSettings.interval, "ms")
+    console.log(
+      "Starting auto-sync with interval:",
+      this.syncSettings.interval,
+      "ms"
+    );
 
     this.autoSyncInterval = setInterval(() => {
-      this.performAttendanceSync(true) // Silent sync
-    }, this.syncSettings.interval)
+      this.performAttendanceSync(true); // Silent sync
+    }, this.syncSettings.interval);
 
     // Also perform an initial sync after 10 seconds with download toast
     setTimeout(() => {
-      this.performAttendanceSync(true, 0, true) // Silent sync with initial download toast
-    }, 10000)
+      this.performAttendanceSync(true, 0, true); // Silent sync with initial download toast
+    }, 10000);
   }
 
   // Start automatic summary sync
   startSummaryAutoSync() {
     if (this.summaryAutoSyncInterval) {
-      clearInterval(this.summaryAutoSyncInterval)
+      clearInterval(this.summaryAutoSyncInterval);
     }
 
-    if (!this.summarySyncSettings.enabled) return
+    if (!this.summarySyncSettings.enabled) return;
 
-    console.log("Starting summary auto-sync with interval:", this.summarySyncSettings.interval, "ms")
+    console.log(
+      "Starting summary auto-sync with interval:",
+      this.summarySyncSettings.interval,
+      "ms"
+    );
 
     this.summaryAutoSyncInterval = setInterval(() => {
-      this.performSummarySync(true) // Silent sync
-    }, this.summarySyncSettings.interval)
+      this.performSummarySync(true); // Silent sync
+    }, this.summarySyncSettings.interval);
 
     // Also perform an initial sync after 15 seconds
     setTimeout(() => {
-      this.performSummarySync(true, 0, true) // Silent sync with initial download toast
-    }, 15000)
+      this.performSummarySync(true, 0, true); // Silent sync with initial download toast
+    }, 15000);
   }
 
   // Stop automatic sync
   stopAutoSync() {
     if (this.autoSyncInterval) {
-      clearInterval(this.autoSyncInterval)
-      this.autoSyncInterval = null
-      console.log("Auto-sync stopped")
+      clearInterval(this.autoSyncInterval);
+      this.autoSyncInterval = null;
+      console.log("Auto-sync stopped");
     }
-    
+
     if (this.summaryAutoSyncInterval) {
-      clearInterval(this.summaryAutoSyncInterval)
-      this.summaryAutoSyncInterval = null
-      console.log("Summary auto-sync stopped")
+      clearInterval(this.summaryAutoSyncInterval);
+      this.summaryAutoSyncInterval = null;
+      console.log("Summary auto-sync stopped");
     }
   }
 
   // Enhanced perform attendance sync with download toast messages
-  async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
-  if (!this.electronAPI) {
-    if (!silent) {
-      this.showStatus("Demo mode: Sync simulated successfully!", "success")
-    }
-    return { success: true, message: "Demo sync" }
-  }
-
-  try {
-    // First check if there are attendance records to sync
-    const countResult = await this.electronAPI.getUnsyncedAttendanceCount()
-
-    if (!countResult.success || countResult.count === 0) {
-      if (!silent) {
-        this.showStatus("No attendance records to sync", "info")
-      }
-      
-      // Even if no attendance records, check for summary records
-      return await this.performSummarySync(silent, retryCount, showDownloadToast)
-    }
-
-    // Show download toast for initial sync or when explicitly requested
-    if (showDownloadToast || (!silent && retryCount === 0)) {
-      this.showDownloadToast(`📤 Uploading ${countResult.count} attendance records to server...`, "info")
-    } else if (!silent) {
-      this.showStatus(`Syncing ${countResult.count} attendance records...`, "info")
-    }
-
-    // Perform the attendance sync
-    const syncResult = await this.electronAPI.syncAttendanceToServer()
-
-    if (syncResult.success) {
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast("✅ Attendance data uploaded successfully!", "success")
-      }
-      console.log("Attendance sync successful:", syncResult.message)
-
-      // Update sync info display if settings modal is open
-      if (document.getElementById("settingsModal").classList.contains("show")) {
-        await this.loadSyncInfo()
-      }
-
-      // After successful attendance sync, perform summary sync
-      console.log("Triggering summary sync after attendance sync")
-      const summaryResult = await this.performSummarySync(true, 0, false) // Silent summary sync
-      
-      return {
-        success: true,
-        message: syncResult.message,
-        attendanceSync: syncResult,
-        summarySync: summaryResult
-      }
-    } else {
-      throw new Error(syncResult.message)
-    }
-  } catch (error) {
-    console.error("Attendance sync error:", error)
-
-    // Retry logic
-    if (retryCount < this.syncSettings.retryAttempts) {
-      console.log(
-        `Retrying sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
-      )
-
-      setTimeout(() => {
-        this.performAttendanceSync(silent, retryCount + 1, showDownloadToast)
-      }, this.syncSettings.retryDelay)
-
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `⚠️ Upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
-          "warning",
-        )
-      }
-    } else {
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
-          "error",
-        )
-      }
-      return { success: false, message: error.message }
-    }
-  }
-}
-
-async performSummarySync(silent = false, retryCount = 0, showDownloadToast = false) {
-  if (!this.electronAPI) {
-    if (!silent) {
-      this.showStatus("Demo mode: Summary sync simulated successfully!", "success")
-    }
-    return { success: true, message: "Demo summary sync" }
-  }
-
-  try {
-    // Check if there are summary records to sync
-    const countResult = await this.electronAPI.getUnsyncedDailySummaryCount()
-
-    if (!countResult.success || countResult.count === 0) {
-      if (!silent) {
-        this.showStatus("No daily summary records to sync", "info")
-      }
-      return { success: true, message: "No summary records to sync" }
-    }
-
-    // Show download toast for initial sync or when explicitly requested
-    if (showDownloadToast || (!silent && retryCount === 0)) {
-      this.showDownloadToast(`📊 Uploading ${countResult.count} daily summary records to server...`, "info")
-    } else if (!silent) {
-      this.showStatus(`Syncing ${countResult.count} daily summary records...`, "info")
-    }
-
-    // Perform the summary sync
-    const syncResult = await this.electronAPI.syncDailySummaryToServer()
-
-    if (syncResult.success) {
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast("✅ Daily summary data uploaded successfully!", "success")
-      }
-      console.log("Daily summary sync successful:", syncResult.message)
-
-      // Update sync info display if settings modal is open
-      if (document.getElementById("settingsModal").classList.contains("show")) {
-        await this.loadSyncInfo()
-      }
-
-      // Reset pending summary sync flag if it exists
-      if (this.pendingSummarySync) {
-        this.pendingSummarySync = false
-      }
-
-      return syncResult
-    } else {
-      throw new Error(syncResult.message)
-    }
-  } catch (error) {
-    console.error("Daily summary sync error:", error)
-
-    // Retry logic
-    if (retryCount < this.syncSettings.retryAttempts) {
-      console.log(
-        `Retrying summary sync in ${this.syncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.syncSettings.retryAttempts})`,
-      )
-
-      setTimeout(() => {
-        this.performSummarySync(silent, retryCount + 1, showDownloadToast)
-      }, this.syncSettings.retryDelay)
-
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${this.syncSettings.retryAttempts})`,
-          "warning",
-        )
-      }
-    } else {
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `❌ Summary upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
-          "error",
-        )
-      }
-      
-      // Set pending summary sync flag for later retry
-      this.pendingSummarySync = true
-      
-      return { success: false, message: error.message }
-    }
-  }
-}
-
-// Helper method to perform both syncs sequentially
-async performFullSync(silent = false, showDownloadToast = true) {
-  console.log("Starting full sync (attendance + summary)")
-  
-  try {
-    const result = await this.performAttendanceSync(silent, 0, showDownloadToast)
-    
-    if (result.success) {
-      console.log("Full sync completed successfully")
-      return result
-    } else {
-      console.error("Full sync failed:", result.message)
-      return result
-    }
-  } catch (error) {
-    console.error("Full sync error:", error)
-    return { success: false, message: error.message }
-  }
-}
-
-// Helper method to force sync all data (both attendance and summary)
-async performForceSyncAll(silent = false, showDownloadToast = true) {
-  if (!this.electronAPI) {
-    if (!silent) {
-      this.showStatus("Demo mode: Force sync simulated successfully!", "success")
-    }
-    return { success: true, message: "Demo force sync" }
-  }
-
-  try {
-    if (showDownloadToast || !silent) {
-      this.showDownloadToast("🔄 Force syncing all data to server...", "info")
-    }
-
-    // Force sync attendance data
-    const attendanceResult = await this.electronAPI.forceSyncAllAttendance()
-    
-    // Force sync summary data
-    const summaryResult = await this.electronAPI.forceSyncAllDailySummary()
-
-    if (attendanceResult.success && summaryResult.success) {
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `✅ Force sync completed! ${attendanceResult.syncedCount} attendance + ${summaryResult.syncedCount} summary records uploaded`,
-          "success"
-        )
-      }
-      
-      // Update sync info display if settings modal is open
-      if (document.getElementById("settingsModal").classList.contains("show")) {
-        await this.loadSyncInfo()
-      }
-
-      return {
-        success: true,
-        message: "Force sync completed successfully",
-        attendanceSync: attendanceResult,
-        summarySync: summaryResult
-      }
-    } else {
-      const errors = []
-      if (!attendanceResult.success) errors.push(`Attendance: ${attendanceResult.message}`)
-      if (!summaryResult.success) errors.push(`Summary: ${summaryResult.message}`)
-      
-      throw new Error(errors.join('; '))
-    }
-  } catch (error) {
-    console.error("Force sync error:", error)
-    
-    if (showDownloadToast || !silent) {
-      this.showDownloadToast(`❌ Force sync failed: ${error.message}`, "error")
-    }
-    
-    return { success: false, message: error.message }
-  }
-}
-
-  // NEW: Perform summary sync with similar pattern to attendance sync
-  async performSummarySync(silent = false, retryCount = 0, showDownloadToast = false) {
+  async performAttendanceSync(
+    silent = false,
+    retryCount = 0,
+    showDownloadToast = false
+  ) {
     if (!this.electronAPI) {
       if (!silent) {
-        this.showStatus("Demo mode: Summary sync simulated successfully!", "success")
+        this.showStatus("Demo mode: Sync simulated successfully!", "success");
       }
-      return { success: true, message: "Demo summary sync" }
+      return { success: true, message: "Demo sync" };
     }
 
     try {
-      // First check if there are summary records to sync
-      const countResult = await this.electronAPI.getUnsyncedDailySummaryCount()
+      // First check if there are attendance records to sync
+      const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
 
       if (!countResult.success || countResult.count === 0) {
         if (!silent) {
-          this.showStatus("No daily summary records to sync", "info")
+          this.showStatus("No attendance records to sync", "info");
         }
-        // Reset pending sync flag if no data to sync
-        this.pendingSummarySync = false
-        return { success: true, message: "No summary records to sync" }
+
+        // Even if no attendance records, check for summary records
+        return await this.performSummarySync(
+          silent,
+          retryCount,
+          showDownloadToast
+        );
       }
 
       // Show download toast for initial sync or when explicitly requested
       if (showDownloadToast || (!silent && retryCount === 0)) {
-        this.showDownloadToast(`📊 Uploading ${countResult.count} daily summary records to server...`, "info")
+        this.showDownloadToast(
+          `📤 Uploading ${countResult.count} attendance records to server...`,
+          "info"
+        );
       } else if (!silent) {
-        this.showStatus(`Syncing ${countResult.count} daily summary records...`, "info")
+        this.showStatus(
+          `Syncing ${countResult.count} attendance records...`,
+          "info"
+        );
       }
 
-      // Perform the summary sync
-      const syncResult = await this.electronAPI.syncDailySummaryToServer()
+      // Perform the attendance sync
+      const syncResult = await this.electronAPI.syncAttendanceToServer();
 
       if (syncResult.success) {
         if (showDownloadToast || !silent) {
-          this.showDownloadToast("✅ Daily summary data uploaded successfully!", "success")
+          this.showDownloadToast(
+            "✅ Attendance data uploaded successfully!",
+            "success"
+          );
         }
-        console.log("Summary sync successful:", syncResult.message)
-        
-        // Reset pending sync flag
-        this.pendingSummarySync = false
-        this.lastSummaryDataChange = null
+        console.log("Attendance sync successful:", syncResult.message);
 
         // Update sync info display if settings modal is open
-        if (document.getElementById("settingsModal").classList.contains("show")) {
-          await this.loadSummaryInfo()
+        if (
+          document.getElementById("settingsModal").classList.contains("show")
+        ) {
+          await this.loadSyncInfo();
         }
 
-        return syncResult
+        // After successful attendance sync, perform summary sync
+        console.log("Triggering summary sync after attendance sync");
+        const summaryResult = await this.performSummarySync(true, 0, false); // Silent summary sync
+
+        return {
+          success: true,
+          message: syncResult.message,
+          attendanceSync: syncResult,
+          summarySync: summaryResult,
+        };
       } else {
-        throw new Error(syncResult.message)
+        throw new Error(syncResult.message);
       }
     } catch (error) {
-      console.error("Summary sync error:", error)
+      console.error("Attendance sync error:", error);
+
+      // Retry logic
+      if (retryCount < this.syncSettings.retryAttempts) {
+        console.log(
+          `Retrying sync in ${
+            this.syncSettings.retryDelay / 1000
+          } seconds... (attempt ${retryCount + 1}/${
+            this.syncSettings.retryAttempts
+          })`
+        );
+
+        setTimeout(() => {
+          this.performAttendanceSync(silent, retryCount + 1, showDownloadToast);
+        }, this.syncSettings.retryDelay);
+
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            `⚠️ Upload failed, retrying... (${retryCount + 1}/${
+              this.syncSettings.retryAttempts
+            })`,
+            "warning"
+          );
+        }
+      } else {
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+            "error"
+          );
+        }
+        return { success: false, message: error.message };
+      }
+    }
+  }
+
+  async performSummarySync(
+    silent = false,
+    retryCount = 0,
+    showDownloadToast = false
+  ) {
+    if (!this.electronAPI) {
+      if (!silent) {
+        this.showStatus(
+          "Demo mode: Summary sync simulated successfully!",
+          "success"
+        );
+      }
+      return { success: true, message: "Demo summary sync" };
+    }
+
+    try {
+      // Check if there are summary records to sync
+      const countResult = await this.electronAPI.getUnsyncedDailySummaryCount();
+
+      if (!countResult.success || countResult.count === 0) {
+        if (!silent) {
+          this.showStatus("No daily summary records to sync", "info");
+        }
+        return { success: true, message: "No summary records to sync" };
+      }
+
+      // Show download toast for initial sync or when explicitly requested
+      if (showDownloadToast || (!silent && retryCount === 0)) {
+        this.showDownloadToast(
+          `📊 Uploading ${countResult.count} daily summary records to server...`,
+          "info"
+        );
+      } else if (!silent) {
+        this.showStatus(
+          `Syncing ${countResult.count} daily summary records...`,
+          "info"
+        );
+      }
+
+      // Perform the summary sync
+      const syncResult = await this.electronAPI.syncDailySummaryToServer();
+
+      if (syncResult.success) {
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            "✅ Daily summary data uploaded successfully!",
+            "success"
+          );
+        }
+        console.log("Daily summary sync successful:", syncResult.message);
+
+        // Update sync info display if settings modal is open
+        if (
+          document.getElementById("settingsModal").classList.contains("show")
+        ) {
+          await this.loadSyncInfo();
+        }
+
+        // Reset pending summary sync flag if it exists
+        if (this.pendingSummarySync) {
+          this.pendingSummarySync = false;
+        }
+
+        return syncResult;
+      } else {
+        throw new Error(syncResult.message);
+      }
+    } catch (error) {
+      console.error("Daily summary sync error:", error);
+
+      // Retry logic
+      if (retryCount < this.syncSettings.retryAttempts) {
+        console.log(
+          `Retrying summary sync in ${
+            this.syncSettings.retryDelay / 1000
+          } seconds... (attempt ${retryCount + 1}/${
+            this.syncSettings.retryAttempts
+          })`
+        );
+
+        setTimeout(() => {
+          this.performSummarySync(silent, retryCount + 1, showDownloadToast);
+        }, this.syncSettings.retryDelay);
+
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${
+              this.syncSettings.retryAttempts
+            })`,
+            "warning"
+          );
+        }
+      } else {
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            `❌ Summary upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+            "error"
+          );
+        }
+
+        // Set pending summary sync flag for later retry
+        this.pendingSummarySync = true;
+
+        return { success: false, message: error.message };
+      }
+    }
+  }
+
+  // Helper method to perform both syncs sequentially
+  async performFullSync(silent = false, showDownloadToast = true) {
+    console.log("Starting full sync (attendance + summary)");
+
+    try {
+      const result = await this.performAttendanceSync(
+        silent,
+        0,
+        showDownloadToast
+      );
+
+      if (result.success) {
+        console.log("Full sync completed successfully");
+        return result;
+      } else {
+        console.error("Full sync failed:", result.message);
+        return result;
+      }
+    } catch (error) {
+      console.error("Full sync error:", error);
+      return { success: false, message: error.message };
+    }
+  }
+
+  // Helper method to force sync all data (both attendance and summary)
+  async performForceSyncAll(silent = false, showDownloadToast = true) {
+    if (!this.electronAPI) {
+      if (!silent) {
+        this.showStatus(
+          "Demo mode: Force sync simulated successfully!",
+          "success"
+        );
+      }
+      return { success: true, message: "Demo force sync" };
+    }
+
+    try {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          "🔄 Force syncing all data to server...",
+          "info"
+        );
+      }
+
+      // Force sync attendance data
+      const attendanceResult = await this.electronAPI.forceSyncAllAttendance();
+
+      // Force sync summary data
+      const summaryResult = await this.electronAPI.forceSyncAllDailySummary();
+
+      if (attendanceResult.success && summaryResult.success) {
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            `✅ Force sync completed! ${attendanceResult.syncedCount} attendance + ${summaryResult.syncedCount} summary records uploaded`,
+            "success"
+          );
+        }
+
+        // Update sync info display if settings modal is open
+        if (
+          document.getElementById("settingsModal").classList.contains("show")
+        ) {
+          await this.loadSyncInfo();
+        }
+
+        return {
+          success: true,
+          message: "Force sync completed successfully",
+          attendanceSync: attendanceResult,
+          summarySync: summaryResult,
+        };
+      } else {
+        const errors = [];
+        if (!attendanceResult.success)
+          errors.push(`Attendance: ${attendanceResult.message}`);
+        if (!summaryResult.success)
+          errors.push(`Summary: ${summaryResult.message}`);
+
+        throw new Error(errors.join("; "));
+      }
+    } catch (error) {
+      console.error("Force sync error:", error);
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Force sync failed: ${error.message}`,
+          "error"
+        );
+      }
+
+      return { success: false, message: error.message };
+    }
+  }
+
+  // NEW: Perform summary sync with similar pattern to attendance sync
+  async performSummarySync(
+    silent = false,
+    retryCount = 0,
+    showDownloadToast = false
+  ) {
+    if (!this.electronAPI) {
+      if (!silent) {
+        this.showStatus(
+          "Demo mode: Summary sync simulated successfully!",
+          "success"
+        );
+      }
+      return { success: true, message: "Demo summary sync" };
+    }
+
+    try {
+      // First check if there are summary records to sync
+      const countResult = await this.electronAPI.getUnsyncedDailySummaryCount();
+
+      if (!countResult.success || countResult.count === 0) {
+        if (!silent) {
+          this.showStatus("No daily summary records to sync", "info");
+        }
+        // Reset pending sync flag if no data to sync
+        this.pendingSummarySync = false;
+        return { success: true, message: "No summary records to sync" };
+      }
+
+      // Show download toast for initial sync or when explicitly requested
+      if (showDownloadToast || (!silent && retryCount === 0)) {
+        this.showDownloadToast(
+          `📊 Uploading ${countResult.count} daily summary records to server...`,
+          "info"
+        );
+      } else if (!silent) {
+        this.showStatus(
+          `Syncing ${countResult.count} daily summary records...`,
+          "info"
+        );
+      }
+
+      // Perform the summary sync
+      const syncResult = await this.electronAPI.syncDailySummaryToServer();
+
+      if (syncResult.success) {
+        if (showDownloadToast || !silent) {
+          this.showDownloadToast(
+            "✅ Daily summary data uploaded successfully!",
+            "success"
+          );
+        }
+        console.log("Summary sync successful:", syncResult.message);
+
+        // Reset pending sync flag
+        this.pendingSummarySync = false;
+        this.lastSummaryDataChange = null;
+
+        // Update sync info display if settings modal is open
+        if (
+          document.getElementById("settingsModal").classList.contains("show")
+        ) {
+          await this.loadSummaryInfo();
+        }
+
+        return syncResult;
+      } else {
+        throw new Error(syncResult.message);
+      }
+    } catch (error) {
+      console.error("Summary sync error:", error);
 
       // Retry logic
       if (retryCount < this.summarySyncSettings.retryAttempts) {
         console.log(
-          `Retrying summary sync in ${this.summarySyncSettings.retryDelay / 1000} seconds... (attempt ${retryCount + 1}/${this.summarySyncSettings.retryAttempts})`,
-        )
+          `Retrying summary sync in ${
+            this.summarySyncSettings.retryDelay / 1000
+          } seconds... (attempt ${retryCount + 1}/${
+            this.summarySyncSettings.retryAttempts
+          })`
+        );
 
         setTimeout(() => {
-          this.performSummarySync(silent, retryCount + 1, showDownloadToast)
-        }, this.summarySyncSettings.retryDelay)
+          this.performSummarySync(silent, retryCount + 1, showDownloadToast);
+        }, this.summarySyncSettings.retryDelay);
 
         if (showDownloadToast || !silent) {
           this.showDownloadToast(
-            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${this.summarySyncSettings.retryAttempts})`,
-            "warning",
-          )
+            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${
+              this.summarySyncSettings.retryAttempts
+            })`,
+            "warning"
+          );
         }
       } else {
         if (showDownloadToast || !silent) {
           this.showDownloadToast(
             `❌ Summary upload failed after ${this.summarySyncSettings.retryAttempts} attempts: ${error.message}`,
-            "error",
-          )
+            "error"
+          );
         }
-        return { success: false, message: error.message }
+        return { success: false, message: error.message };
       }
     }
   }
 
   // NEW: Mark that summary data has changed and needs syncing
   markSummaryDataChanged() {
-    this.pendingSummarySync = true
-    this.lastSummaryDataChange = Date.now()
-    console.log("Summary data marked as changed, pending sync")
+    this.pendingSummarySync = true;
+    this.lastSummaryDataChange = Date.now();
+    console.log("Summary data marked as changed, pending sync");
   }
 
   // Enhanced save and sync functionality with download toasts
   async saveAndSync() {
-    const syncNowBtn = document.getElementById("syncNowBtn")
-    const originalText = syncNowBtn.textContent
+    const syncNowBtn = document.getElementById("syncNowBtn");
+    const originalText = syncNowBtn.textContent;
 
     // Show loading state
-    syncNowBtn.textContent = "💾 Saving & Syncing..."
-    syncNowBtn.disabled = true
+    syncNowBtn.textContent = "💾 Saving & Syncing...";
+    syncNowBtn.disabled = true;
 
     if (!this.electronAPI) {
-      this.showSettingsStatus("Demo mode: Settings saved and sync completed successfully!", "success")
-      this.showDownloadToast("📊 Demo: Employee data downloaded successfully!", "success")
-      await this.loadSyncInfo()
-      syncNowBtn.textContent = originalText
-      syncNowBtn.disabled = false
-      return
+      this.showSettingsStatus(
+        "Demo mode: Settings saved and sync completed successfully!",
+        "success"
+      );
+      this.showDownloadToast(
+        "📊 Demo: Employee data downloaded successfully!",
+        "success"
+      );
+      await this.loadSyncInfo();
+      syncNowBtn.textContent = originalText;
+      syncNowBtn.disabled = false;
+      return;
     }
 
     try {
       // First, save the settings
-      const settingsForm = document.getElementById("settingsForm")
+      const settingsForm = document.getElementById("settingsForm");
       if (!settingsForm) {
-        throw new Error("Settings form not found")
+        throw new Error("Settings form not found");
       }
 
-      const formData = new FormData(settingsForm)
+      const formData = new FormData(settingsForm);
 
       // Get server URL with proper null checking
-      const serverUrlInput = formData.get("serverUrl") || document.getElementById("serverUrl")?.value
+      const serverUrlInput =
+        formData.get("serverUrl") ||
+        document.getElementById("serverUrl")?.value;
       if (!serverUrlInput) {
-        this.showSettingsStatus("Server URL is required", "error")
-        return
+        this.showSettingsStatus("Server URL is required", "error");
+        return;
       }
 
       // Clean the base URL and ensure it doesn't already have the API endpoint
-      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, "") // Remove trailing slash
+      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, ""); // Remove trailing slash
       if (baseUrl.endsWith("/api/tables/emp_list/data")) {
-        baseUrl = baseUrl.replace("/api/tables/emp_list/data", "")
+        baseUrl = baseUrl.replace("/api/tables/emp_list/data", "");
       }
 
-      const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`
+      const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`;
 
       // Get other form values with fallbacks
-      const syncIntervalInput = formData.get("syncInterval") || document.getElementById("syncInterval")?.value || "5"
-      const gracePeriodInput = formData.get("gracePeriod") || document.getElementById("gracePeriod")?.value || "5"
-      const summarySyncIntervalInput = formData.get("summarySyncInterval") || document.getElementById("summarySyncInterval")?.value || "10"
+      const syncIntervalInput =
+        formData.get("syncInterval") ||
+        document.getElementById("syncInterval")?.value ||
+        "5";
+      const gracePeriodInput =
+        formData.get("gracePeriod") ||
+        document.getElementById("gracePeriod")?.value ||
+        "5";
+      const summarySyncIntervalInput =
+        formData.get("summarySyncInterval") ||
+        document.getElementById("summarySyncInterval")?.value ||
+        "10";
 
       const settings = {
         server_url: fullServerUrl,
         sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
-        summary_sync_interval: (Number.parseInt(summarySyncIntervalInput) * 60000).toString(),
+        summary_sync_interval: (
+          Number.parseInt(summarySyncIntervalInput) * 60000
+        ).toString(),
         grace_period: gracePeriodInput,
-      }
+      };
 
-      console.log("Saving settings:", settings) // Debug log
+      console.log("Saving settings:", settings); // Debug log
 
-      const saveResult = await this.electronAPI.updateSettings(settings)
+      const saveResult = await this.electronAPI.updateSettings(settings);
 
       if (!saveResult.success) {
-        this.showSettingsStatus(saveResult.error || "Error saving settings", "error")
-        return
+        this.showSettingsStatus(
+          saveResult.error || "Error saving settings",
+          "error"
+        );
+        return;
       }
 
       // Update local sync settings
-      this.syncSettings.interval = Number.parseInt(settings.sync_interval)
-      this.summarySyncSettings.interval = Number.parseInt(settings.summary_sync_interval)
+      this.syncSettings.interval = Number.parseInt(settings.sync_interval);
+      this.summarySyncSettings.interval = Number.parseInt(
+        settings.summary_sync_interval
+      );
 
       // Restart auto-sync with new intervals
-      this.startAutoSync()
-      this.startSummaryAutoSync()
+      this.startAutoSync();
+      this.startSummaryAutoSync();
 
       // Update button text and show download toast for employee sync phase
-      syncNowBtn.textContent = "📥 Downloading Employees..."
-      this.showDownloadToast("🔄 Connecting to server and downloading employee data...", "info")
+      syncNowBtn.textContent = "📥 Downloading Employees...";
+      this.showDownloadToast(
+        "🔄 Connecting to server and downloading employee data...",
+        "info"
+      );
 
       // Then sync the employees
-      const employeeSyncResult = await this.electronAPI.syncEmployees()
+      const employeeSyncResult = await this.electronAPI.syncEmployees();
 
       if (!employeeSyncResult.success) {
-        this.showSettingsStatus(`Settings saved, but employee sync failed: ${employeeSyncResult.error}`, "warning")
-        this.showDownloadToast("❌ Failed to download employee data from server", "error")
-        return
+        this.showSettingsStatus(
+          `Settings saved, but employee sync failed: ${employeeSyncResult.error}`,
+          "warning"
+        );
+        this.showDownloadToast(
+          "❌ Failed to download employee data from server",
+          "error"
+        );
+        return;
       }
 
       // Show success toast for employee download
-      this.showDownloadToast("✅ Employee data downloaded successfully!", "success")
+      this.showDownloadToast(
+        "✅ Employee data downloaded successfully!",
+        "success"
+      );
 
       // Update button text to show attendance sync phase
-      syncNowBtn.textContent = "📊 Uploading Attendance..."
+      syncNowBtn.textContent = "📊 Uploading Attendance...";
 
       // Then sync attendance with download toast
-      const attendanceSyncResult = await this.performAttendanceSync(false, 0, true)
+      const attendanceSyncResult = await this.performAttendanceSync(
+        false,
+        0,
+        true
+      );
 
       // Update button text to show summary sync phase
-      syncNowBtn.textContent = "📈 Uploading Summary..."
+      syncNowBtn.textContent = "📈 Uploading Summary...";
 
       // Finally sync summary data
-      const summarySyncResult = await this.performSummarySync(false, 0, true)
+      const summarySyncResult = await this.performSummarySync(false, 0, true);
 
-      if (attendanceSyncResult && attendanceSyncResult.success && summarySyncResult && summarySyncResult.success) {
-        this.showSettingsStatus("Settings saved and all data synced successfully!", "success")
-        await this.loadSyncInfo()
-        await this.loadSummaryInfo()
+      if (
+        attendanceSyncResult &&
+        attendanceSyncResult.success &&
+        summarySyncResult &&
+        summarySyncResult.success
+      ) {
+        this.showSettingsStatus(
+          "Settings saved and all data synced successfully!",
+          "success"
+        );
+        await this.loadSyncInfo();
+        await this.loadSummaryInfo();
         // Also refresh the main attendance data
-        await this.loadTodayAttendance()
+        await this.loadTodayAttendance();
       } else if (attendanceSyncResult && attendanceSyncResult.success) {
-        this.showSettingsStatus("Settings saved, attendance synced, but summary sync had issues", "warning")
+        this.showSettingsStatus(
+          "Settings saved, attendance synced, but summary sync had issues",
+          "warning"
+        );
       } else {
-        this.showSettingsStatus("Settings saved, employees synced, but data sync had issues", "warning")
+        this.showSettingsStatus(
+          "Settings saved, employees synced, but data sync had issues",
+          "warning"
+        );
       }
     } catch (error) {
-      console.error("Save and sync error:", error)
-      this.showSettingsStatus(`Error occurred during save and sync: ${error.message}`, "error")
-      this.showDownloadToast("❌ Connection to server failed", "error")
+      console.error("Save and sync error:", error);
+      this.showSettingsStatus(
+        `Error occurred during save and sync: ${error.message}`,
+        "error"
+      );
+      this.showDownloadToast("❌ Connection to server failed", "error");
     } finally {
-      syncNowBtn.textContent = originalText
-      syncNowBtn.disabled = false
+      syncNowBtn.textContent = originalText;
+      syncNowBtn.disabled = false;
     }
   }
 
   // New method for download-specific toast messages
   showDownloadToast(message, type = "info") {
     // Create or get download-specific toast element
-    let downloadToast = document.getElementById("downloadToast")
+    let downloadToast = document.getElementById("downloadToast");
 
     if (!downloadToast) {
-      downloadToast = document.createElement("div")
-      downloadToast.id = "downloadToast"
-      downloadToast.className = "download-toast"
-      document.body.appendChild(downloadToast)
+      downloadToast = document.createElement("div");
+      downloadToast.id = "downloadToast";
+      downloadToast.className = "download-toast";
+      document.body.appendChild(downloadToast);
     }
 
-    downloadToast.textContent = message
-    downloadToast.className = `download-toast ${type} show`
+    downloadToast.textContent = message;
+    downloadToast.className = `download-toast ${type} show`;
 
     // Clear any existing timeout
     if (downloadToast.hideTimeout) {
-      clearTimeout(downloadToast.hideTimeout)
+      clearTimeout(downloadToast.hideTimeout);
     }
 
     // Auto-hide after appropriate duration based on type
-    const duration = type === "error" ? 6000 : type === "warning" ? 5000 : 4000
+    const duration = type === "error" ? 6000 : type === "warning" ? 5000 : 4000;
     downloadToast.hideTimeout = setTimeout(() => {
-      downloadToast.classList.remove("show")
-    }, duration)
+      downloadToast.classList.remove("show");
+    }, duration);
   }
 
   setupEventListeners() {
     // Barcode input
-    const barcodeInput = document.getElementById("barcodeInput")
-    const manualSubmit = document.getElementById("manualSubmit")
-    const settingsBtn = document.getElementById("settingsBtn")
-    const closeSettings = document.getElementById("closeSettings")
-    const cancelSettings = document.getElementById("cancelSettings")
-    const settingsModal = document.getElementById("settingsModal")
-    const settingsForm = document.getElementById("settingsForm")
-    const syncNowBtn = document.getElementById("syncNowBtn")
+    const barcodeInput = document.getElementById("barcodeInput");
+    const manualSubmit = document.getElementById("manualSubmit");
+    const settingsBtn = document.getElementById("settingsBtn");
+    const closeSettings = document.getElementById("closeSettings");
+    const cancelSettings = document.getElementById("cancelSettings");
+    const settingsModal = document.getElementById("settingsModal");
+    const settingsForm = document.getElementById("settingsForm");
+    const syncNowBtn = document.getElementById("syncNowBtn");
 
-    let canScan = true
+    let canScan = true;
 
     barcodeInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
-        e.preventDefault()
+        e.preventDefault();
 
         if (canScan) {
-          canScan = false
-          this.handleScan()
+          canScan = false;
+          this.handleScan();
 
           setTimeout(() => {
-            canScan = true
-          }, 1500)
+            canScan = true;
+          }, 1500);
         }
       }
-    })
+    });
 
     barcodeInput.addEventListener("input", (e) => {
-      const inputType = document.querySelector('input[name="inputType"]:checked').value
+      const inputType = document.querySelector(
+        'input[name="inputType"]:checked'
+      ).value;
 
       // Clear any existing timeout
       if (this.barcodeTimeout) {
-        clearTimeout(this.barcodeTimeout)
+        clearTimeout(this.barcodeTimeout);
       }
 
       if (inputType === "barcode") {
         this.barcodeTimeout = setTimeout(() => {
-          const currentValue = e.target.value.trim()
+          const currentValue = e.target.value.trim();
           if (currentValue.length >= 8) {
-            this.handleScan()
+            this.handleScan();
           }
-        }, 2000)
+        }, 2000);
       }
-    })
+    });
 
     // Handle paste events (some barcode scanners simulate paste)
     barcodeInput.addEventListener("paste", (e) => {
-      const inputType = document.querySelector('input[name="inputType"]:checked').value
+      const inputType = document.querySelector(
+        'input[name="inputType"]:checked'
+      ).value;
 
       if (inputType === "barcode") {
         setTimeout(() => {
-          const pastedValue = e.target.value.trim()
+          const pastedValue = e.target.value.trim();
           if (pastedValue.length >= 8) {
-            this.handleScan()
+            this.handleScan();
           }
-        }, 2000)
+        }, 2000);
       }
-    })
+    });
 
     manualSubmit.addEventListener("click", () => {
-      this.handleScan()
-    })
+      this.handleScan();
+    });
 
     // Settings event listeners
     settingsBtn.addEventListener("click", () => {
-      this.openSettings()
-    })
+      this.openSettings();
+    });
 
     closeSettings.addEventListener("click", () => {
-      this.closeSettings()
-    })
+      this.closeSettings();
+    });
 
     cancelSettings.addEventListener("click", () => {
-      this.closeSettings()
-    })
+      this.closeSettings();
+    });
 
     settingsModal.addEventListener("click", (e) => {
       if (e.target === settingsModal) {
-        this.closeSettings()
+        this.closeSettings();
       }
-    })
+    });
 
     // Settings form submission - now calls saveAndSync
     settingsForm.addEventListener("submit", (e) => {
-      e.preventDefault()
-      this.saveAndSync()
-    })
+      e.preventDefault();
+      this.saveAndSync();
+    });
 
     // Sync now button - now calls saveAndSync
     syncNowBtn.addEventListener("click", () => {
-      this.saveAndSync()
-    })
+      this.saveAndSync();
+    });
 
     // Add manual attendance sync button functionality
-    const syncAttendanceBtn = document.getElementById("syncAttendanceBtn")
+    const syncAttendanceBtn = document.getElementById("syncAttendanceBtn");
     if (syncAttendanceBtn) {
       syncAttendanceBtn.addEventListener("click", () => {
-        this.performAttendanceSync(false, 0, true) // Not silent, with download toast
-      })
+        this.performAttendanceSync(false, 0, true); // Not silent, with download toast
+      });
     }
 
     // NEW: Add manual summary sync button functionality
-    const syncSummaryBtn = document.getElementById("syncSummaryBtn")
+    const syncSummaryBtn = document.getElementById("syncSummaryBtn");
     if (syncSummaryBtn) {
       syncSummaryBtn.addEventListener("click", () => {
-        this.performSummarySync(false, 0, true) // Not silent, with download toast
-      })
+        this.performSummarySync(false, 0, true); // Not silent, with download toast
+      });
     }
 
     // Keep input focused but allow interaction with employee display
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".employee-display") && !e.target.closest("button") && !e.target.closest("input")) {
-        this.focusInput()
+      if (
+        !e.target.closest(".employee-display") &&
+        !e.target.closest("button") &&
+        !e.target.closest("input")
+      ) {
+        this.focusInput();
       }
-    })
+    });
 
     // Handle input type changes
-    const inputTypeRadios = document.querySelectorAll('input[name="inputType"]')
+    const inputTypeRadios = document.querySelectorAll(
+      'input[name="inputType"]'
+    );
     inputTypeRadios.forEach((radio) => {
       radio.addEventListener("change", () => {
-        this.focusInput()
+        this.focusInput();
         // Clear any pending timeouts when switching input types
         if (this.barcodeTimeout) {
-          clearTimeout(this.barcodeTimeout)
+          clearTimeout(this.barcodeTimeout);
         }
-      })
-    })
+      });
+    });
 
     // Listen for IPC events from main process using the exposed API
     if (this.electronAPI) {
       // Set up listener for sync attendance events
       this.electronAPI.onSyncAttendanceToServer(() => {
-        this.performAttendanceSync(false, 0, true) // Show download toast
-      })
+        this.performAttendanceSync(false, 0, true); // Show download toast
+      });
     }
 
-    const downloadBtn = document.getElementById("downloadExcelBtn")
+    const downloadBtn = document.getElementById("downloadExcelBtn");
     if (downloadBtn) {
-      downloadBtn.addEventListener("click", () => this.downloadExcel())
+      downloadBtn.addEventListener("click", () => this.downloadExcel());
     }
   }
 
@@ -785,143 +964,173 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
   async syncEmployees() {
     try {
       // Show download toast when syncing employees
-      this.showDownloadToast("📥 Downloading employee data from server...", "info")
+      this.showDownloadToast(
+        "📥 Downloading employee data from server...",
+        "info"
+      );
 
-      const result = await this.electronAPI.syncEmployees()
+      const result = await this.electronAPI.syncEmployees();
 
       if (result.success) {
-        this.showDownloadToast("✅ Employee data downloaded successfully!", "success")
-        this.showStatus(result.message, "success")
+        this.showDownloadToast(
+          "✅ Employee data downloaded successfully!",
+          "success"
+        );
+        this.showStatus(result.message, "success");
       } else {
-        this.showDownloadToast("❌ Failed to download employee data", "error")
-        console.warn("Sync warning:", result.error)
+        this.showDownloadToast("❌ Failed to download employee data", "error");
+        console.warn("Sync warning:", result.error);
       }
     } catch (error) {
-      console.error("Sync error:", error)
-      this.showDownloadToast("❌ Connection to server failed", "error")
+      console.error("Sync error:", error);
+      this.showDownloadToast("❌ Connection to server failed", "error");
     }
   }
 
   // Settings functionality
   openSettings() {
-    const modal = document.getElementById("settingsModal")
-    modal.classList.add("show")
-    this.loadSettings()
-    this.loadSyncInfo()
-    this.loadSummaryInfo() // NEW: Load summary sync info
-    this.loadAttendanceSyncInfo()
-    this.loadDailySummary()
-    this.initializeSettingsTabs()
+    const modal = document.getElementById("settingsModal");
+    modal.classList.add("show");
+    this.loadSettings();
+    this.loadSyncInfo();
+    this.loadSummaryInfo(); // NEW: Load summary sync info
+    this.loadAttendanceSyncInfo();
+    this.loadDailySummary();
+    this.initializeSettingsTabs();
   }
 
   closeSettings() {
-    const modal = document.getElementById("settingsModal")
-    modal.classList.remove("show")
+    const modal = document.getElementById("settingsModal");
+    modal.classList.remove("show");
     // Clear any status messages
-    const statusElement = document.getElementById("settingsStatusMessage")
-    statusElement.style.display = "none"
+    const statusElement = document.getElementById("settingsStatusMessage");
+    statusElement.style.display = "none";
   }
 
   initializeSettingsTabs() {
-    const tabs = document.querySelectorAll(".settings-tab")
-    const panels = document.querySelectorAll(".settings-panel")
+    const tabs = document.querySelectorAll(".settings-tab");
+    const panels = document.querySelectorAll(".settings-panel");
 
     tabs.forEach((tab) => {
       tab.addEventListener("click", () => {
         // Remove active class from all tabs and panels
-        tabs.forEach((t) => t.classList.remove("active"))
-        panels.forEach((p) => p.classList.remove("active"))
+        tabs.forEach((t) => t.classList.remove("active"));
+        panels.forEach((p) => p.classList.remove("active"));
 
         // Add active class to clicked tab
-        tab.classList.add("active")
+        tab.classList.add("active");
 
         // Show corresponding panel
-        const targetPanel = document.getElementById(tab.dataset.tab + "Panel")
+        const targetPanel = document.getElementById(tab.dataset.tab + "Panel");
         if (targetPanel) {
-          targetPanel.classList.add("active")
+          targetPanel.classList.add("active");
         }
 
         // Load data for specific tabs
         if (tab.dataset.tab === "reports") {
-          this.loadDailySummary()
+          this.loadDailySummary();
         } else if (tab.dataset.tab === "sync") {
-          this.loadSyncInfo()
-          this.loadSummaryInfo() // NEW: Load summary info when sync tab is opened
-          this.loadAttendanceSyncInfo()
+          this.loadSyncInfo();
+          this.loadSummaryInfo(); // NEW: Load summary info when sync tab is opened
+          this.loadAttendanceSyncInfo();
         }
-      })
-    })
+      });
+    });
   }
 
   async loadSettings() {
     if (!this.electronAPI) {
       // Demo values
-      document.getElementById("serverUrl").value = "URL"
-      document.getElementById("syncInterval").value = "5"
-      document.getElementById("gracePeriod").value = "5"
-      document.getElementById("summarySyncInterval").value = "10" // NEW: Demo summary sync interval
-      return
+      document.getElementById("serverUrl").value = "URL";
+      document.getElementById("syncInterval").value = "5";
+      document.getElementById("gracePeriod").value = "5";
+      document.getElementById("summarySyncInterval").value = "10"; // NEW: Demo summary sync interval
+      return;
     }
 
     try {
-      const result = await this.electronAPI.getSettings()
+      const result = await this.electronAPI.getSettings();
 
       if (result.success) {
-        const settings = result.data
+        const settings = result.data;
 
-        document.getElementById("serverUrl").value = settings.server_url || ""
-        document.getElementById("syncInterval").value = Math.floor((settings.sync_interval || 300000) / 60000)
-        document.getElementById("gracePeriod").value = settings.grace_period || 5
+        document.getElementById("serverUrl").value = settings.server_url || "";
+        document.getElementById("syncInterval").value = Math.floor(
+          (settings.sync_interval || 300000) / 60000
+        );
+        document.getElementById("gracePeriod").value =
+          settings.grace_period || 5;
         // NEW: Load summary sync interval setting
-        document.getElementById("summarySyncInterval").value = Math.floor((settings.summary_sync_interval || 600000) / 60000)
+        document.getElementById("summarySyncInterval").value = Math.floor(
+          (settings.summary_sync_interval || 600000) / 60000
+        );
       }
     } catch (error) {
-      console.error("Error loading settings:", error)
-      this.showSettingsStatus("Error loading settings", "error")
+      console.error("Error loading settings:", error);
+      this.showSettingsStatus("Error loading settings", "error");
     }
   }
 
   async loadSyncInfo() {
-    if (!this.electronAPI) {
-      document.getElementById("employeeCount").textContent = "Employees in database: 25 (Demo)"
-      document.getElementById("lastSync").textContent = "Last sync: Just now (Demo)"
-      document.getElementById("profileStatus").textContent = "Profile images: 20/25 downloaded (Demo)"
-      document.getElementById("syncInfo").style.display = "block"
-      return
-    }
-
-    try {
-      const employeesResult = await this.electronAPI.getEmployees()
-
-      if (employeesResult.success) {
-        document.getElementById("employeeCount").textContent = `Employees in database: ${employeesResult.data.length}`
-
-        const settingsResult = await this.electronAPI.getSettings()
-        if (settingsResult.success && settingsResult.data.last_sync) {
-          const lastSync = new Date(Number.parseInt(settingsResult.data.last_sync))
-          document.getElementById("lastSync").textContent = `Last sync: ${lastSync.toLocaleString()}`
-        } else {
-          document.getElementById("lastSync").textContent = "Last sync: Never"
-        }
-
-        const profileResult = await this.electronAPI.checkProfileImages()
-        if (profileResult.success) {
-          document.getElementById("profileStatus").textContent =
-            `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`
-        }
-
-        document.getElementById("syncInfo").style.display = "block"
-      }
-    } catch (error) {
-      console.error("Error loading sync info:", error)
-    }
+  if (!this.electronAPI) {
+    document.getElementById("employeeCount").textContent =
+      "Employees in database: 25 (Demo)";
+    document.getElementById("lastSync").textContent =
+      "Last sync: Just now (Demo)";
+    document.getElementById("profileStatus").textContent =
+      "Profile images: 20/25 downloaded (Demo)";
+    document.getElementById("syncInfo").style.display = "block";
+    return;
   }
+
+  try {
+    const employeesResult = await this.electronAPI.getEmployees();
+
+    if (employeesResult.success) {
+      document.getElementById(
+        "employeeCount"
+      ).textContent = `Employees in database: ${employeesResult.data.length}`;
+
+      const settingsResult = await this.electronAPI.getSettings();
+      if (settingsResult.success && settingsResult.data.last_sync) {
+        const lastSync = new Date(
+          Number.parseInt(settingsResult.data.last_sync)
+        );
+        document.getElementById(
+          "lastSync"
+        ).textContent = `Last sync: ${lastSync.toLocaleString()}`;
+      } else {
+        document.getElementById("lastSync").textContent = "Last sync: Never";
+      }
+
+      // FIXED: Extract UIDs from employees and pass to checkProfileImages
+      const employeeUids = employeesResult.data.map(emp => emp.uid);
+      const profileResult = await this.electronAPI.checkProfileImages(employeeUids);
+      
+      if (profileResult.success) {
+        document.getElementById(
+          "profileStatus"
+        ).textContent = `Profile images: ${profileResult.downloaded}/${profileResult.total} downloaded`;
+      } else {
+        document.getElementById(
+          "profileStatus"
+        ).textContent = `Profile images: Error checking profiles`;
+      }
+
+      document.getElementById("syncInfo").style.display = "block";
+    }
+  } catch (error) {
+    console.error("Error loading sync info:", error);
+    document.getElementById("profileStatus").textContent = 
+      "Profile images: Error loading info";
+  }
+}
 
   // NEW: Load summary sync information
   async loadSummaryInfo() {
     if (!this.electronAPI) {
       // Demo values
-      const summarySyncInfo = document.getElementById("summarySyncInfo")
+      const summarySyncInfo = document.getElementById("summarySyncInfo");
       if (summarySyncInfo) {
         summarySyncInfo.innerHTML = `
           <div class="sync-info-item">
@@ -933,31 +1142,44 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           <div class="sync-info-item">
             <strong>Last Summary Sync:</strong> 5 minutes ago (Demo)
           </div>
-        `
+        `;
       }
-      return
+      return;
     }
 
     try {
-      const unsyncedResult = await this.electronAPI.getUnsyncedDailySummaryCount()
-      const lastSyncResult = await this.electronAPI.getDailySummaryLastSyncTime()
-      const summarySyncInfo = document.getElementById("summarySyncInfo")
+      const unsyncedResult =
+        await this.electronAPI.getUnsyncedDailySummaryCount();
+      const lastSyncResult =
+        await this.electronAPI.getDailySummaryLastSyncTime();
+      const summarySyncInfo = document.getElementById("summarySyncInfo");
 
       if (summarySyncInfo) {
-        const syncIntervalMinutes = Math.floor(this.summarySyncSettings.interval / 60000)
-        const syncStatus = this.summarySyncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : "Disabled"
-        
-        let lastSyncText = "Never"
-        if (lastSyncResult.success && lastSyncResult.lastSync && lastSyncResult.lastSync !== '1970-01-01T00:00:00.000Z') {
-          const lastSyncDate = new Date(lastSyncResult.lastSync)
-          const now = new Date()
-          const minutesAgo = Math.floor((now - lastSyncDate) / (1000 * 60))
-          lastSyncText = minutesAgo < 1 ? "Just now" : `${minutesAgo} minutes ago`
+        const syncIntervalMinutes = Math.floor(
+          this.summarySyncSettings.interval / 60000
+        );
+        const syncStatus = this.summarySyncSettings.enabled
+          ? `Enabled - Every ${syncIntervalMinutes} minutes`
+          : "Disabled";
+
+        let lastSyncText = "Never";
+        if (
+          lastSyncResult.success &&
+          lastSyncResult.lastSync &&
+          lastSyncResult.lastSync !== "1970-01-01T00:00:00.000Z"
+        ) {
+          const lastSyncDate = new Date(lastSyncResult.lastSync);
+          const now = new Date();
+          const minutesAgo = Math.floor((now - lastSyncDate) / (1000 * 60));
+          lastSyncText =
+            minutesAgo < 1 ? "Just now" : `${minutesAgo} minutes ago`;
         }
 
         summarySyncInfo.innerHTML = `
           <div class="sync-info-item">
-            <strong>Unsynced Summary Records:</strong> ${unsyncedResult.success ? unsyncedResult.count : 0}
+            <strong>Unsynced Summary Records:</strong> ${
+              unsyncedResult.success ? unsyncedResult.count : 0
+            }
           </div>
           <div class="sync-info-item">
             <strong>Summary Auto-sync:</strong> ${syncStatus}
@@ -966,12 +1188,14 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
             <strong>Last Summary Sync:</strong> ${lastSyncText}
           </div>
           <div class="sync-info-item">
-            <strong>Pending Sync:</strong> ${this.pendingSummarySync ? "Yes" : "No"}
+            <strong>Pending Sync:</strong> ${
+              this.pendingSummarySync ? "Yes" : "No"
+            }
           </div>
-        `
+        `;
       }
     } catch (error) {
-      console.error("Error loading summary sync info:", error)
+      console.error("Error loading summary sync info:", error);
     }
   }
 
@@ -979,7 +1203,7 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
   async loadAttendanceSyncInfo() {
     if (!this.electronAPI) {
       // Demo values
-      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo")
+      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo");
       if (attendanceSyncInfo) {
         attendanceSyncInfo.innerHTML = `
           <div class="sync-info-item">
@@ -991,18 +1215,23 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           <div class="sync-info-item">
             <strong>Last Attendance Sync:</strong> 2 minutes ago (Demo)
           </div>
-        `
+        `;
       }
-      return
+      return;
     }
 
     try {
-      const unsyncedResult = await this.electronAPI.getUnsyncedAttendanceCount()
-      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo")
+      const unsyncedResult =
+        await this.electronAPI.getUnsyncedAttendanceCount();
+      const attendanceSyncInfo = document.getElementById("attendanceSyncInfo");
 
       if (attendanceSyncInfo && unsyncedResult.success) {
-        const syncIntervalMinutes = Math.floor(this.syncSettings.interval / 60000)
-        const syncStatus = this.syncSettings.enabled ? `Enabled - Every ${syncIntervalMinutes} minutes` : "Disabled"
+        const syncIntervalMinutes = Math.floor(
+          this.syncSettings.interval / 60000
+        );
+        const syncStatus = this.syncSettings.enabled
+          ? `Enabled - Every ${syncIntervalMinutes} minutes`
+          : "Disabled";
 
         attendanceSyncInfo.innerHTML = `
           <div class="sync-info-item">
@@ -1014,61 +1243,61 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           <div class="sync-info-item">
             <strong>Next sync:</strong> <span id="nextSyncTime">Calculating...</span>
           </div>
-        `
+        `;
 
         // Update next sync time if auto-sync is enabled
         if (this.syncSettings.enabled && this.autoSyncInterval) {
-          this.updateNextSyncTime()
+          this.updateNextSyncTime();
         }
       }
     } catch (error) {
-      console.error("Error loading attendance sync info:", error)
+      console.error("Error loading attendance sync info:", error);
     }
   }
 
   // Update next sync countdown
   updateNextSyncTime() {
     // This is a simplified version - in a real app you might want to track the exact next sync time
-    const nextSyncElement = document.getElementById("nextSyncTime")
+    const nextSyncElement = document.getElementById("nextSyncTime");
     if (nextSyncElement) {
-      const minutes = Math.floor(this.syncSettings.interval / 60000)
-      nextSyncElement.textContent = `~${minutes} minutes`
+      const minutes = Math.floor(this.syncSettings.interval / 60000);
+      nextSyncElement.textContent = `~${minutes} minutes`;
     }
   }
 
   showSettingsStatus(message, type = "info") {
-    const statusElement = document.getElementById("settingsStatusMessage")
-    statusElement.textContent = message
-    statusElement.className = `status-message ${type}`
-    statusElement.style.display = "block"
-    statusElement.style.position = "relative"
-    statusElement.style.top = "auto"
-    statusElement.style.right = "auto"
-    statusElement.style.transform = "none"
-    statusElement.style.marginBottom = "16px"
-    statusElement.style.borderRadius = "8px"
+    const statusElement = document.getElementById("settingsStatusMessage");
+    statusElement.textContent = message;
+    statusElement.className = `status-message ${type}`;
+    statusElement.style.display = "block";
+    statusElement.style.position = "relative";
+    statusElement.style.top = "auto";
+    statusElement.style.right = "auto";
+    statusElement.style.transform = "none";
+    statusElement.style.marginBottom = "16px";
+    statusElement.style.borderRadius = "8px";
 
     setTimeout(() => {
-      statusElement.style.display = "none"
-    }, 4000)
+      statusElement.style.display = "none";
+    }, 4000);
   }
 
   focusInput() {
-    const barcodeInput = document.getElementById("barcodeInput")
+    const barcodeInput = document.getElementById("barcodeInput");
     setTimeout(() => {
-      barcodeInput.focus()
-      barcodeInput.select() // Select all text for easy replacement
-    }, 100)
+      barcodeInput.focus();
+      barcodeInput.select(); // Select all text for easy replacement
+    }, 100);
   }
 
   // Generate unique ID for images
   generateUniqueId(prefix) {
-    return `${prefix}-${++this.imageCounter}-${Date.now()}`
+    return `${prefix}-${++this.imageCounter}-${Date.now()}`;
   }
 
   startClock() {
     const updateClock = () => {
-      const now = new Date()
+      const now = new Date();
       const options = {
         weekday: "long",
         year: "numeric",
@@ -1077,286 +1306,313 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-      }
-      document.getElementById("datetime").textContent = now.toLocaleDateString("en-US", options)
-    }
+      };
+      document.getElementById("datetime").textContent = now.toLocaleDateString(
+        "en-US",
+        options
+      );
+    };
 
-    updateClock()
-    setInterval(updateClock, 1000)
+    updateClock();
+    setInterval(updateClock, 1000);
   }
 
   connectWebSocket() {
     try {
-      this.ws = new WebSocket("ws://localhost:8080")
+      this.ws = new WebSocket("ws://localhost:8080");
 
       this.ws.onopen = () => {
-        console.log("WebSocket connected")
-        this.updateConnectionStatus(true)
-      }
+        console.log("WebSocket connected");
+        this.updateConnectionStatus(true);
+      };
 
       this.ws.onmessage = (event) => {
-        const message = JSON.parse(event.data)
-        this.handleWebSocketMessage(message)
-      }
+        const message = JSON.parse(event.data);
+        this.handleWebSocketMessage(message);
+      };
 
       this.ws.onclose = () => {
-        console.log("WebSocket disconnected")
-        this.updateConnectionStatus(false)
+        console.log("WebSocket disconnected");
+        this.updateConnectionStatus(false);
         // Reconnect after 5 seconds
-        setTimeout(() => this.connectWebSocket(), 5000)
-      }
+        setTimeout(() => this.connectWebSocket(), 5000);
+      };
 
       this.ws.onerror = (error) => {
-        console.error("WebSocket error:", error)
-        this.updateConnectionStatus(false)
-      }
+        console.error("WebSocket error:", error);
+        this.updateConnectionStatus(false);
+      };
     } catch (error) {
-      console.error("Failed to connect WebSocket:", error)
-      this.updateConnectionStatus(false)
+      console.error("Failed to connect WebSocket:", error);
+      this.updateConnectionStatus(false);
     }
   }
 
   updateConnectionStatus(isOnline) {
-    const statusElement = document.getElementById("connectionStatus")
-    const dot = statusElement.querySelector(".status-dot")
-    const text = statusElement.querySelector("span:last-child")
+    const statusElement = document.getElementById("connectionStatus");
+    const dot = statusElement.querySelector(".status-dot");
+    const text = statusElement.querySelector("span:last-child");
 
     if (isOnline) {
-      dot.classList.add("online")
-      text.textContent = "Online"
+      dot.classList.add("online");
+      text.textContent = "Online";
     } else {
-      dot.classList.remove("online")
-      text.textContent = "Offline"
+      dot.classList.remove("online");
+      text.textContent = "Offline";
     }
   }
 
   handleWebSocketMessage(message) {
     switch (message.type) {
       case "attendance_update":
-        this.loadTodayAttendance()
+        this.loadTodayAttendance();
         // Mark summary data as changed since attendance affects summary
-        this.markSummaryDataChanged()
+        this.markSummaryDataChanged();
         // Trigger sync after attendance update
         setTimeout(() => {
-          this.performAttendanceSync(true) // Silent sync
-        }, 2000)
-        break
+          this.performAttendanceSync(true); // Silent sync
+        }, 2000);
+        break;
       case "summary_update": // NEW: Handle summary-specific updates
-        this.markSummaryDataChanged()
+        this.markSummaryDataChanged();
         // Trigger summary sync
         setTimeout(() => {
-          this.performSummarySync(true) // Silent summary sync
-        }, 3000)
-        break
+          this.performSummarySync(true); // Silent summary sync
+        }, 3000);
+        break;
       default:
-        console.log("Unknown WebSocket message:", message)
+        console.log("Unknown WebSocket message:", message);
     }
   }
 
   // Show loading screen to prevent duplicate scans
   showLoadingScreen() {
     // Create loading screen if it doesn't exist
-    let loadingScreen = document.getElementById("loadingScreen")
+    let loadingScreen = document.getElementById("loadingScreen");
 
     if (!loadingScreen) {
-      loadingScreen = document.createElement("div")
-      loadingScreen.id = "loadingScreen"
-      loadingScreen.className = "loading-screen"
+      loadingScreen = document.createElement("div");
+      loadingScreen.id = "loadingScreen";
+      loadingScreen.className = "loading-screen";
       loadingScreen.innerHTML = `
         <div class="loading-content">
           <div class="loading-spinner"></div>
           <div class="loading-text">Processing attendance...</div>
           <div class="loading-subtext">Please wait</div>
         </div>
-      `
-      document.body.appendChild(loadingScreen)
+      `;
+      document.body.appendChild(loadingScreen);
     }
 
-    loadingScreen.style.display = "flex"
+    loadingScreen.style.display = "flex";
     // Add fade-in effect
     setTimeout(() => {
-      loadingScreen.classList.add("show")
-    }, 5)
+      loadingScreen.classList.add("show");
+    }, 5);
   }
 
   // Hide loading screen
   hideLoadingScreen() {
-    const loadingScreen = document.getElementById("loadingScreen")
+    const loadingScreen = document.getElementById("loadingScreen");
     if (loadingScreen) {
-      loadingScreen.classList.remove("show")
+      loadingScreen.classList.remove("show");
       setTimeout(() => {
-        loadingScreen.style.display = "none"
-      }, 250) // Wait for fade-out animation
+        loadingScreen.style.display = "none";
+      }, 250); // Wait for fade-out animation
     }
   }
 
   async handleScan() {
     // Clear any pending timeouts
     if (this.barcodeTimeout) {
-      clearTimeout(this.barcodeTimeout)
+      clearTimeout(this.barcodeTimeout);
     }
 
-    const input = document.getElementById("barcodeInput").value.trim()
-    const inputType = document.querySelector('input[name="inputType"]:checked').value
+    const input = document.getElementById("barcodeInput").value.trim();
+    const inputType = document.querySelector(
+      'input[name="inputType"]:checked'
+    ).value;
 
     if (!input) {
-      this.showStatus("Please enter a barcode or ID number", "error")
-      this.focusInput()
-      return
+      this.showStatus("Please enter a barcode or ID number", "error");
+      this.focusInput();
+      return;
     }
 
     // Check for duplicate scan
     if (this.isDuplicateScan(input)) {
-      this.showStatus("Duplicate scan detected - please wait before scanning again", "warning")
-      this.focusInput()
-      return
+      this.showStatus(
+        "Duplicate scan detected - please wait before scanning again",
+        "warning"
+      );
+      this.focusInput();
+      return;
     }
 
     // Update last scan data to prevent duplicates
-    this.updateLastScanData(input)
+    this.updateLastScanData(input);
 
     // Show 2-second loading screen
-    this.showLoadingScreen()
+    this.showLoadingScreen();
 
     // Disable input and button during processing
-    const barcodeInput = document.getElementById("barcodeInput")
-    const submitButton = document.getElementById("manualSubmit")
-    const originalText = submitButton.textContent
+    const barcodeInput = document.getElementById("barcodeInput");
+    const submitButton = document.getElementById("manualSubmit");
+    const originalText = submitButton.textContent;
 
-    barcodeInput.disabled = true
-    submitButton.textContent = "Processing..."
-    submitButton.disabled = true
+    barcodeInput.disabled = true;
+    submitButton.textContent = "Processing...";
+    submitButton.disabled = true;
 
     try {
       const result = await this.electronAPI.clockAttendance({
         input: input,
         inputType: inputType,
-      })
+      });
 
       if (result.success) {
         // Wait for loading screen (0.5 seconds minimum)
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
-        this.hideLoadingScreen()
-        this.showEmployeeDisplay(result.data)
-        this.clearInput()
-        await this.loadTodayAttendance()
-        this.showStatus("Attendance recorded successfully", "success")
+        this.hideLoadingScreen();
+        this.showEmployeeDisplay(result.data);
+        this.clearInput();
+        await this.loadTodayAttendance();
+        this.showStatus("Attendance recorded successfully", "success");
 
         // NEW: Mark summary data as changed since new attendance affects summary
-        this.markSummaryDataChanged()
+        this.markSummaryDataChanged();
 
         // Trigger automatic sync after successful attendance recording
         setTimeout(() => {
-          this.performAttendanceSync(true) // Silent sync
-        }, 3000)
+          this.performAttendanceSync(true); // Silent sync
+        }, 3000);
       } else {
         // Wait for loading screen (2 seconds minimum)
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-        this.hideLoadingScreen()
-        this.showStatus(result.error || "Employee not found", "error")
-        this.focusInput()
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        this.hideLoadingScreen();
+        this.showStatus(result.error || "Employee not found", "error");
+        this.focusInput();
       }
     } catch (error) {
-      console.error("Clock error:", error)
+      console.error("Clock error:", error);
       // Wait for loading screen (2 seconds minimum)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      this.hideLoadingScreen()
-      this.showStatus("System error occurred", "error")
-      this.focusInput()
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      this.hideLoadingScreen();
+      this.showStatus("System error occurred", "error");
+      this.focusInput();
     } finally {
       // Restore input and button
-      barcodeInput.disabled = false
-      submitButton.textContent = originalText
-      submitButton.disabled = false
+      barcodeInput.disabled = false;
+      submitButton.textContent = originalText;
+      submitButton.disabled = false;
     }
   }
 
-  // Improved image loading with proper fallback handling and cleanup
-  setupImageWithFallback(imgElement, employee_uid, altText) {
-    if (!imgElement || !employee_uid) return
+ async setupImageWithFallback(imgElement, employee_uid, altText) {
+  if (!imgElement || !employee_uid) return
 
-    // Clear any existing error handlers
-    imgElement.onerror = null
-    imgElement.onload = null
+  // Clear any existing error handlers
+  imgElement.onerror = null
+  imgElement.onload = null
 
-    const attemptKey = `${employee_uid}_${imgElement.id}`
+  const attemptKey = `${employee_uid}_${imgElement.id}`
 
-    // Clean up previous attempts for this element
-    this.imageLoadAttempts.delete(attemptKey)
-    this.imageLoadAttempts.set(attemptKey, 0)
+  // Clean up previous attempts for this element
+  this.imageLoadAttempts.delete(attemptKey)
+  this.imageLoadAttempts.set(attemptKey, 0)
 
-    const fallbackChain = [
-      `profiles/${employee_uid}.jpg`,
-      `profiles/${employee_uid}.png`,
-      "assets/profile.png",
-      this.getDefaultImageDataURL(), // Base64 fallback
-    ]
+  try {
+    // Use your existing getLocalProfilePath method (this method EXISTS in your preload.js)
+    if (this.electronAPI && this.electronAPI.getLocalProfilePath) {
+      const result = await this.electronAPI.getLocalProfilePath(employee_uid)
+      
+      if (result.success && result.path) {
+        // Convert Windows path to file URL for Electron
+        const normalizedPath = result.path.replace(/\\/g, '/')
+        const fileUrl = normalizedPath.startsWith('file:///') ? normalizedPath : `file:///${normalizedPath}`
+        
+        // Set up success handler
+        imgElement.onload = () => {
+          this.imageLoadAttempts.delete(attemptKey)
+          imgElement.onerror = null
+          imgElement.onload = null
+          console.log(`Profile loaded successfully for UID ${employee_uid}`)
+        }
 
-    const tryNextImage = () => {
-      const attempts = this.imageLoadAttempts.get(attemptKey) || 0
+        // Set up error handler to fall back to default
+        imgElement.onerror = () => {
+          console.log(`Profile image failed to load for UID ${employee_uid}, using default`)
+          imgElement.src = this.getDefaultImageDataURL()
+          imgElement.onerror = null
+          imgElement.onload = null
+          this.imageLoadAttempts.delete(attemptKey)
+        }
 
-      if (attempts >= fallbackChain.length) {
-        // All fallbacks failed, use default
-        imgElement.src = this.getDefaultImageDataURL()
-        imgElement.onerror = null
-        imgElement.onload = null
-        this.imageLoadAttempts.delete(attemptKey)
+        imgElement.alt = altText || "Profile Image"
+        imgElement.src = fileUrl
         return
       }
-
-      // Set up error handler for this attempt
-      imgElement.onerror = () => {
-        this.imageLoadAttempts.set(attemptKey, attempts + 1)
-        tryNextImage()
-      }
-
-      // Set up success handler to clean up
-      imgElement.onload = () => {
-        this.imageLoadAttempts.delete(attemptKey)
-        imgElement.onerror = null
-        imgElement.onload = null
-      }
-
-      // Set the image source
-      imgElement.src = fallbackChain[attempts]
     }
 
-    imgElement.alt = altText || "Profile Image"
-    tryNextImage()
+  } catch (error) {
+    console.error(`Error getting profile path for UID ${employee_uid}:`, error)
   }
 
-  // Generate a simple default profile image as data URL
-  getDefaultImageDataURL() {
-    return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y0ZjRmNCIgcng9IjUwIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIzNSIgcj0iMTUiIGZpbGw9IiNjY2MiLz48cGF0aCBkPSJNMjAgNzVhMzAgMzAgMCAwIDEgNjAgMCIgZmlsbD0iI2NjYyIvPjwvc3ZnPg=="
+  // Fallback: use default image
+  console.log(`No profile found for UID ${employee_uid}, using default image`)
+  imgElement.src = this.getDefaultImageDataURL()
+  imgElement.alt = altText || "Profile Image"
+  imgElement.onerror = null
+  imgElement.onload = null
+  this.imageLoadAttempts.delete(attemptKey)
+}
+
+  // Generate a loading image as data URL
+  getLoadingImageDataURL() {
+    return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y4ZjhmOCIgcng9IjUwIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iMTUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwN2NmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtZGFzaGFycmF5PSI4IDQiPjxhbmltYXRlVHJhbnNmb3JtIGF0dHJpYnV0ZU5hbWU9InRyYW5zZm9ybSIgYXR0cmlidXRlVHlwZT0iWE1MIiB0eXBlPSJyb3RhdGUiIGZyb209IjAgNTAgNTAiIHRvPSIzNjAgNTAgNTAiIGR1cj0iMXMiIHJlcGVhdENvdW50PSJpbmRlZmluaXRlIi8+PC9jaXJjbGU+PC9zdmc+";
   }
 
   showEmployeeDisplay(data) {
-    const display = document.getElementById("employeeDisplay")
-    const { employee, clockType, sessionType, clockTime, regularHours, overtimeHours, isOvertimeSession } = data
+    const display = document.getElementById("employeeDisplay");
+    const {
+      employee,
+      clockType,
+      sessionType,
+      clockTime,
+      regularHours,
+      overtimeHours,
+      isOvertimeSession,
+    } = data;
 
     // Update employee info
-    document.getElementById("employeeName").textContent =
-      `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim()
-    document.getElementById("employeeDepartment").textContent = employee.department || "No Department"
-    document.getElementById("employeeId").textContent = `ID: ${employee.id_number}`
+    document.getElementById("employeeName").textContent = `${
+      employee.first_name
+    } ${employee.middle_name || ""} ${employee.last_name}`.trim();
+    document.getElementById("employeeDepartment").textContent =
+      employee.department || "No Department";
+    document.getElementById(
+      "employeeId"
+    ).textContent = `ID: ${employee.id_number}`;
 
-    const photo = document.getElementById("employeePhoto")
-    photo.style.display = "block"
-
-    // Use the improved image loading method
-    this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${employee.last_name}`)
+const photo = document.getElementById("employeePhoto")
+photo.style.display = "block"
+this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${employee.last_name}`)
 
     // Update clock info with enhanced display
-    const clockTypeElement = document.getElementById("clockType")
-    clockTypeElement.textContent = this.formatClockType(clockType, sessionType)
-    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${isOvertimeSession ? "overtime" : ""}`
+    const clockTypeElement = document.getElementById("clockType");
+    clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
+    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${
+      isOvertimeSession ? "overtime" : ""
+    }`;
 
-    document.getElementById("clockTime").textContent = new Date(clockTime).toLocaleTimeString()
+    document.getElementById("clockTime").textContent = new Date(
+      clockTime
+    ).toLocaleTimeString();
 
     // Enhanced hours display
-    const hoursInfo = document.getElementById("hoursInfo")
-    const totalHours = (regularHours || 0) + (overtimeHours || 0)
+    const hoursInfo = document.getElementById("hoursInfo");
+    const totalHours = (regularHours || 0) + (overtimeHours || 0);
 
     if (isOvertimeSession) {
       hoursInfo.innerHTML = `
@@ -1364,40 +1620,44 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           <div class="regular-hours">Regular: ${regularHours || 0}h</div>
           <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
           <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
-          <div class="session-indicator">🌙 ${sessionType || "Overtime Session"}</div>
+          <div class="session-indicator">🌙 ${
+            sessionType || "Overtime Session"
+          }</div>
         </div>
-      `
+      `;
     } else {
       hoursInfo.innerHTML = `
         <div class="hours-breakdown">
           <div class="regular-hours">Regular: ${regularHours || 0}h</div>
-          <div class="overtime-hours">Overtime: ${overtimeHours.toFixed(2)}h</div>
+          <div class="overtime-hours">Overtime: ${overtimeHours.toFixed(
+            2
+          )}h</div>
           <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
         </div>
-      `
+      `;
     }
 
     // Show display
-    display.style.display = "block"
+    display.style.display = "block";
 
     // Auto-hide after 10 seconds
     if (this.employeeDisplayTimeout) {
-      clearTimeout(this.employeeDisplayTimeout)
+      clearTimeout(this.employeeDisplayTimeout);
     }
 
     this.employeeDisplayTimeout = setTimeout(() => {
-      display.style.display = "none"
-      this.focusInput()
-    }, 10000)
+      display.style.display = "none";
+      this.focusInput();
+    }, 10000);
   }
 
   formatClockType(clockType, sessionType) {
     // Use enhanced session type from backend if available
     if (sessionType) {
-      const isIn = clockType.endsWith("_in")
-      const emoji = isIn ? "🟢" : "🔴"
-      const action = isIn ? "In" : "Out"
-      return `${emoji} ${sessionType} ${action}`
+      const isIn = clockType.endsWith("_in");
+      const emoji = isIn ? "🟢" : "🔴";
+      const action = isIn ? "In" : "Out";
+      return `${emoji} ${sessionType} ${action}`;
     }
 
     // Fallback to original mapping with new types
@@ -1410,131 +1670,144 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
       evening_out: "🔴 Evening Out (Overtime)",
       overtime_in: "🟢 Overtime In",
       overtime_out: "🔴 Overtime Out",
-    }
-    return types[clockType] || clockType
+    };
+    return types[clockType] || clockType;
   }
 
   clearInput() {
-    document.getElementById("barcodeInput").value = ""
-    setTimeout(() => this.focusInput(), 100)
+    document.getElementById("barcodeInput").value = "";
+    setTimeout(() => this.focusInput(), 100);
   }
 
   async loadInitialData() {
     // Show download toast for initial data loading
-    this.showDownloadToast("🔄 Loading initial data...", "info")
+    this.showDownloadToast("🔄 Loading initial data...", "info");
 
     try {
-      await Promise.all([this.loadTodayAttendance(), this.syncEmployees()])
-      this.showDownloadToast("✅ Initial data loaded successfully!", "success")
+      await Promise.all([this.loadTodayAttendance(), this.syncEmployees()]);
+      this.showDownloadToast("✅ Initial data loaded successfully!", "success");
     } catch (error) {
-      console.error("Error loading initial data:", error)
-      this.showDownloadToast("❌ Failed to load initial data", "error")
+      console.error("Error loading initial data:", error);
+      this.showDownloadToast("❌ Failed to load initial data", "error");
     }
   }
 
   async loadTodayAttendance() {
     try {
-      const result = await this.electronAPI.getTodayAttendance()
+      const result = await this.electronAPI.getTodayAttendance();
 
       if (result.success) {
-        this.updateCurrentlyClocked(result.data.currentlyClocked)
-        this.updateTodayActivity(result.data.attendance)
-        this.updateStatistics(result.data.statistics)
-        this.loadDailySummary()
+        this.updateCurrentlyClocked(result.data.currentlyClocked);
+        this.updateTodayActivity(result.data.attendance);
+        this.updateStatistics(result.data.statistics);
+        this.loadDailySummary();
       }
     } catch (error) {
-      console.error("Error loading attendance:", error)
+      console.error("Error loading attendance:", error);
     }
   }
 
- initializeDateRangeControls() {
+  initializeDateRangeControls() {
     // Set default end date to today
-    const today = new Date().toISOString().split('T')[0]
-    document.getElementById('endDate').value = today
-    
+    const today = new Date().toISOString().split("T")[0];
+    document.getElementById("endDate").value = today;
+
     // Set default start date to 7 days ago
-    const weekAgo = new Date()
-    weekAgo.setDate(weekAgo.getDate() - 7)
-    document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0]
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    document.getElementById("startDate").value = weekAgo
+      .toISOString()
+      .split("T")[0];
 
     // Add event listeners
-    document.getElementById('applyDateFilter').addEventListener('click', () => this.applyDateFilter())
-    document.getElementById('clearDateFilter').addEventListener('click', () => this.clearDateFilter())
-    
+    document
+      .getElementById("applyDateFilter")
+      .addEventListener("click", () => this.applyDateFilter());
+    document
+      .getElementById("clearDateFilter")
+      .addEventListener("click", () => this.clearDateFilter());
+
     // Quick date range buttons
-    document.querySelectorAll('[data-range]').forEach(btn => {
-      btn.addEventListener('click', (e) => this.setQuickDateRange(e.target.dataset.range))
-    })
+    document.querySelectorAll("[data-range]").forEach((btn) => {
+      btn.addEventListener("click", (e) =>
+        this.setQuickDateRange(e.target.dataset.range)
+      );
+    });
 
     // Auto-apply filter when dates change
-    document.getElementById('startDate').addEventListener('change', () => this.applyDateFilter())
-    document.getElementById('endDate').addEventListener('change', () => this.applyDateFilter())
+    document
+      .getElementById("startDate")
+      .addEventListener("change", () => this.applyDateFilter());
+    document
+      .getElementById("endDate")
+      .addEventListener("change", () => this.applyDateFilter());
   }
 
   setQuickDateRange(range) {
-    const today = new Date()
-    const startDateInput = document.getElementById('startDate')
-    const endDateInput = document.getElementById('endDate')
-    
-    let startDate, endDate = new Date(today)
+    const today = new Date();
+    const startDateInput = document.getElementById("startDate");
+    const endDateInput = document.getElementById("endDate");
 
-    switch(range) {
-      case 'today':
-        startDate = new Date(today)
-        break
-      case 'yesterday':
-        startDate = new Date(today)
-        startDate.setDate(today.getDate() - 1)
-        endDate = new Date(startDate)
-        break
-      case 'week':
-        startDate = new Date(today)
-        startDate.setDate(today.getDate() - today.getDay()) // Start of week (Sunday)
-        break
-      case 'month':
-        startDate = new Date(today.getFullYear(), today.getMonth(), 1)
-        break
-      case 'last7':
-        startDate = new Date(today)
-        startDate.setDate(today.getDate() - 6) // Include today
-        break
-      case 'last30':
-        startDate = new Date(today)
-        startDate.setDate(today.getDate() - 29) // Include today
-        break
+    let startDate,
+      endDate = new Date(today);
+
+    switch (range) {
+      case "today":
+        startDate = new Date(today);
+        break;
+      case "yesterday":
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - 1);
+        endDate = new Date(startDate);
+        break;
+      case "week":
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+        break;
+      case "month":
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        break;
+      case "last7":
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - 6); // Include today
+        break;
+      case "last30":
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - 29); // Include today
+        break;
       default:
-        return
+        return;
     }
 
-    startDateInput.value = startDate.toISOString().split('T')[0]
-    endDateInput.value = endDate.toISOString().split('T')[0]
-    
-    this.applyDateFilter()
+    startDateInput.value = startDate.toISOString().split("T")[0];
+    endDateInput.value = endDate.toISOString().split("T")[0];
+
+    this.applyDateFilter();
   }
 
   applyDateFilter() {
-    const startDate = document.getElementById('startDate').value
-    const endDate = document.getElementById('endDate').value
+    const startDate = document.getElementById("startDate").value;
+    const endDate = document.getElementById("endDate").value;
 
     // Validation
     if (startDate && endDate && startDate > endDate) {
-      this.showStatus('Start date cannot be after end date', 'error')
-      return
+      this.showStatus("Start date cannot be after end date", "error");
+      return;
     }
 
-    this.currentDateRange.startDate = startDate || null
-    this.currentDateRange.endDate = endDate || null
+    this.currentDateRange.startDate = startDate || null;
+    this.currentDateRange.endDate = endDate || null;
 
-    this.loadDailySummary()
+    this.loadDailySummary();
   }
 
   clearDateFilter() {
-    document.getElementById('startDate').value = ''
-    document.getElementById('endDate').value = ''
-    this.currentDateRange.startDate = null
-    this.currentDateRange.endDate = null
-    
-    this.loadDailySummary()
+    document.getElementById("startDate").value = "";
+    document.getElementById("endDate").value = "";
+    this.currentDateRange.startDate = null;
+    this.currentDateRange.endDate = null;
+
+    this.loadDailySummary();
   }
 
   async loadDailySummary() {
@@ -1542,68 +1815,72 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
       const result = await this.electronAPI.getDailySummary(
         this.currentDateRange.startDate,
         this.currentDateRange.endDate
-      )
+      );
 
       if (result.success) {
-        this.summaryData = result.data
-        this.updateDailySummaryTable(result.data)
-        this.updateSummaryStats(result.data)
+        this.summaryData = result.data;
+        this.updateDailySummaryTable(result.data);
+        this.updateSummaryStats(result.data);
       } else {
-        console.error("Failed to load daily summary:", result.error)
-        this.showStatus('Failed to load daily summary', 'error')
+        console.error("Failed to load daily summary:", result.error);
+        this.showStatus("Failed to load daily summary", "error");
       }
     } catch (error) {
-      console.error("Error loading daily summary:", error)
-      const tbody = document.getElementById("summaryTableBody")
+      console.error("Error loading daily summary:", error);
+      const tbody = document.getElementById("summaryTableBody");
       if (tbody) {
-        tbody.innerHTML = '<tr><td colspan="20" class="loading">Error loading summary</td></tr>'
+        tbody.innerHTML =
+          '<tr><td colspan="20" class="loading">Error loading summary</td></tr>';
       }
     }
   }
 
   updateSummaryStats(summaryData) {
-    const totalRecordsEl = document.getElementById('totalRecords')
-    const dateRangeTextEl = document.getElementById('dateRangeText')
-    const totalHoursEl = document.getElementById('totalHours')
+    const totalRecordsEl = document.getElementById("totalRecords");
+    const dateRangeTextEl = document.getElementById("dateRangeText");
+    const totalHoursEl = document.getElementById("totalHours");
 
     // Update total records
     if (totalRecordsEl) {
-      totalRecordsEl.textContent = summaryData.length.toLocaleString()
+      totalRecordsEl.textContent = summaryData.length.toLocaleString();
     }
 
     // Update date range text
     if (dateRangeTextEl) {
-      let rangeText = 'All Records'
+      let rangeText = "All Records";
       if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
-        const start = this.currentDateRange.startDate ? 
-          new Date(this.currentDateRange.startDate).toLocaleDateString() : 'Beginning'
-        const end = this.currentDateRange.endDate ? 
-          new Date(this.currentDateRange.endDate).toLocaleDateString() : 'Latest'
-        rangeText = `${start} - ${end}`
+        const start = this.currentDateRange.startDate
+          ? new Date(this.currentDateRange.startDate).toLocaleDateString()
+          : "Beginning";
+        const end = this.currentDateRange.endDate
+          ? new Date(this.currentDateRange.endDate).toLocaleDateString()
+          : "Latest";
+        rangeText = `${start} - ${end}`;
       }
-      dateRangeTextEl.textContent = rangeText
+      dateRangeTextEl.textContent = rangeText;
     }
 
     // Calculate and update total hours
     if (totalHoursEl) {
       const totalHours = summaryData.reduce((sum, record) => {
-        return sum + (parseFloat(record.total_hours) || 0)
-      }, 0)
-      totalHoursEl.textContent = totalHours.toFixed(1) + ' hrs'
+        return sum + (parseFloat(record.total_hours) || 0);
+      }, 0);
+      totalHoursEl.textContent = totalHours.toFixed(1) + " hrs";
     }
   }
 
   updateDailySummaryTable(summaryData) {
-    const tbody = document.getElementById("summaryTableBody")
+    const tbody = document.getElementById("summaryTableBody");
 
     if (!summaryData || summaryData.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="20" class="loading">No summary data available for the selected date range</td></tr>'
-      return
+      tbody.innerHTML =
+        '<tr><td colspan="20" class="loading">No summary data available for the selected date range</td></tr>';
+      return;
     }
 
     tbody.innerHTML = summaryData
       .map((record) => {
-        const status = this.getEmployeeStatus(record)
+        const status = this.getEmployeeStatus(record);
 
         return `
         <tr>
@@ -1626,18 +1903,20 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           <td>${(record.regular_hours || 0).toFixed(2)}</td>
           <td>${(record.overtime_hours || 0).toFixed(2)}</td>
           <td>${(record.total_hours || 0).toFixed(2)}</td>
-          <td><span class="status-badge ${status.class}">${status.text}</span></td>
+          <td><span class="status-badge ${status.class}">${
+          status.text
+        }</span></td>
         </tr>
-      `
+      `;
       })
-      .join("")
+      .join("");
   }
 
   formatDateTime(dateTimeString) {
-    if (!dateTimeString) return "-"
+    if (!dateTimeString) return "-";
 
     try {
-      const date = new Date(dateTimeString)
+      const date = new Date(dateTimeString);
       return (
         date.toLocaleDateString("en-US", {
           month: "short",
@@ -1650,30 +1929,30 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
           minute: "2-digit",
           hour12: true,
         })
-      )
+      );
     } catch (error) {
-      return "-"
+      return "-";
     }
   }
 
   getEmployeeStatus(record) {
     if (record.has_overtime) {
-      return { class: "overtime", text: "Overtime" }
+      return { class: "overtime", text: "Overtime" };
     } else if (record.is_incomplete) {
-      return { class: "incomplete", text: "Incomplete" }
+      return { class: "incomplete", text: "Incomplete" };
     } else {
-      return { class: "complete", text: "Complete" }
+      return { class: "complete", text: "Complete" };
     }
   }
 
   async downloadExcel() {
     try {
       // Use the current filtered data instead of fetching again
-      const summaryData = this.summaryData
+      const summaryData = this.summaryData;
 
       if (!summaryData || summaryData.length === 0) {
-        this.showStatus("No data available for export", "error")
-        return
+        this.showStatus("No data available for export", "error");
+        return;
       }
 
       const excelData = summaryData.map((record) => ({
@@ -1700,7 +1979,9 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
         "Morning Hours": (record.morning_hours || 0).toFixed(2),
         "Afternoon Hours": (record.afternoon_hours || 0).toFixed(2),
         "Evening Hours": (record.evening_hours || 0).toFixed(2),
-        "Overtime Session Hours": (record.overtime_session_hours || 0).toFixed(2),
+        "Overtime Session Hours": (record.overtime_session_hours || 0).toFixed(
+          2
+        ),
         "Is Incomplete": record.is_incomplete ? "Yes" : "No",
         "Has Late Entry": record.has_late_entry ? "Yes" : "No",
         "Has Overtime": record.has_overtime ? "Yes" : "No",
@@ -1711,77 +1992,83 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
         "Total Minutes Worked": record.total_minutes_worked || 0,
         "Break Time Minutes": record.break_time_minutes || 0,
         Status: this.getEmployeeStatus(record).text,
-      }))
+      }));
 
       // Create Excel file using SheetJS
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.json_to_sheet(excelData)
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
 
       // Auto-size columns
       const colWidths = Object.keys(excelData[0] || {}).map((key) => ({
         wch: Math.max(key.length, 15),
-      }))
-      ws["!cols"] = colWidths
+      }));
+      ws["!cols"] = colWidths;
 
-      XLSX.utils.book_append_sheet(wb, ws, "Daily Attendance Summary")
+      XLSX.utils.book_append_sheet(wb, ws, "Daily Attendance Summary");
 
       // Generate filename with date range
-      let filename = "Daily_Attendance_Summary"
-      
+      let filename = "Daily_Attendance_Summary";
+
       if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
-        const start = this.currentDateRange.startDate || "all"
-        const end = this.currentDateRange.endDate || "latest"
-        filename += `_${start}_to_${end}`
+        const start = this.currentDateRange.startDate || "all";
+        const end = this.currentDateRange.endDate || "latest";
+        filename += `_${start}_to_${end}`;
       } else {
-        const today = new Date().toISOString().split("T")[0]
-        filename += `_${today}`
+        const today = new Date().toISOString().split("T")[0];
+        filename += `_${today}`;
       }
-      
-      filename += ".xlsx"
+
+      filename += ".xlsx";
 
       // Download file
-      XLSX.writeFile(wb, filename)
+      XLSX.writeFile(wb, filename);
 
       // Show success message with record count
-      const recordCount = summaryData.length
-      const dateRangeText = this.currentDateRange.startDate || this.currentDateRange.endDate 
-        ? `for selected date range` 
-        : `for all dates`
-      
-      this.showStatus(`Excel file downloaded successfully! ${recordCount} records exported ${dateRangeText}`, "success")
-      
+      const recordCount = summaryData.length;
+      const dateRangeText =
+        this.currentDateRange.startDate || this.currentDateRange.endDate
+          ? `for selected date range`
+          : `for all dates`;
+
+      this.showStatus(
+        `Excel file downloaded successfully! ${recordCount} records exported ${dateRangeText}`,
+        "success"
+      );
     } catch (error) {
-      console.error("Error downloading Excel:", error)
-      this.showStatus("Error downloading Excel file", "error")
+      console.error("Error downloading Excel:", error);
+      this.showStatus("Error downloading Excel file", "error");
     }
   }
 
   showStatus(message, type) {
-    const statusEl = document.getElementById('settingsStatusMessage')
+    const statusEl = document.getElementById("settingsStatusMessage");
     if (statusEl) {
-      statusEl.textContent = message
-      statusEl.className = `status-message ${type}`
-      statusEl.style.display = 'block'
-      
+      statusEl.textContent = message;
+      statusEl.className = `status-message ${type}`;
+      statusEl.style.display = "block";
+
       setTimeout(() => {
-        statusEl.style.display = 'none'
-      }, 5000)
+        statusEl.style.display = "none";
+      }, 5000);
     }
   }
 
   updateStatistics(stats) {
-    if (!stats) return
+    if (!stats) return;
 
     // Update basic statistics
-    document.getElementById("totalRegularHours").textContent = stats.totalRegularHours || 0
-    document.getElementById("totalOvertimeHours").textContent = stats.totalOvertimeHours || 0
-    document.getElementById("presentCount").textContent = stats.presentCount || 0
-    document.getElementById("lateCount").textContent = stats.lateCount || 0
-    document.getElementById("absentCount").textContent = stats.absentCount || 0
+    document.getElementById("totalRegularHours").textContent =
+      stats.totalRegularHours || 0;
+    document.getElementById("totalOvertimeHours").textContent =
+      stats.totalOvertimeHours || 0;
+    document.getElementById("presentCount").textContent =
+      stats.presentCount || 0;
+    document.getElementById("lateCount").textContent = stats.lateCount || 0;
+    document.getElementById("absentCount").textContent = stats.absentCount || 0;
 
     // Update overtime-specific statistics if available
     if (stats.overtimeEmployeesCount !== undefined) {
-      const overtimeStatsElement = document.getElementById("overtimeStats")
+      const overtimeStatsElement = document.getElementById("overtimeStats");
       if (overtimeStatsElement) {
         overtimeStatsElement.innerHTML = `
           <div class="stat-item overtime-stat">
@@ -1792,56 +2079,74 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
             <div class="stat-value">${stats.eveningSessionsCount || 0}</div>
             <div class="stat-label">Evening Sessions</div>
           </div>
-        `
+        `;
       }
     }
 
     // Update session breakdown if available
     if (stats.sessionBreakdown) {
-      const sessionBreakdownElement = document.getElementById("sessionBreakdown")
+      const sessionBreakdownElement =
+        document.getElementById("sessionBreakdown");
       if (sessionBreakdownElement) {
         sessionBreakdownElement.innerHTML = `
           <div class="session-stat morning">
-            <span class="session-count">${stats.sessionBreakdown.morning || 0}</span>
+            <span class="session-count">${
+              stats.sessionBreakdown.morning || 0
+            }</span>
             <span class="session-label">Morning</span>
           </div>
           <div class="session-stat afternoon">
-            <span class="session-count">${stats.sessionBreakdown.afternoon || 0}</span>
+            <span class="session-count">${
+              stats.sessionBreakdown.afternoon || 0
+            }</span>
             <span class="session-label">Afternoon</span>
           </div>
           <div class="session-stat evening">
-            <span class="session-count">${stats.sessionBreakdown.evening || 0}</span>
+            <span class="session-count">${
+              stats.sessionBreakdown.evening || 0
+            }</span>
             <span class="session-label">Evening</span>
           </div>
           <div class="session-stat overtime">
-            <span class="session-count">${stats.sessionBreakdown.overtime || 0}</span>
+            <span class="session-count">${
+              stats.sessionBreakdown.overtime || 0
+            }</span>
             <span class="session-label">Overtime</span>
           </div>
-        `
+        `;
       }
     }
   }
 
   updateCurrentlyClocked(employees) {
-    const container = document.getElementById("currentlyClocked")
+    const container = document.getElementById("currentlyClocked");
 
     if (!employees || employees.length === 0) {
-      container.innerHTML = '<div class="loading">No employees currently clocked in</div>'
-      return
+      container.innerHTML =
+        '<div class="loading">No employees currently clocked in</div>';
+      return;
     }
 
-    const imageIds = []
+    const imageIds = [];
 
     container.innerHTML = employees
       .map((emp) => {
-        const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`)
-        imageIds.push({ id: empId, uid: emp.employee_uid, name: `${emp.first_name} ${emp.last_name}` })
+        const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
+        imageIds.push({
+          id: empId,
+          uid: emp.employee_uid,
+          name: `${emp.first_name} ${emp.last_name}`,
+        });
 
         // Determine session type and styling
-        const sessionType = emp.sessionType || this.getSessionTypeFromClockType(emp.last_clock_type)
-        const isOvertime = emp.isOvertimeSession || this.isOvertimeClockType(emp.last_clock_type)
-        const badgeClass = isOvertime ? "overtime" : "in"
-        const sessionIcon = this.getSessionIcon(emp.last_clock_type)
+        const sessionType =
+          emp.sessionType ||
+          this.getSessionTypeFromClockType(emp.last_clock_type);
+        const isOvertime =
+          emp.isOvertimeSession ||
+          this.isOvertimeClockType(emp.last_clock_type);
+        const badgeClass = isOvertime ? "overtime" : "in";
+        const sessionIcon = this.getSessionIcon(emp.last_clock_type);
 
         return `
             <div class="employee-item ${isOvertime ? "overtime-employee" : ""}">
@@ -1849,53 +2154,62 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
                      id="${empId}"
                      alt="${emp.first_name} ${emp.last_name}">
                 <div class="employee-details">
-                    <div class="employee-name">${emp.first_name} ${emp.last_name}</div>
-                    <div class="employee-dept">${emp.department || "No Department"}</div>
+                    <div class="employee-name">${emp.first_name} ${
+          emp.last_name
+        }</div>
+                    <div class="employee-dept">${
+                      emp.department || "No Department"
+                    }</div>
                 </div>
                 <div class="clock-badge ${badgeClass}">
                     ${sessionIcon} ${sessionType}
                 </div>
             </div>
-        `
+        `;
       })
-      .join("")
+      .join("");
 
-    // Setup images after HTML is inserted with a small delay to ensure DOM is ready
-    setTimeout(() => {
-      imageIds.forEach(({ id, uid, name }) => {
-        const imgElement = document.getElementById(id)
-        if (imgElement) {
-          this.setupImageWithFallback(imgElement, uid, name)
-        }
-      })
-    }, 10)
+setTimeout(() => {
+  imageIds.forEach(({ id, uid, name }) => {
+    const imgElement = document.getElementById(id)
+    if (imgElement) {
+      this.setupImageWithFallback(imgElement, uid, name)
+    }
+  })
+}, 10)
   }
 
   updateTodayActivity(attendance) {
-    const container = document.getElementById("todayActivity")
+    const container = document.getElementById("todayActivity");
 
     if (!attendance || attendance.length === 0) {
-      container.innerHTML = '<div class="loading">No activity today</div>'
-      return
+      container.innerHTML = '<div class="loading">No activity today</div>';
+      return;
     }
 
-    const attendanceSlice = attendance.slice(0, 10)
-    const imageIds = []
+    const attendanceSlice = attendance.slice(0, 10);
+    const imageIds = [];
 
     container.innerHTML = attendanceSlice
       .map((record, index) => {
-        const recordId = this.generateUniqueId(`activity-${record.employee_uid}-${index}`)
+        const recordId = this.generateUniqueId(
+          `activity-${record.employee_uid}-${index}`
+        );
         imageIds.push({
           id: recordId,
           uid: record.employee_uid,
           name: `${record.first_name} ${record.last_name}`,
-        })
+        });
 
         // Enhanced display for overtime sessions
-        const sessionType = record.sessionType || this.getSessionTypeFromClockType(record.clock_type)
-        const isOvertime = record.isOvertimeSession || this.isOvertimeClockType(record.clock_type)
-        const badgeClass = record.clock_type.includes("in") ? "in" : "out"
-        const finalBadgeClass = `${badgeClass} ${isOvertime ? "overtime" : ""}`
+        const sessionType =
+          record.sessionType ||
+          this.getSessionTypeFromClockType(record.clock_type);
+        const isOvertime =
+          record.isOvertimeSession ||
+          this.isOvertimeClockType(record.clock_type);
+        const badgeClass = record.clock_type.includes("in") ? "in" : "out";
+        const finalBadgeClass = `${badgeClass} ${isOvertime ? "overtime" : ""}`;
 
         return `
             <div class="attendance-item ${isOvertime ? "overtime-record" : ""}">
@@ -1903,106 +2217,119 @@ async performForceSyncAll(silent = false, showDownloadToast = true) {
                      id="${recordId}"
                      alt="${record.first_name} ${record.last_name}">
                 <div class="attendance-details">
-                    <div class="attendance-name">${record.first_name} ${record.last_name}</div>
-                    <div class="attendance-time">${new Date(record.clock_time).toLocaleTimeString()}</div>
-                    ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ""}
+                    <div class="attendance-name">${record.first_name} ${
+          record.last_name
+        }</div>
+                    <div class="attendance-time">${new Date(
+                      record.clock_time
+                    ).toLocaleTimeString()}</div>
+                    ${
+                      isOvertime
+                        ? '<div class="overtime-indicator">Overtime Session</div>'
+                        : ""
+                    }
                 </div>
                 <div class="clock-badge ${finalBadgeClass}">
                     ${this.formatClockType(record.clock_type, sessionType)}
                 </div>
             </div>
-        `
+        `;
       })
-      .join("")
+      .join("");
 
-    // Setup images after HTML is inserted with a small delay to ensure DOM is ready
-    setTimeout(() => {
-      imageIds.forEach(({ id, uid, name }) => {
-        const imgElement = document.getElementById(id)
-        if (imgElement) {
-          this.setupImageWithFallback(imgElement, uid, name)
-        }
-      })
-    }, 10)
+setTimeout(() => {
+  imageIds.forEach(({ id, uid, name }) => {
+    const imgElement = document.getElementById(id)
+    if (imgElement) {
+      this.setupImageWithFallback(imgElement, uid, name)
+    }
+  })
+}, 10)
   }
 
   // Helper function to determine if clock type is overtime
   isOvertimeClockType(clockType) {
-    return clockType && (clockType.startsWith("evening") || clockType.startsWith("overtime"))
+    return (
+      clockType &&
+      (clockType.startsWith("evening") || clockType.startsWith("overtime"))
+    );
   }
 
   // Helper function to get session type from clock type
   getSessionTypeFromClockType(clockType) {
-    if (!clockType) return "Unknown"
+    if (!clockType) return "Unknown";
 
-    if (clockType.startsWith("morning")) return "Morning"
-    if (clockType.startsWith("afternoon")) return "Afternoon"
-    if (clockType.startsWith("evening")) return "Evening"
-    if (clockType.startsWith("overtime")) return "Overtime"
+    if (clockType.startsWith("morning")) return "Morning";
+    if (clockType.startsWith("afternoon")) return "Afternoon";
+    if (clockType.startsWith("evening")) return "Evening";
+    if (clockType.startsWith("overtime")) return "Overtime";
 
-    return "Unknown"
+    return "Unknown";
   }
 
   // Helper function to get session icon
   getSessionIcon(clockType) {
-    if (!clockType) return "🔘"
+    if (!clockType) return "🔘";
 
-    if (clockType.startsWith("morning")) return "🌅"
-    if (clockType.startsWith("afternoon")) return "☀️"
-    if (clockType.startsWith("evening")) return "🌙"
-    if (clockType.startsWith("overtime")) return "⭐"
+    if (clockType.startsWith("morning")) return "🌅";
+    if (clockType.startsWith("afternoon")) return "☀️";
+    if (clockType.startsWith("evening")) return "🌙";
+    if (clockType.startsWith("overtime")) return "⭐";
 
-    return "🔘"
+    return "🔘";
   }
 
   showStatus(message, type = "info") {
-    const statusElement = document.getElementById("statusMessage")
-    statusElement.textContent = message
-    statusElement.className = `status-message ${type} show`
+    const statusElement = document.getElementById("statusMessage");
+    statusElement.textContent = message;
+    statusElement.className = `status-message ${type} show`;
 
     setTimeout(() => {
-      statusElement.classList.remove("show")
-    }, 4000)
+      statusElement.classList.remove("show");
+    }, 4000);
   }
 
   // Clean up when app is being destroyed
   destroy() {
-    this.stopAutoSync()
+    this.stopAutoSync();
 
     if (this.employeeDisplayTimeout) {
-      clearTimeout(this.employeeDisplayTimeout)
+      clearTimeout(this.employeeDisplayTimeout);
     }
 
     if (this.barcodeTimeout) {
-      clearTimeout(this.barcodeTimeout)
+      clearTimeout(this.barcodeTimeout);
     }
 
     if (this.ws) {
-      this.ws.close()
+      this.ws.close();
     }
 
     // Clean up image load attempts
-    this.imageLoadAttempts.clear()
+    this.imageLoadAttempts.clear();
 
     // Clean up download toast
-    const downloadToast = document.getElementById("downloadToast")
+    const downloadToast = document.getElementById("downloadToast");
     if (downloadToast && downloadToast.hideTimeout) {
-      clearTimeout(downloadToast.hideTimeout)
+      clearTimeout(downloadToast.hideTimeout);
     }
 
-    console.log("AttendanceApp destroyed and cleaned up")
+    console.log("AttendanceApp destroyed and cleaned up");
   }
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener("DOMContentLoaded", () => {
   // Store reference globally for cleanup if needed
-  window.attendanceApp = new AttendanceApp()
-})
+  window.attendanceApp = new AttendanceApp();
+});
 
 // Clean up on page unload
 window.addEventListener("beforeunload", () => {
-  if (window.attendanceApp && typeof window.attendanceApp.destroy === "function") {
-    window.attendanceApp.destroy()
+  if (
+    window.attendanceApp &&
+    typeof window.attendanceApp.destroy === "function"
+  ) {
+    window.attendanceApp.destroy();
   }
-})
+});

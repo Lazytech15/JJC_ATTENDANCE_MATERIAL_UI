@@ -770,7 +770,7 @@ function registerIpcHandlers(routes) {
     "markAttendanceAsSynced",
   )
 
-// Replace your existing profile services handler registration section with this:
+// Replace your existing profile services handler registration section with this COMPLETE version:
 
 // Profile service handlers
 const profileServices = routes.profileServices || {}
@@ -798,7 +798,8 @@ ipcMain.handle("check-profile-images", async (event, employeeUids) => {
         total: 0,
         percentage: 0,
         downloadedUids: [],
-        missingUids: []
+        missingUids: [],
+        profilesDir: "Not available"
       }
     }
   } catch (error) {
@@ -810,10 +811,303 @@ ipcMain.handle("check-profile-images", async (event, employeeUids) => {
       total: 0,
       percentage: 0,
       downloadedUids: [],
-      missingUids: []
+      missingUids: [],
+      profilesDir: "Error occurred"
     }
   }
 })
+
+// NEW: Handler for bulk profile downloads
+ipcMain.handle("bulk-download-profiles", async (event, serverUrl, options = {}) => {
+  try {
+    console.log("IPC Handler - bulk-download-profiles called")
+    console.log("Server URL:", serverUrl)
+    console.log("Options:", options)
+    
+    if (profileServices.bulkDownloadProfiles && typeof profileServices.bulkDownloadProfiles === 'function') {
+      const result = await profileServices.bulkDownloadProfiles(serverUrl, options)
+      return result
+    } else {
+      console.error("bulkDownloadProfiles function not available in profileServices")
+      return {
+        success: false,
+        error: "Bulk download service not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - bulk-download-profiles:", error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+// NEW: Handler for bulk download by department
+ipcMain.handle("bulk-download-by-department", async (event, serverUrl, department, onProgress) => {
+  try {
+    console.log("IPC Handler - bulk-download-by-department called")
+    console.log("Server URL:", serverUrl)
+    console.log("Department:", department)
+    
+    if (profileServices.bulkDownloadByDepartment && typeof profileServices.bulkDownloadByDepartment === 'function') {
+      const result = await profileServices.bulkDownloadByDepartment(serverUrl, department, onProgress)
+      return result
+    } else {
+      console.error("bulkDownloadByDepartment function not available in profileServices")
+      return {
+        success: false,
+        error: "Bulk download by department service not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - bulk-download-by-department:", error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+// NEW: Handler for bulk download by search
+ipcMain.handle("bulk-download-by-search", async (event, serverUrl, searchQuery, onProgress) => {
+  try {
+    console.log("IPC Handler - bulk-download-by-search called")
+    console.log("Server URL:", serverUrl)
+    console.log("Search Query:", searchQuery)
+    
+    if (profileServices.bulkDownloadBySearch && typeof profileServices.bulkDownloadBySearch === 'function') {
+      const result = await profileServices.bulkDownloadBySearch(serverUrl, searchQuery, onProgress)
+      return result
+    } else {
+      console.error("bulkDownloadBySearch function not available in profileServices")
+      return {
+        success: false,
+        error: "Bulk download by search service not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - bulk-download-by-search:", error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+// NEW: Handler for bulk download specific employees
+ipcMain.handle("bulk-download-specific-employees", async (event, serverUrl, employeeUids, onProgress) => {
+  try {
+    console.log("IPC Handler - bulk-download-specific-employees called")
+    console.log("Server URL:", serverUrl)
+    console.log("Employee UIDs:", employeeUids)
+    
+    if (profileServices.bulkDownloadSpecificEmployees && typeof profileServices.bulkDownloadSpecificEmployees === 'function') {
+      const result = await profileServices.bulkDownloadSpecificEmployees(serverUrl, employeeUids, onProgress)
+      return result
+    } else {
+      console.error("bulkDownloadSpecificEmployees function not available in profileServices")
+      return {
+        success: false,
+        error: "Bulk download specific employees service not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - bulk-download-specific-employees:", error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+// NEW: Handler to check all profile images
+ipcMain.handle("check-all-profile-images", async (event) => {
+  try {
+    console.log("IPC Handler - check-all-profile-images called")
+    
+    if (profileServices.checkAllProfileImages && typeof profileServices.checkAllProfileImages === 'function') {
+      const result = await profileServices.checkAllProfileImages()
+      return result
+    } else {
+      console.error("checkAllProfileImages function not available in profileServices")
+      return {
+        success: false,
+        error: "Check all profiles service not available",
+        downloaded: 0,
+        profiles: [],
+        profilesDir: "Not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - check-all-profile-images:", error)
+    return {
+      success: false,
+      error: error.message,
+      downloaded: 0,
+      profiles: [],
+      profilesDir: "Error occurred"
+    }
+  }
+})
+
+// NEW: Handler for profile cleanup
+ipcMain.handle("cleanup-profiles", async (event) => {
+  try {
+    console.log("IPC Handler - cleanup-profiles called")
+    
+    if (profileServices.cleanupProfiles && typeof profileServices.cleanupProfiles === 'function') {
+      const result = await profileServices.cleanupProfiles()
+      return result
+    } else {
+      console.error("cleanupProfiles function not available in profileServices")
+      return {
+        success: false,
+        error: "Profile cleanup service not available",
+        cleaned: 0,
+        errors: []
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - cleanup-profiles:", error)
+    return {
+      success: false,
+      error: error.message,
+      cleaned: 0,
+      errors: []
+    }
+  }
+})
+
+// NEW: Handler to get profiles directory info
+ipcMain.handle("get-profiles-directory-info", async (event) => {
+  try {
+    console.log("IPC Handler - get-profiles-directory-info called")
+    
+    if (profileServices.getProfilesDirectoryInfo && typeof profileServices.getProfilesDirectoryInfo === 'function') {
+      const result = profileServices.getProfilesDirectoryInfo()
+      console.log("Profiles directory info:", result)
+      return result
+    } else {
+      console.error("getProfilesDirectoryInfo function not available in profileServices")
+      return {
+        path: "Service not available",
+        isDev: false,
+        exists: false,
+        error: "Service not available"
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - get-profiles-directory-info:", error)
+    return {
+      path: "Error occurred",
+      isDev: false,
+      exists: false,
+      error: error.message
+    }
+  }
+})
+
+// NEW: Handler to get local profile path
+ipcMain.handle("get-local-profile-path", async (event, uid) => {
+  try {
+    console.log("IPC Handler - get-local-profile-path called with UID:", uid)
+    
+    if (profileServices.getLocalProfilePath && typeof profileServices.getLocalProfilePath === 'function') {
+      const result = profileServices.getLocalProfilePath(uid)
+      console.log("Local profile path for UID", uid, ":", result)
+      return {
+        success: true,
+        path: result,
+        uid: uid
+      }
+    } else {
+      console.error("getLocalProfilePath function not available in profileServices")
+      return {
+        success: false,
+        error: "Get local profile path service not available",
+        path: null,
+        uid: uid
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - get-local-profile-path:", error)
+    return {
+      success: false,
+      error: error.message,
+      path: null,
+      uid: uid
+    }
+  }
+})
+
+// NEW: Handler to check if a specific profile exists
+ipcMain.handle("profile-exists", async (event, uid) => {
+  try {
+    console.log("IPC Handler - profile-exists called with UID:", uid)
+    
+    if (profileServices.profileExists && typeof profileServices.profileExists === 'function') {
+      const result = await profileServices.profileExists(uid)
+      console.log("Profile exists for UID", uid, ":", result)
+      return {
+        success: true,
+        exists: result,
+        uid: uid
+      }
+    } else {
+      console.error("profileExists function not available in profileServices")
+      return {
+        success: false,
+        error: "Profile exists check service not available",
+        exists: false,
+        uid: uid
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - profile-exists:", error)
+    return {
+      success: false,
+      error: error.message,
+      exists: false,
+      uid: uid
+    }
+  }
+})
+
+// Legacy handler for individual profile downloads (kept for backward compatibility)
+ipcMain.handle("download-and-store-profile", async (event, uid, serverUrl) => {
+  try {
+    console.log("IPC Handler - download-and-store-profile called")
+    console.log("UID:", uid, "Server URL:", serverUrl)
+    
+    if (profileServices.downloadAndStoreProfile && typeof profileServices.downloadAndStoreProfile === 'function') {
+      const result = await profileServices.downloadAndStoreProfile(uid, serverUrl)
+      return {
+        success: result !== null,
+        path: result,
+        uid: uid
+      }
+    } else {
+      console.error("downloadAndStoreProfile function not available in profileServices")
+      return {
+        success: false,
+        error: "Individual profile download service not available",
+        path: null,
+        uid: uid
+      }
+    }
+  } catch (error) {
+    console.error("IPC Handler Error - download-and-store-profile:", error)
+    return {
+      success: false,
+      error: error.message,
+      path: null,
+      uid: uid
+    }
+  }
+})
+
+console.log("✓ Profile service IPC handlers registration complete")
 
 
   console.log("✓ IPC handlers registration complete")
