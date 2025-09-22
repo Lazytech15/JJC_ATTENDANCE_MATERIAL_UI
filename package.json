@@ -1,6 +1,6 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Offline and dynamic tracking of employee attendance via barcode scanner",
   "main": "src/main.js",
   "type": "commonjs",
@@ -9,6 +9,7 @@
     "dev": "NODE_ENV=development electron . --dev",
     "build": "electron-builder",
     "dist": "electron-builder --publish=never",
+    "release": "electron-builder --publish=always",
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "npx electron-rebuild"
   },
@@ -18,23 +19,34 @@
     "barcode",
     "employee"
   ],
-  "author": "Dev. Emmmanuel S. Ablao",
+  "author": "Dev. Emmanuel S. Ablao",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^39.0.0",
-    "electron-builder": "^24.6.4"
+    "electron": "^38.1.2",
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
     "axios": "^1.11.0",
-    "better-sqlite3": "^9.0.0",
+    "better-sqlite3": "^12.2.0",
     "cors": "^2.8.5",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2",
     "express": "^5.1.0",
+    "node-abi": "^4.14.0",
     "node-fetch": "^2.6.7",
     "services": "^0.0.3",
     "ws": "^8.14.2",
     "xlsx": "^0.18.5",
     "yauzl": "^3.2.0",
     "zod": "^3.25.67"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lazytech15/JJC_ATTENDANCE_MATERIAL_UI.git"
+  },
+  "publish": {
+    "provider": "github",
+    "releaseType": "release"
   },
   "build": {
     "appId": "com.jjc.attendance-system",
@@ -76,7 +88,8 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "publisherName": "JJC Engineering Works"
     },
     "nsis": {
       "oneClick": false,
@@ -84,15 +97,18 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "license": "assets/license.txt"
+      "license": "assets/license.txt",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.business"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "category": "Office"
     },
     "asar": false,
     "compression": "normal",

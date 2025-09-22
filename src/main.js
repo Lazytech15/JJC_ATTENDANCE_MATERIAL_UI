@@ -1,6 +1,11 @@
-const { app, BrowserWindow, ipcMain, Menu } = require("electron")
+const { app, BrowserWindow, ipcMain, Menu, dialog } = require("electron")
 const path = require("path")
 const fs = require("fs")
+const { autoUpdater } = require("electron-updater")
+
+// Configure auto-updater
+autoUpdater.autoDownload = false
+autoUpdater.autoInstallOnAppQuit = true
 
 // Determine if we're in development
 const isDev = process.env.NODE_ENV === "development" || process.argv.includes("--dev")
@@ -19,6 +24,163 @@ app.commandLine.appendSwitch("--disable-gpu")
 let mainWindow
 let settingsWindow
 let webExportServer
+let updateDownloadStarted = false
+
+// Auto-updater configuration and event handlers
+function setupAutoUpdater() {
+  console.log("Setting up auto-updater...")
+  
+  // Configure updater settings
+  autoUpdater.logger = require("electron-log")
+  autoUpdater.logger.transports.file.level = "info"
+  
+  // Set update check interval (check every 30 minutes)
+  setInterval(() => {
+    if (!isDev) {
+      console.log("Performing scheduled update check...")
+      autoUpdater.checkForUpdates()
+    }
+  }, 30 * 60 * 1000) // 30 minutes
+
+  // Auto-updater event handlers
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for update...')
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-status', {
+        status: 'checking',
+        message: 'Checking for updates...'
+      })
+    }
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info)
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-status', {
+        status: 'available',
+        message: 'Update available',
+        version: info.version,
+        releaseNotes: info.releaseNotes,
+        releaseDate: info.releaseDate
+      })
+    }
+
+    // Show dialog asking user if they want to download the update
+    const dialogOpts = {
+      type: 'info',
+      buttons: ['Download Now', 'Later'],
+      defaultId: 0,
+      title: 'Application Update',
+      message: `A new version (${info.version}) is available!`,
+      detail: 'Would you like to download it now? The update will be installed when you restart the application.'
+    }
+
+    dialog.showMessageBox(mainWindow, dialogOpts).then((returnValue) => {
+      if (returnValue.response === 0) {
+        // User clicked "Download Now"
+        console.log('User chose to download update')
+        autoUpdater.downloadUpdate()
+        updateDownloadStarted = true
+      } else {
+        console.log('User chose to download later')
+        if (mainWindow) {
+          mainWindow.webContents.send('updater-status', {
+            status: 'postponed',
+            message: 'Update postponed'
+          })
+        }
+      }
+    }).catch(err => {
+      console.error('Error showing update dialog:', err)
+    })
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('Update not available:', info)
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-status', {
+        status: 'not-available',
+        message: 'You are using the latest version'
+      })
+    }
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('Error in auto-updater:', err)
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-status', {
+        status: 'error',
+        message: 'Error checking for updates',
+        error: err.message
+      })
+    }
+  })
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    let log_message = "Download speed: " + progressObj.bytesPerSecond
+    log_message = log_message + ' - Downloaded ' + progressObj.percent + '%'
+    log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')'
+    
+    console.log(log_message)
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-progress', {
+        percent: Math.round(progressObj.percent),
+        bytesPerSecond: progressObj.bytesPerSecond,
+        transferred: progressObj.transferred,
+        total: progressObj.total
+      })
+      
+      mainWindow.webContents.send('updater-status', {
+        status: 'downloading',
+        message: `Downloading update... ${Math.round(progressObj.percent)}%`,
+        progress: progressObj
+      })
+    }
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded:', info)
+    updateDownloadStarted = false
+    
+    if (mainWindow) {
+      mainWindow.webContents.send('updater-status', {
+        status: 'downloaded',
+        message: 'Update downloaded successfully',
+        version: info.version
+      })
+    }
+
+    // Show dialog asking user to restart
+    const dialogOpts = {
+      type: 'info',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      title: 'Application Update Ready',
+      message: 'Update has been downloaded successfully!',
+      detail: 'The application will restart to apply the update. Would you like to restart now?'
+    }
+
+    dialog.showMessageBox(mainWindow, dialogOpts).then((returnValue) => {
+      if (returnValue.response === 0) {
+        // User clicked "Restart Now"
+        console.log('User chose to restart now')
+        autoUpdater.quitAndInstall(false, true)
+      } else {
+        console.log('User chose to restart later')
+        if (mainWindow) {
+          mainWindow.webContents.send('updater-status', {
+            status: 'ready-to-install',
+            message: 'Update ready - will install on next restart'
+          })
+        }
+      }
+    }).catch(err => {
+      console.error('Error showing restart dialog:', err)
+    })
+  })
+}
+
 
 // Improved path resolution that works in both dev and production
 function getResourcePath(relativePath) {
@@ -281,10 +443,10 @@ function createMainWindow() {
     height: 800,
     autoHideMenuBar: true,
     webPreferences: {
-      nodeIntegration: false, // ✅ Secure
-      contextIsolation: true, // ✅ Secure
-      enableRemoteModule: false, // ✅ Secure
-      preload: fs.existsSync(preloadPath) ? preloadPath : undefined, // Only load if exists
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      preload: fs.existsSync(preloadPath) ? preloadPath : undefined,
     },
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     show: false,
@@ -350,6 +512,17 @@ function createMainWindow() {
     if (!isDev) {
       mainWindow.maximize()
     }
+    
+    // Setup auto-updater after window is ready
+    setupAutoUpdater()
+    
+    // Check for updates on app start (after a short delay)
+    if (!isDev) {
+      setTimeout(() => {
+        console.log("Performing initial update check...")
+        autoUpdater.checkForUpdates()
+      }, 3000) // 3 second delay
+    }
   })
 
   mainWindow.on("closed", () => {
@@ -372,87 +545,188 @@ function createMainWindow() {
   }
 }
 
-function createSettingsWindow() {
-  if (settingsWindow) {
-    settingsWindow.focus()
-    return
-  }
-
-  console.log("Creating settings window...")
-
-  settingsWindow = new BrowserWindow({
-    width: 600,
-    height: 500,
-    parent: mainWindow,
-    modal: true,
-    webPreferences: {
-      nodeIntegration: false, // ✅ Also make settings window secure
-      contextIsolation: true, // ✅ Secure
-      preload: path.join(__dirname, "preload.js"), // Use same preload script
+// Enhanced menu with update options
+function createApplicationMenu() {
+  const template = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Settings",
+          click: () => createSettingsWindow(),
+        },
+        { type: "separator" },
+        {
+          label: "Export Data",
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send("show-export-dialog")
+            }
+          },
+        },
+        {
+          label: "Sync Attendance to Server",
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send("sync-attendance-to-server")
+            }
+          },
+        },
+        {
+          label: "Web Export URL",
+          click: () => {
+            const { shell } = require("electron")
+            shell.openExternal("http://localhost:3001/api/docs")
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Exit",
+          click: () => app.quit(),
+        },
+      ],
     },
-    show: false,
-  })
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+      ],
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates",
+          click: () => {
+            if (!isDev) {
+              console.log("Manual update check triggered")
+              autoUpdater.checkForUpdates()
+            } else {
+              dialog.showMessageBox(mainWindow, {
+                type: 'info',
+                title: 'Development Mode',
+                message: 'Updates are disabled in development mode.'
+              })
+            }
+          }
+        },
+        {
+          label: "About",
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'About',
+              message: `Attendance System v${app.getVersion()}`,
+              detail: 'Employee Attendance Management System'
+            })
+          }
+        }
+      ],
+    }
+  ]
 
-  // Based on your structure: src/renderer/settings.html
-  const settingsPath = getResourcePath("renderer/settings.html")
-  console.log("Loading settings from:", settingsPath)
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
 
-  if (!fs.existsSync(settingsPath)) {
-    console.error("Settings file not found, trying alternative paths...")
-    const altSettingsPaths = [
-      path.join(__dirname, "src", "renderer", "settings.html"), // Your actual structure
-      path.join(__dirname, "settings.html"),
-      path.join(__dirname, "renderer", "settings.html"),
-    ]
-
-    let foundSettings = null
-    for (const altPath of altSettingsPaths) {
-      console.log("Trying settings path:", altPath)
-      if (fs.existsSync(altPath)) {
-        foundSettings = altPath
-        console.log(`Found settings.html at: ${altPath}`)
-        break
+// Enhanced IPC handlers for updater
+function registerUpdaterIpcHandlers() {
+  // Manual update check
+  ipcMain.handle("check-for-updates", async () => {
+    if (!isDev) {
+      try {
+        console.log("Manual update check requested from renderer")
+        const result = await autoUpdater.checkForUpdates()
+        return {
+          success: true,
+          updateCheckResult: result
+        }
+      } catch (error) {
+        console.error("Error checking for updates:", error)
+        return {
+          success: false,
+          error: error.message
+        }
+      }
+    } else {
+      return {
+        success: false,
+        error: "Updates disabled in development mode"
       }
     }
-
-    if (foundSettings) {
-      settingsWindow.loadFile(foundSettings)
-    } else {
-      console.error("Settings file not found, creating fallback")
-      const fallbackHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Settings</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .error { color: red; margin: 20px 0; }
-          </style>
-        </head>
-        <body>
-          <h1>Settings</h1>
-          <div class="error">Settings file not found at: ${settingsPath}</div>
-          <button onclick="window.close()">Close</button>
-        </body>
-        </html>
-      `
-      settingsWindow.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(fallbackHtml)}`)
-    }
-  } else {
-    settingsWindow.loadFile(settingsPath)
-  }
-
-  settingsWindow.once("ready-to-show", () => {
-    console.log("Settings window ready, showing...")
-    settingsWindow.show()
   })
 
-  settingsWindow.on("closed", () => {
-    console.log("Settings window closed")
-    settingsWindow = null
+  // Download update
+  ipcMain.handle("download-update", async () => {
+    if (!isDev && !updateDownloadStarted) {
+      try {
+        console.log("Update download requested from renderer")
+        await autoUpdater.downloadUpdate()
+        updateDownloadStarted = true
+        return {
+          success: true,
+          message: "Update download started"
+        }
+      } catch (error) {
+        console.error("Error downloading update:", error)
+        return {
+          success: false,
+          error: error.message
+        }
+      }
+    } else if (updateDownloadStarted) {
+      return {
+        success: false,
+        error: "Update download already in progress"
+      }
+    } else {
+      return {
+        success: false,
+        error: "Updates disabled in development mode"
+      }
+    }
+  })
+
+  // Quit and install
+  ipcMain.handle("quit-and-install", async () => {
+    if (!isDev) {
+      try {
+        console.log("Quit and install requested from renderer")
+        autoUpdater.quitAndInstall(false, true)
+        return {
+          success: true
+        }
+      } catch (error) {
+        console.error("Error during quit and install:", error)
+        return {
+          success: false,
+          error: error.message
+        }
+      }
+    } else {
+      return {
+        success: false,
+        error: "Updates disabled in development mode"
+      }
+    }
+  })
+
+  // Get app version
+  ipcMain.handle("get-app-version", () => {
+    return {
+      version: app.getVersion(),
+      isDev: isDev
+    }
   })
 }
 
+// Your existing app.whenReady() with enhancements
 app.whenReady().then(async () => {
   try {
     console.log("App ready event fired, initializing...")
@@ -496,65 +770,14 @@ app.whenReady().then(async () => {
     // Create main window
     createMainWindow()
 
-    // Set up menu
-    const template = [
-      {
-        label: "File",
-        submenu: [
-          {
-            label: "Settings",
-            click: () => createSettingsWindow(),
-          },
-          { type: "separator" },
-          {
-            label: "Export Data",
-            click: () => {
-              if (mainWindow) {
-                mainWindow.webContents.send("show-export-dialog")
-              }
-            },
-          },
-          {
-            label: "Sync Attendance to Server",
-            click: () => {
-              if (mainWindow) {
-                mainWindow.webContents.send("sync-attendance-to-server")
-              }
-            },
-          },
-          {
-            label: "Web Export URL",
-            click: () => {
-              const { shell } = require("electron")
-              shell.openExternal("http://localhost:3001/api/docs")
-            },
-          },
-          { type: "separator" },
-          {
-            label: "Exit",
-            click: () => app.quit(),
-          },
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { role: "reload" },
-          { role: "forceReload" },
-          { role: "toggleDevTools" },
-          { type: "separator" },
-          { role: "resetZoom" },
-          { role: "zoomIn" },
-          { role: "zoomOut" },
-        ],
-      },
-    ]
+    // Set up enhanced menu
+    createApplicationMenu()
 
-    const menu = Menu.buildFromTemplate(template)
-    Menu.setApplicationMenu(menu)
-
-    // Register IPC handlers
+    // Register IPC handlers (your existing ones)
     registerIpcHandlers(routes)
+    
+    // Register updater IPC handlers
+    registerUpdaterIpcHandlers()
 
     console.log("✓ App initialization complete")
   } catch (error) {
@@ -566,6 +789,7 @@ app.whenReady().then(async () => {
   }
 })
 
+// Your existing app event handlers with update cleanup
 app.on("window-all-closed", () => {
   console.log("All windows closed")
 
@@ -590,9 +814,26 @@ app.on("activate", () => {
   }
 })
 
-// Clean shutdown
-app.on("before-quit", () => {
+// Enhanced clean shutdown
+app.on("before-quit", (event) => {
   console.log("App before quit")
+  
+  // If update download is in progress, ask user
+  if (updateDownloadStarted) {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Wait for Download', 'Quit Anyway'],
+      defaultId: 0,
+      title: 'Update Download in Progress',
+      message: 'An update is currently downloading. Would you like to wait for it to complete?'
+    })
+    
+    if (choice === 0) {
+      event.preventDefault()
+      return
+    }
+  }
+  
   if (webExportServer) {
     try {
       webExportServer.stop()
@@ -602,7 +843,7 @@ app.on("before-quit", () => {
   }
 })
 
-// Error handling
+// Your existing error handlers
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error)
 })
@@ -686,24 +927,9 @@ function registerIpcHandlers(routes) {
   const attendanceRoutes = routes.attendance || {}
   console.log("Attendance routes available:", Object.keys(attendanceRoutes))
   safelyRegisterHandler("clock-attendance", attendanceRoutes.clockAttendance, attendanceRoutes, "clockAttendance")
-  safelyRegisterHandler(
-    "get-today-attendance",
-    attendanceRoutes.getTodayAttendance,
-    attendanceRoutes,
-    "getTodayAttendance",
-  )
-  safelyRegisterHandler(
-    "get-employee-attendance",
-    attendanceRoutes.getEmployeeAttendance,
-    attendanceRoutes,
-    "getEmployeeAttendance",
-  )
-  safelyRegisterHandler(
-    "get-today-statistics",
-    attendanceRoutes.getTodayStatistics,
-    attendanceRoutes,
-    "getTodayStatistics",
-  )
+  safelyRegisterHandler("get-today-attendance",attendanceRoutes.getTodayAttendance,attendanceRoutes,"getTodayAttendance")
+  safelyRegisterHandler("get-employee-attendance",attendanceRoutes.getEmployeeAttendance,attendanceRoutes,"getEmployeeAttendance")
+  safelyRegisterHandler("get-today-statistics",attendanceRoutes.getTodayStatistics,attendanceRoutes,"getTodayStatistics")
 
   // Daily summary handlers (from attendancedb module)
   const dailysummary = routes.attendancedb || {}

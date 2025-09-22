@@ -73,6 +73,45 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAssetPath: (filename) => ipcRenderer.invoke("get-asset-path", filename),
   getProfilePath: (filename) => ipcRenderer.invoke("get-profile-path", filename),
 
+  // NEW: Auto-updater operations
+  updater: {
+    // Check for updates manually
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    
+    // Download available update
+    downloadUpdate: () => ipcRenderer.invoke('download-update'),
+    
+    // Quit and install update
+    quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
+    
+    // Get current app version
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    
+    // Listen to updater status changes
+    onStatusUpdate: (callback) => {
+      const subscription = (event, data) => callback(data)
+      ipcRenderer.on('updater-status', subscription)
+      
+      // Return unsubscribe function
+      return () => ipcRenderer.removeListener('updater-status', subscription)
+    },
+    
+    // Listen to download progress updates
+    onProgressUpdate: (callback) => {
+      const subscription = (event, data) => callback(data)
+      ipcRenderer.on('updater-progress', subscription)
+      
+      // Return unsubscribe function
+      return () => ipcRenderer.removeListener('updater-progress', subscription)
+    },
+    
+    // Remove all updater listeners (cleanup)
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('updater-status')
+      ipcRenderer.removeAllListeners('updater-progress')
+    }
+  },
+
   // Event listeners for main process messages
   onShowExportDialog: (callback) => {
     ipcRenderer.on("show-export-dialog", callback)
@@ -216,4 +255,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
 })
 
 // Optional: Log when preload script is loaded
-console.log("Preload script loaded successfully with enhanced profile operations")
+console.log("Preload script loaded successfully with enhanced profile operations and auto-updater support")

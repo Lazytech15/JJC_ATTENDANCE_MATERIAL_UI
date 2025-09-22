@@ -837,6 +837,381 @@ function calculateEveningContinuousHours(
   return totalOvertimeHours
 }
 
+function isLate(clockType, clockTime) {
+  const hour = clockTime.getHours()
+  const minute = clockTime.getMinutes()
+  const totalMinutes = hour * 60 + minute
+
+  const earlyMorningStart = 6 * 60 // 6:00 AM - new early morning boundary
+  const morningStart = 8 * 60 // 8:00 AM
+  const afternoonStart = 13 * 60 // 1:00 PM
+  const gracePeriod = 5 // 5 minutes
+
+  console.log(`Late check: ${clockType} at ${hour}:${minute.toString().padStart(2, "0")} (${totalMinutes} minutes)`)
+
+  if (clockType === "morning_in") {
+    // Special case for early morning shift (6:00-12:00)
+    if (totalMinutes >= earlyMorningStart && totalMinutes <= earlyMorningStart + gracePeriod) {
+      console.log(
+        `Early morning threshold: ${earlyMorningStart + gracePeriod} minutes (6:05 AM), Result: ON TIME (early morning rule)`,
+      )
+      return false
+    }
+
+    const isEmployeeLate = totalMinutes > morningStart + gracePeriod
+    console.log(
+      `Morning threshold: ${morningStart + gracePeriod} minutes (8:05 AM), Result: ${isEmployeeLate ? "LATE" : "ON TIME"}`,
+    )
+    return isEmployeeLate
+  } else if (clockType === "afternoon_in") {
+    const isEmployeeLate = totalMinutes > afternoonStart + gracePeriod
+    console.log(
+      `Afternoon threshold: ${afternoonStart + gracePeriod} minutes (1:05 PM), Result: ${isEmployeeLate ? "LATE" : "ON TIME"}`,
+    )
+    return isEmployeeLate
+  }
+
+  return false
+}
+
+function determineClockType(lastClockType, currentTime, lastClockTime = null, employeeUid = null, db = null) {
+  const safeCurrentTime = currentTime || new Date(dateService.getCurrentDateTime())
+  const hour = safeCurrentTime.getHours()
+  const minute = safeCurrentTime.getMinutes()
+  const totalMinutes = hour * 60 + minute
+  const eveningStart = 17 * 60 + 15 // 5:15 PM (after overtime grace period)
+
+  // Define afternoon end time (5:00 PM)
+  const afternoonEnd = 17 * 60 // 5:00 PM
+
+  // Night shift boundaries
+  const nightShiftStart = 22 * 60 // 10:00 PM
+  const earlyMorningEnd = 8 * 60 // 8:00 AM
+
+  console.log(`=== CLOCK TYPE DETERMINATION ===`)
+  console.log(`Input time: ${safeCurrentTime.toISOString()}`)
+  console.log(`Parsed time: ${hour}:${minute.toString().padStart(2, "0")} (${totalMinutes} minutes from midnight)`)
+  console.log(`Last clock type: ${lastClockType}`)
+  console.log(`Evening start threshold: ${eveningStart} minutes (5:15 PM)`)
+  console.log(`Afternoon end: ${afternoonEnd} minutes (5:00 PM)`)
+
+  // Check if this might be an overnight shift continuation
+  const isEarlyMorning = totalMinutes < earlyMorningEnd // Before 8:00 AM
+  const isPossibleOvernightOut = isEarlyMorning && lastClockType && lastClockType.includes("_in")
+
+  console.log(`Early morning check: ${isEarlyMorning}, Possible overnight out: ${isPossibleOvernightOut}`)
+
+  // CRITICAL FIX: Check for overnight shifts with time validation
+  if (lastClockTime && isPossibleOvernightOut) {
+    const lastClockHour = lastClockTime.getHours()
+    const lastClockMinutes = lastClockHour * 60 + lastClockTime.getMinutes()
+    const currentClockMinutes = totalMinutes
+
+    // If last clock was late in the evening/night (after 17:00) and current is early morning (before 8:00)
+    // This indicates an overnight shift continuation
+    if (lastClockMinutes >= afternoonEnd && currentClockMinutes < earlyMorningEnd) {
+      console.log(
+        `OVERNIGHT SHIFT DETECTED: Last clock at ${lastClockHour}:${lastClockTime.getMinutes().toString().padStart(2, "0")} (${lastClockMinutes} min), Current at ${hour}:${minute.toString().padStart(2, "0")} (${currentClockMinutes} min)`,
+      )
+
+      // Return the corresponding out type for the overnight shift
+      const overtimeOutType = lastClockType.replace("_in", "_out")
+      console.log(`Overnight shift continuation: ${lastClockType} → ${overtimeOutType}`)
+      return overtimeOutType
+    }
+  }
+
+  // NEW RULE: Special handling for 17:00 (5:00 PM) clock-ins when user hasn't had any sessions today
+  if (totalMinutes >= afternoonEnd && totalMinutes < eveningStart && employeeUid && db) {
+    // Exactly 17:00
+    console.log(`=== SPECIAL 17:00 RULE CHECK ===`)
+    console.log(`Clock-in at exactly 17:00 - checking for prior sessions today`)
+
+    try {
+      const today = safeCurrentTime.toISOString().split("T")[0]
+
+      // Check if employee has any completed sessions today
+      const sessionCheckQuery = db.prepare(`
+        SELECT COUNT(*) as session_count
+        FROM attendance 
+        WHERE employee_uid = ? 
+          AND date = ?
+          AND clock_type LIKE '%_out'
+      `)
+
+      const sessionResult = sessionCheckQuery.get(employeeUid, today)
+      const hasCompletedSessions = sessionResult && sessionResult.session_count > 0
+
+      // Also check for any pending clock-ins today
+      const pendingCheckQuery = db.prepare(`
+        SELECT COUNT(*) as pending_count
+        FROM attendance 
+        WHERE employee_uid = ? 
+          AND date = ?
+          AND clock_type LIKE '%_in'
+          AND id NOT IN (
+            SELECT a1.id FROM attendance a1
+            JOIN attendance a2 ON a1.employee_uid = a2.employee_uid
+            WHERE a1.clock_type LIKE '%_in' 
+              AND a2.clock_type = REPLACE(a1.clock_type, '_in', '_out')
+              AND a2.clock_time > a1.clock_time
+              AND a1.employee_uid = ?
+              AND a1.date = ?
+          )
+      `)
+
+      const pendingResult = pendingCheckQuery.get(employeeUid, today, employeeUid, today)
+      const hasPendingClockIns = pendingResult && pendingResult.pending_count > 0
+
+      console.log(`Sessions today: ${sessionResult?.session_count || 0}`)
+      console.log(`Pending clock-ins: ${pendingResult?.pending_count || 0}`)
+      console.log(`Has completed sessions: ${hasCompletedSessions}`)
+      console.log(`Has pending clock-ins: ${hasPendingClockIns}`)
+
+      // If no sessions today and no pending clock-ins, treat 17:00 as evening_in
+      if (!hasCompletedSessions && !hasPendingClockIns) {
+        console.log(`✓ SPECIAL RULE APPLIED: No prior sessions today - 17:00 clock-in treated as evening_in`)
+        console.log(`=== END SPECIAL 17:00 RULE CHECK ===`)
+        return "evening_in"
+      } else {
+        console.log(`✗ SPECIAL RULE NOT APPLIED: User has prior sessions/pending clock-ins today`)
+        console.log(`=== END SPECIAL 17:00 RULE CHECK ===`)
+        // Continue with normal logic below
+      }
+    } catch (error) {
+      console.error("Error checking sessions for 17:00 rule:", error)
+      console.log(`Database error - falling back to normal 17:00 logic`)
+      // Fall back to normal logic if database check fails
+    }
+  }
+
+  if (!lastClockType) {
+    // First clock of the day
+    console.log(`No previous clock - determining by time:`)
+
+    // Add overtime check for late night hours (22:00+)
+    if (totalMinutes >= nightShiftStart) {
+      console.log(`Time >= 10:00 PM → overtime_in`)
+      return "overtime_in"
+    }
+
+    if (totalMinutes >= eveningStart) {
+      console.log(`Time >= 5:15 PM → evening_in`)
+      return "evening_in"
+    }
+
+    const clockType = hour < 12 ? "morning_in" : "afternoon_in"
+    console.log(`Hour ${hour} < 12? ${hour < 12} → ${clockType}`)
+    return clockType
+  }
+
+  console.log(`Processing sequence based on last clock: ${lastClockType}`)
+
+  switch (lastClockType) {
+    case "morning_in":
+      // Check if this is an overnight shift (morning_in followed by early morning time)
+      if (isPossibleOvernightOut) {
+        console.log(
+          `morning_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → morning_out (overnight shift)`,
+        )
+        return "morning_out"
+      }
+      console.log(`morning_in → morning_out`)
+      return "morning_out"
+
+    case "morning_out":
+      console.log(`morning_out → afternoon_in (lunch break assumed)`)
+      return "afternoon_in"
+
+    case "afternoon_in":
+      // Check if this is an overnight shift
+      if (isPossibleOvernightOut) {
+        console.log(
+          `afternoon_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → afternoon_out (overnight shift)`,
+        )
+        return "afternoon_out"
+      }
+      console.log(`afternoon_in → afternoon_out`)
+      return "afternoon_out"
+
+    case "afternoon_out":
+      console.log(`=== AFTERNOON_OUT LOGIC ===`)
+
+      // Check if this is the same day as the last clock
+      const isSameDay =
+        lastClockTime && lastClockTime.toISOString().split("T")[0] === safeCurrentTime.toISOString().split("T")[0]
+
+      console.log(`Same day check: ${isSameDay}`)
+      console.log(`Last clock time: ${lastClockTime?.toISOString()}`)
+      console.log(`Current time: ${safeCurrentTime.toISOString()}`)
+
+      if (isSameDay) {
+        // Same day - any clock in after afternoon_out should be evening_in
+        console.log(`Same day after afternoon_out → evening_in`)
+        return "evening_in"
+      } else {
+        // Different day - determine by current time
+        if (totalMinutes >= eveningStart) {
+          console.log(`Different day + evening time → evening_in`)
+          return "evening_in"
+        }
+        const nextClockType = hour < 12 ? "morning_in" : "afternoon_in"
+        console.log(`Different day + not evening time → ${nextClockType}`)
+        return nextClockType
+      }
+
+    case "evening_in":
+      // Evening session can go overnight - check for early morning clock out
+      if (isPossibleOvernightOut) {
+        console.log(
+          `evening_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → evening_out (overnight shift)`,
+        )
+        return "evening_out"
+      }
+      console.log(`evening_in → evening_out`)
+      return "evening_out"
+
+    case "evening_out":
+      if (totalMinutes >= eveningStart) {
+        console.log(`evening_out + still evening time → evening_in`)
+        return "evening_in"
+      }
+      const nextAfterEvening = hour < 12 ? "morning_in" : "afternoon_in"
+      console.log(`evening_out + not evening time → ${nextAfterEvening}`)
+      return nextAfterEvening
+
+    case "overtime_in":
+      // CRITICAL FIX: Overtime session can go overnight - check for early morning clock out
+      if (isPossibleOvernightOut) {
+        console.log(
+          `overtime_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → overtime_out (overnight shift)`,
+        )
+        return "overtime_out"
+      }
+      console.log(`overtime_in → overtime_out`)
+      return "overtime_out"
+
+    case "overtime_out":
+      // After overtime out, determine next clock type based on time
+      if (totalMinutes >= nightShiftStart) {
+        console.log(`overtime_out + late night time (>= 22:00) → overtime_in`)
+        return "overtime_in"
+      }
+      if (totalMinutes >= eveningStart) {
+        console.log(`overtime_out + evening time → evening_in`)
+        return "evening_in"
+      }
+      const nextAfterOvertime = hour < 12 ? "morning_in" : "afternoon_in"
+      console.log(`overtime_out + not evening time → ${nextAfterOvertime}`)
+      return nextAfterOvertime
+
+    default:
+      console.log(`Unknown last clock type: ${lastClockType} → defaulting to morning_in`)
+      return "morning_in"
+  }
+}
+
+// Helper function to check for pending clock-outs for an employee
+function getPendingClockOut(employeeUid, db = null) {
+  let database = db
+  if (!database) {
+    try {
+      const { getDatabase } = require("./setup")
+      database = getDatabase()
+    } catch (error) {
+      console.error("Cannot get database connection:", error)
+      return null
+    }
+  }
+
+  try {
+    const pendingClockQuery = database.prepare(`
+      SELECT 
+        id, clock_type, clock_time, date,
+        regular_hours, overtime_hours
+      FROM attendance 
+      WHERE employee_uid = ? 
+        AND clock_type LIKE '%_in'
+        AND id NOT IN (
+          SELECT a1.id FROM attendance a1
+          JOIN attendance a2 ON a1.employee_uid = a2.employee_uid
+          WHERE a1.clock_type LIKE '%_in' 
+            AND a2.clock_type = REPLACE(a1.clock_type, '_in', '_out')
+            AND a2.clock_time > a1.clock_time
+            AND a1.employee_uid = ?
+        )
+      ORDER BY clock_time DESC 
+      LIMIT 1
+    `)
+
+    const pendingClock = pendingClockQuery.get(employeeUid, employeeUid)
+
+    if (pendingClock) {
+      console.log(
+        `Found pending clock-in for employee ${employeeUid}: ${pendingClock.clock_type} at ${pendingClock.clock_time}`,
+      )
+      return {
+        id: pendingClock.id,
+        clockType: pendingClock.clock_type,
+        clockTime: new Date(pendingClock.clock_time),
+        date: pendingClock.date,
+        expectedClockOut: pendingClock.clock_type.replace("_in", "_out"),
+        regularHours: pendingClock.regular_hours || 0,
+        overtimeHours: pendingClock.overtime_hours || 0,
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error("Error checking for pending clock-out:", error)
+    return null
+  }
+}
+
+// Helper function to get today's completed sessions for an employee
+function getTodaysCompletedSessions(employeeUid, date = null, db = null) {
+  let database = db
+  if (!database) {
+    try {
+      const { getDatabase } = require("./setup")
+      database = getDatabase()
+    } catch (error) {
+      console.error("Cannot get database connection:", error)
+      return []
+    }
+  }
+
+  const targetDate = date || new Date().toISOString().split("T")[0]
+
+  try {
+    const sessionsQuery = database.prepare(`
+      SELECT 
+        clock_type, clock_time, regular_hours, overtime_hours
+      FROM attendance 
+      WHERE employee_uid = ? 
+        AND date = ?
+        AND clock_type LIKE '%_out'
+      ORDER BY clock_time ASC
+    `)
+
+    const sessions = sessionsQuery.all(employeeUid, targetDate)
+
+    console.log(`Found ${sessions.length} completed sessions for employee ${employeeUid} on ${targetDate}`)
+
+    return sessions.map((session) => ({
+      clockType: session.clock_type,
+      clockTime: new Date(session.clock_time),
+      regularHours: session.regular_hours || 0,
+      overtimeHours: session.overtime_hours || 0,
+    }))
+  } catch (error) {
+    console.error("Error getting completed sessions:", error)
+    return []
+  }
+}
+
+//statistic
+
 function calculateEveningSessionHoursWithStats(clockInTime, clockOutTime, sessionGracePeriod, statisticsData) {
   // FIXED: Ensure parameters are Date objects
   const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
@@ -1067,401 +1442,6 @@ function calculateOriginalEveningSessionWithStats(clockInMinutes, clockOutMinute
   return totalHours
 }
 
-// Updated helper function to handle 24+ hour formatting
-// function formatMinutes(minutes) {
-//   const hours = Math.floor(minutes / 60)
-//   const mins = minutes % 60
-
-//   // Handle next day display
-//   if (hours >= 24) {
-//     const displayHours = hours - 24
-//     return `${displayHours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")} (+1 day)`
-//   }
-
-//   return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
-// }
-
-function isLate(clockType, clockTime) {
-  const hour = clockTime.getHours()
-  const minute = clockTime.getMinutes()
-  const totalMinutes = hour * 60 + minute
-
-  const earlyMorningStart = 6 * 60 // 6:00 AM - new early morning boundary
-  const morningStart = 8 * 60 // 8:00 AM
-  const afternoonStart = 13 * 60 // 1:00 PM
-  const gracePeriod = 5 // 5 minutes
-
-  console.log(`Late check: ${clockType} at ${hour}:${minute.toString().padStart(2, "0")} (${totalMinutes} minutes)`)
-
-  if (clockType === "morning_in") {
-    // Special case for early morning shift (6:00-12:00)
-    if (totalMinutes >= earlyMorningStart && totalMinutes <= earlyMorningStart + gracePeriod) {
-      console.log(
-        `Early morning threshold: ${earlyMorningStart + gracePeriod} minutes (6:05 AM), Result: ON TIME (early morning rule)`,
-      )
-      return false
-    }
-
-    const isEmployeeLate = totalMinutes > morningStart + gracePeriod
-    console.log(
-      `Morning threshold: ${morningStart + gracePeriod} minutes (8:05 AM), Result: ${isEmployeeLate ? "LATE" : "ON TIME"}`,
-    )
-    return isEmployeeLate
-  } else if (clockType === "afternoon_in") {
-    const isEmployeeLate = totalMinutes > afternoonStart + gracePeriod
-    console.log(
-      `Afternoon threshold: ${afternoonStart + gracePeriod} minutes (1:05 PM), Result: ${isEmployeeLate ? "LATE" : "ON TIME"}`,
-    )
-    return isEmployeeLate
-  }
-
-  return false
-}
-
-function determineClockType(lastClockType, currentTime, lastClockTime = null, employeeUid = null, db = null) {
-  const safeCurrentTime = currentTime || new Date(dateService.getCurrentDateTime())
-  const hour = safeCurrentTime.getHours()
-  const minute = safeCurrentTime.getMinutes()
-  const totalMinutes = hour * 60 + minute
-  const eveningStart = 17 * 60 + 15 // 5:15 PM (after overtime grace period)
-
-  // Define afternoon end time (5:00 PM)
-  const afternoonEnd = 17 * 60 // 5:00 PM
-
-  // Night shift boundaries
-  const nightShiftStart = 22 * 60 // 10:00 PM
-  const earlyMorningEnd = 8 * 60 // 8:00 AM
-
-  console.log(`=== CLOCK TYPE DETERMINATION ===`)
-  console.log(`Input time: ${safeCurrentTime.toISOString()}`)
-  console.log(`Parsed time: ${hour}:${minute.toString().padStart(2, "0")} (${totalMinutes} minutes from midnight)`)
-  console.log(`Last clock type: ${lastClockType}`)
-  console.log(`Evening start threshold: ${eveningStart} minutes (5:15 PM)`)
-  console.log(`Afternoon end: ${afternoonEnd} minutes (5:00 PM)`)
-
-  // Check if this might be an overnight shift continuation
-  const isEarlyMorning = totalMinutes < earlyMorningEnd // Before 8:00 AM
-  const isPossibleOvernightOut = isEarlyMorning && lastClockType && lastClockType.includes("_in")
-
-  console.log(`Early morning check: ${isEarlyMorning}, Possible overnight out: ${isPossibleOvernightOut}`)
-
-  // CRITICAL FIX: Check for overnight shifts with time validation
-  if (lastClockTime && isPossibleOvernightOut) {
-    const lastClockHour = lastClockTime.getHours()
-    const lastClockMinutes = lastClockHour * 60 + lastClockTime.getMinutes()
-    const currentClockMinutes = totalMinutes
-
-    // If last clock was late in the evening/night (after 17:00) and current is early morning (before 8:00)
-    // This indicates an overnight shift continuation
-    if (lastClockMinutes >= afternoonEnd && currentClockMinutes < earlyMorningEnd) {
-      console.log(
-        `OVERNIGHT SHIFT DETECTED: Last clock at ${lastClockHour}:${lastClockTime.getMinutes().toString().padStart(2, "0")} (${lastClockMinutes} min), Current at ${hour}:${minute.toString().padStart(2, "0")} (${currentClockMinutes} min)`,
-      )
-
-      // Return the corresponding out type for the overnight shift
-      const overtimeOutType = lastClockType.replace("_in", "_out")
-      console.log(`Overnight shift continuation: ${lastClockType} → ${overtimeOutType}`)
-      return overtimeOutType
-    }
-  }
-
-  // NEW RULE: Special handling for 17:00 (5:00 PM) clock-ins when user hasn't had any sessions today
-  if (totalMinutes >= afternoonEnd && totalMinutes < eveningStart && employeeUid && db) {
-    // Exactly 17:00
-    console.log(`=== SPECIAL 17:00 RULE CHECK ===`)
-    console.log(`Clock-in at exactly 17:00 - checking for prior sessions today`)
-
-    try {
-      const today = safeCurrentTime.toISOString().split("T")[0]
-
-      // Check if employee has any completed sessions today
-      const sessionCheckQuery = db.prepare(`
-        SELECT COUNT(*) as session_count
-        FROM attendance 
-        WHERE employee_uid = ? 
-          AND date = ?
-          AND clock_type LIKE '%_out'
-      `)
-
-      const sessionResult = sessionCheckQuery.get(employeeUid, today)
-      const hasCompletedSessions = sessionResult && sessionResult.session_count > 0
-
-      // Also check for any pending clock-ins today
-      const pendingCheckQuery = db.prepare(`
-        SELECT COUNT(*) as pending_count
-        FROM attendance 
-        WHERE employee_uid = ? 
-          AND date = ?
-          AND clock_type LIKE '%_in'
-          AND id NOT IN (
-            SELECT a1.id FROM attendance a1
-            JOIN attendance a2 ON a1.employee_uid = a2.employee_uid
-            WHERE a1.clock_type LIKE '%_in' 
-              AND a2.clock_type = REPLACE(a1.clock_type, '_in', '_out')
-              AND a2.clock_time > a1.clock_time
-              AND a1.employee_uid = ?
-              AND a1.date = ?
-          )
-      `)
-
-      const pendingResult = pendingCheckQuery.get(employeeUid, today, employeeUid, today)
-      const hasPendingClockIns = pendingResult && pendingResult.pending_count > 0
-
-      console.log(`Sessions today: ${sessionResult?.session_count || 0}`)
-      console.log(`Pending clock-ins: ${pendingResult?.pending_count || 0}`)
-      console.log(`Has completed sessions: ${hasCompletedSessions}`)
-      console.log(`Has pending clock-ins: ${hasPendingClockIns}`)
-
-      // If no sessions today and no pending clock-ins, treat 17:00 as evening_in
-      if (!hasCompletedSessions && !hasPendingClockIns) {
-        console.log(`✓ SPECIAL RULE APPLIED: No prior sessions today - 17:00 clock-in treated as evening_in`)
-        console.log(`=== END SPECIAL 17:00 RULE CHECK ===`)
-        return "evening_in"
-      } else {
-        console.log(`✗ SPECIAL RULE NOT APPLIED: User has prior sessions/pending clock-ins today`)
-        console.log(`=== END SPECIAL 17:00 RULE CHECK ===`)
-        // Continue with normal logic below
-      }
-    } catch (error) {
-      console.error("Error checking sessions for 17:00 rule:", error)
-      console.log(`Database error - falling back to normal 17:00 logic`)
-      // Fall back to normal logic if database check fails
-    }
-  }
-
-  if (!lastClockType) {
-    // First clock of the day
-    console.log(`No previous clock - determining by time:`)
-
-    // Add overtime check for late night hours (22:00+)
-    if (totalMinutes >= nightShiftStart) {
-      console.log(`Time >= 10:00 PM → overtime_in`)
-      return "overtime_in"
-    }
-
-    if (totalMinutes >= eveningStart) {
-      console.log(`Time >= 5:15 PM → evening_in`)
-      return "evening_in"
-    }
-
-    const clockType = hour < 12 ? "morning_in" : "afternoon_in"
-    console.log(`Hour ${hour} < 12? ${hour < 12} → ${clockType}`)
-    return clockType
-  }
-
-  // Helper function to format time for logging
-  function formatTime(minutes) {
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
-  }
-
-  console.log(`Processing sequence based on last clock: ${lastClockType}`)
-
-  switch (lastClockType) {
-    case "morning_in":
-      // Check if this is an overnight shift (morning_in followed by early morning time)
-      if (isPossibleOvernightOut) {
-        console.log(
-          `morning_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → morning_out (overnight shift)`,
-        )
-        return "morning_out"
-      }
-      console.log(`morning_in → morning_out`)
-      return "morning_out"
-
-    case "morning_out":
-      console.log(`morning_out → afternoon_in (lunch break assumed)`)
-      return "afternoon_in"
-
-    case "afternoon_in":
-      // Check if this is an overnight shift
-      if (isPossibleOvernightOut) {
-        console.log(
-          `afternoon_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → afternoon_out (overnight shift)`,
-        )
-        return "afternoon_out"
-      }
-      console.log(`afternoon_in → afternoon_out`)
-      return "afternoon_out"
-
-    case "afternoon_out":
-      console.log(`=== AFTERNOON_OUT LOGIC ===`)
-
-      // Check if this is the same day as the last clock
-      const isSameDay =
-        lastClockTime && lastClockTime.toISOString().split("T")[0] === safeCurrentTime.toISOString().split("T")[0]
-
-      console.log(`Same day check: ${isSameDay}`)
-      console.log(`Last clock time: ${lastClockTime?.toISOString()}`)
-      console.log(`Current time: ${safeCurrentTime.toISOString()}`)
-
-      if (isSameDay) {
-        // Same day - any clock in after afternoon_out should be evening_in
-        console.log(`Same day after afternoon_out → evening_in`)
-        return "evening_in"
-      } else {
-        // Different day - determine by current time
-        if (totalMinutes >= eveningStart) {
-          console.log(`Different day + evening time → evening_in`)
-          return "evening_in"
-        }
-        const nextClockType = hour < 12 ? "morning_in" : "afternoon_in"
-        console.log(`Different day + not evening time → ${nextClockType}`)
-        return nextClockType
-      }
-
-    case "evening_in":
-      // Evening session can go overnight - check for early morning clock out
-      if (isPossibleOvernightOut) {
-        console.log(
-          `evening_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → evening_out (overnight shift)`,
-        )
-        return "evening_out"
-      }
-      console.log(`evening_in → evening_out`)
-      return "evening_out"
-
-    case "evening_out":
-      if (totalMinutes >= eveningStart) {
-        console.log(`evening_out + still evening time → evening_in`)
-        return "evening_in"
-      }
-      const nextAfterEvening = hour < 12 ? "morning_in" : "afternoon_in"
-      console.log(`evening_out + not evening time → ${nextAfterEvening}`)
-      return nextAfterEvening
-
-    case "overtime_in":
-      // CRITICAL FIX: Overtime session can go overnight - check for early morning clock out
-      if (isPossibleOvernightOut) {
-        console.log(
-          `overtime_in + early morning time (${totalMinutes} < ${earlyMorningEnd}) → overtime_out (overnight shift)`,
-        )
-        return "overtime_out"
-      }
-      console.log(`overtime_in → overtime_out`)
-      return "overtime_out"
-
-    case "overtime_out":
-      // After overtime out, determine next clock type based on time
-      if (totalMinutes >= nightShiftStart) {
-        console.log(`overtime_out + late night time (>= 22:00) → overtime_in`)
-        return "overtime_in"
-      }
-      if (totalMinutes >= eveningStart) {
-        console.log(`overtime_out + evening time → evening_in`)
-        return "evening_in"
-      }
-      const nextAfterOvertime = hour < 12 ? "morning_in" : "afternoon_in"
-      console.log(`overtime_out + not evening time → ${nextAfterOvertime}`)
-      return nextAfterOvertime
-
-    default:
-      console.log(`Unknown last clock type: ${lastClockType} → defaulting to morning_in`)
-      return "morning_in"
-  }
-}
-
-// Helper function to check for pending clock-outs for an employee
-function getPendingClockOut(employeeUid, db = null) {
-  let database = db
-  if (!database) {
-    try {
-      const { getDatabase } = require("./setup")
-      database = getDatabase()
-    } catch (error) {
-      console.error("Cannot get database connection:", error)
-      return null
-    }
-  }
-
-  try {
-    const pendingClockQuery = database.prepare(`
-      SELECT 
-        id, clock_type, clock_time, date,
-        regular_hours, overtime_hours
-      FROM attendance 
-      WHERE employee_uid = ? 
-        AND clock_type LIKE '%_in'
-        AND id NOT IN (
-          SELECT a1.id FROM attendance a1
-          JOIN attendance a2 ON a1.employee_uid = a2.employee_uid
-          WHERE a1.clock_type LIKE '%_in' 
-            AND a2.clock_type = REPLACE(a1.clock_type, '_in', '_out')
-            AND a2.clock_time > a1.clock_time
-            AND a1.employee_uid = ?
-        )
-      ORDER BY clock_time DESC 
-      LIMIT 1
-    `)
-
-    const pendingClock = pendingClockQuery.get(employeeUid, employeeUid)
-
-    if (pendingClock) {
-      console.log(
-        `Found pending clock-in for employee ${employeeUid}: ${pendingClock.clock_type} at ${pendingClock.clock_time}`,
-      )
-      return {
-        id: pendingClock.id,
-        clockType: pendingClock.clock_type,
-        clockTime: new Date(pendingClock.clock_time),
-        date: pendingClock.date,
-        expectedClockOut: pendingClock.clock_type.replace("_in", "_out"),
-        regularHours: pendingClock.regular_hours || 0,
-        overtimeHours: pendingClock.overtime_hours || 0,
-      }
-    }
-
-    return null
-  } catch (error) {
-    console.error("Error checking for pending clock-out:", error)
-    return null
-  }
-}
-
-// Helper function to get today's completed sessions for an employee
-function getTodaysCompletedSessions(employeeUid, date = null, db = null) {
-  let database = db
-  if (!database) {
-    try {
-      const { getDatabase } = require("./setup")
-      database = getDatabase()
-    } catch (error) {
-      console.error("Cannot get database connection:", error)
-      return []
-    }
-  }
-
-  const targetDate = date || new Date().toISOString().split("T")[0]
-
-  try {
-    const sessionsQuery = database.prepare(`
-      SELECT 
-        clock_type, clock_time, regular_hours, overtime_hours
-      FROM attendance 
-      WHERE employee_uid = ? 
-        AND date = ?
-        AND clock_type LIKE '%_out'
-      ORDER BY clock_time ASC
-    `)
-
-    const sessions = sessionsQuery.all(employeeUid, targetDate)
-
-    console.log(`Found ${sessions.length} completed sessions for employee ${employeeUid} on ${targetDate}`)
-
-    return sessions.map((session) => ({
-      clockType: session.clock_type,
-      clockTime: new Date(session.clock_time),
-      regularHours: session.regular_hours || 0,
-      overtimeHours: session.overtime_hours || 0,
-    }))
-  } catch (error) {
-    console.error("Error getting completed sessions:", error)
-    return []
-  }
-}
-
-//statistic
 /**
  * Save detailed calculation statistics to the database
  * Call this function after each clock-out calculation
