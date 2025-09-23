@@ -45,12 +45,13 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
     console.log(`=== CLOCKING ATTENDANCE FOR EMPLOYEE ${employee.uid} ===`)
     console.log(`Employee: ${employee.first_name} ${employee.last_name}`)
     console.log(`Current time: ${currentDateTime.toISOString()}`)
+    console.log(`Current date: ${today}`)
 
-    // Check for any pending clock-out first
-    const pendingClockOut = getPendingClockOut(employee.uid, db)
+    // FIXED: Check for any pending clock-out from the SAME DAY only
+    const pendingClockOut = getPendingClockOut(employee.uid, today, db)
     
     if (pendingClockOut) {
-      console.log(`Found pending clock: ${pendingClockOut.clockType} from ${pendingClockOut.clockTime}`)
+      console.log(`Found pending clock from SAME DAY: ${pendingClockOut.clockType} from ${pendingClockOut.clockTime}`)
       
       // Calculate hours for the pending session WITH STATISTICS
       const clockType = pendingClockOut.expectedClockOut
@@ -155,7 +156,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
     const lastClockType = lastClockRecord ? lastClockRecord.clock_type : null
     const lastClockTime = lastClockRecord ? new Date(lastClockRecord.clock_time) : null
 
-    console.log(`Last clock record: ${lastClockType} at ${lastClockTime}`)
+    console.log(`Last clock record for ${today}: ${lastClockType} at ${lastClockTime}`)
 
     // Determine next clock type
     const clockType = determineClockType(
@@ -169,7 +170,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
 
     // Handle clock-out validation
     if (isValidClockOut(clockType)) {
-      // Double-check for missed pending clock-ins
+      // FIXED: Double-check for missed pending clock-ins from SAME DAY only
       const doubleCheckPendingQuery = db.prepare(`
         SELECT 
           id, clock_type, clock_time, date
@@ -183,15 +184,16 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
               AND a2.clock_type = REPLACE(attendance.clock_type, '_in', '_out')
               AND a2.clock_time > attendance.clock_time
               AND a2.date = attendance.date
+              AND a2.date = ?
           )
         ORDER BY clock_time DESC 
         LIMIT 1
       `)
       
-      const missedPendingClock = doubleCheckPendingQuery.get(employee.uid, today, employee.uid)
+      const missedPendingClock = doubleCheckPendingQuery.get(employee.uid, today, employee.uid, today)
       
       if (missedPendingClock) {
-        console.log(`Found missed pending clock-in: ${missedPendingClock.clock_type} at ${missedPendingClock.clock_time}`)
+        console.log(`Found missed pending clock-in from SAME DAY: ${missedPendingClock.clock_type} at ${missedPendingClock.clock_time}`)
         
         // Process the missed clock-out
         const expectedClockOut = {
@@ -283,7 +285,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       }
       
       // Error case: invalid clock-out without pending session
-      let errorMessage = "Cannot clock out without an active session. "
+      let errorMessage = "Cannot clock out without an active session from today. "
       
       if (lastClockType && lastClockType.endsWith('_out')) {
         errorMessage += `Your last action was clocking out (${getSessionType(lastClockType)}). Please clock in first.`
@@ -302,7 +304,8 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
           determinedClockType: clockType,
           lastClockType: lastClockType,
           lastClockTime: lastClockTime?.toISOString(),
-          currentTime: currentDateTime.toISOString()
+          currentTime: currentDateTime.toISOString(),
+          currentDate: today
         }
       }
     }
