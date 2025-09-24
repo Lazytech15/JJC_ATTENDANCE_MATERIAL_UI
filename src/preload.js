@@ -47,6 +47,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // UPDATED: Enhanced Profile operations
   checkProfileImages: (employeeUids) => ipcRenderer.invoke("check-profile-images", employeeUids),
   checkAllProfileImages: () => ipcRenderer.invoke("check-all-profile-images"),
+
+  // validate time operations
+  validateAttendanceData: () => ipcRenderer.invoke("validate-attendance-data"),
+  validateTodayAttendance: () => ipcRenderer.invoke("validate-today-attendance"),
+  validateEmployeeTodayAttendance: () => ipcRenderer.invoke("validate-employee-today-attendance"),
+  validateAndCorrectUnsyncedRecords: () => ipcRenderer.invoke("validate-and-correct-unsynced-records"),
+  validateSingleRecord: () => ipcRenderer.invoke("validate-single-record"),
   
   // Bulk download operations
   bulkDownloadProfiles: (serverUrl, options) => ipcRenderer.invoke("bulk-download-profiles", serverUrl, options),

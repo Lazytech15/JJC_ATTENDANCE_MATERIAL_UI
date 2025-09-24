@@ -176,117 +176,141 @@ class AttendanceApp {
     }
   }
 
-  // Enhanced perform attendance sync with download toast messages
   async performAttendanceSync(
-    silent = false,
-    retryCount = 0,
-    showDownloadToast = false
-  ) {
-    if (!this.electronAPI) {
-      if (!silent) {
-        this.showStatus("Demo mode: Sync simulated successfully!", "success");
+  silent = false,
+  retryCount = 0,
+  showDownloadToast = false
+) {
+  if (!this.electronAPI) {
+    if (!silent) {
+      this.showStatus("Demo mode: Sync simulated successfully!", "success");
+    }
+    return { success: true, message: "Demo sync" };
+  }
+
+  try {
+    // First validate unsynced records before syncing
+    if (retryCount === 0) { // Only validate on first attempt, not retries
+      try {
+        if (!silent) {
+          this.showStatus("Validating attendance data before sync...", "info");
+        }
+        
+        const validationResult = await this.electronAPI.validateAndCorrectUnsyncedRecords({
+          autoCorrect: true,
+          updateSyncStatus: false // Don't change sync status during validation
+        });
+        
+        if (validationResult.success && validationResult.data.summary.correctedRecords > 0) {
+          const corrected = validationResult.data.summary.correctedRecords;
+          console.log(`Pre-sync validation: ${corrected} records corrected`);
+          
+          if (!silent) {
+            this.showStatus(`Validated and corrected ${corrected} records before sync`, "success");
+          }
+        }
+      } catch (validationError) {
+        console.warn("Pre-sync validation failed, continuing with sync:", validationError);
       }
-      return { success: true, message: "Demo sync" };
     }
 
-    try {
-      // First check if there are attendance records to sync
-      const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
+    // First check if there are attendance records to sync
+    const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
 
-      if (!countResult.success || countResult.count === 0) {
-        if (!silent) {
-          this.showStatus("No attendance records to sync", "info");
-        }
-
-        // Even if no attendance records, check for summary records
-        return await this.performSummarySync(
-          silent,
-          retryCount,
-          showDownloadToast
-        );
+    if (!countResult.success || countResult.count === 0) {
+      if (!silent) {
+        this.showStatus("No attendance records to sync", "info");
       }
 
-      // Show download toast for initial sync or when explicitly requested
-      if (showDownloadToast || (!silent && retryCount === 0)) {
+      // Even if no attendance records, check for summary records
+      return await this.performSummarySync(
+        silent,
+        retryCount,
+        showDownloadToast
+      );
+    }
+
+    // Show download toast for initial sync or when explicitly requested
+    if (showDownloadToast || (!silent && retryCount === 0)) {
+      this.showDownloadToast(
+        `📤 Uploading ${countResult.count} attendance records to server...`,
+        "info"
+      );
+    } else if (!silent) {
+      this.showStatus(
+        `Syncing ${countResult.count} attendance records...`,
+        "info"
+      );
+    }
+
+    // Perform the attendance sync
+    const syncResult = await this.electronAPI.syncAttendanceToServer();
+
+    if (syncResult.success) {
+      if (showDownloadToast || !silent) {
         this.showDownloadToast(
-          `📤 Uploading ${countResult.count} attendance records to server...`,
-          "info"
-        );
-      } else if (!silent) {
-        this.showStatus(
-          `Syncing ${countResult.count} attendance records...`,
-          "info"
+          "✅ Attendance data uploaded successfully!",
+          "success"
         );
       }
+      console.log("Attendance sync successful:", syncResult.message);
 
-      // Perform the attendance sync
-      const syncResult = await this.electronAPI.syncAttendanceToServer();
-
-      if (syncResult.success) {
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            "✅ Attendance data uploaded successfully!",
-            "success"
-          );
-        }
-        console.log("Attendance sync successful:", syncResult.message);
-
-        // Update sync info display if settings modal is open
-        if (
-          document.getElementById("settingsModal").classList.contains("show")
-        ) {
-          await this.loadSyncInfo();
-        }
-
-        // After successful attendance sync, perform summary sync
-        console.log("Triggering summary sync after attendance sync");
-        const summaryResult = await this.performSummarySync(true, 0, false); // Silent summary sync
-
-        return {
-          success: true,
-          message: syncResult.message,
-          attendanceSync: syncResult,
-          summarySync: summaryResult,
-        };
-      } else {
-        throw new Error(syncResult.message);
+      // Update sync info display if settings modal is open
+      if (
+        document.getElementById("settingsModal").classList.contains("show")
+      ) {
+        await this.loadSyncInfo();
       }
-    } catch (error) {
-      console.error("Attendance sync error:", error);
 
-      // Retry logic
-      if (retryCount < this.syncSettings.retryAttempts) {
-        console.log(
-          `Retrying sync in ${
-            this.syncSettings.retryDelay / 1000
-          } seconds... (attempt ${retryCount + 1}/${
+      // After successful attendance sync, perform summary sync
+      console.log("Triggering summary sync after attendance sync");
+      const summaryResult = await this.performSummarySync(true, 0, false); // Silent summary sync
+
+      return {
+        success: true,
+        message: syncResult.message,
+        attendanceSync: syncResult,
+        summarySync: summaryResult,
+      };
+    } else {
+      throw new Error(syncResult.message);
+    }
+  } catch (error) {
+    console.error("Attendance sync error:", error);
+
+    // Retry logic
+    if (retryCount < this.syncSettings.retryAttempts) {
+      console.log(
+        `Retrying sync in ${
+          this.syncSettings.retryDelay / 1000
+        } seconds... (attempt ${retryCount + 1}/${
+          this.syncSettings.retryAttempts
+        })`
+      );
+
+      setTimeout(() => {
+        this.performAttendanceSync(silent, retryCount + 1, showDownloadToast);
+      }, this.syncSettings.retryDelay);
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `⚠️ Upload failed, retrying... (${retryCount + 1}/${
             this.syncSettings.retryAttempts
-          })`
+          })`,
+          "warning"
         );
-
-        setTimeout(() => {
-          this.performAttendanceSync(silent, retryCount + 1, showDownloadToast);
-        }, this.syncSettings.retryDelay);
-
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `⚠️ Upload failed, retrying... (${retryCount + 1}/${
-              this.syncSettings.retryAttempts
-            })`,
-            "warning"
-          );
-        }
-      } else {
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
-            "error"
-          );
-        }
-        return { success: false, message: error.message };
       }
+    } else {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
+          "error"
+        );
+      }
+      return { success: false, message: error.message };
     }
   }
+}
 
   async performSummarySync(
     silent = false,
@@ -603,182 +627,226 @@ class AttendanceApp {
     console.log("Summary data marked as changed, pending sync");
   }
 
-  // Enhanced save and sync functionality with download toasts
-  async saveAndSync() {
-    const syncNowBtn = document.getElementById("syncNowBtn");
-    const originalText = syncNowBtn.textContent;
+ async saveAndSync() {
+  const syncNowBtn = document.getElementById("syncNowBtn");
+  const originalText = syncNowBtn.textContent;
 
-    // Show loading state
-    syncNowBtn.textContent = "💾 Saving & Syncing...";
-    syncNowBtn.disabled = true;
+  // Show loading state
+  syncNowBtn.textContent = "💾 Saving & Syncing...";
+  syncNowBtn.disabled = true;
 
-    if (!this.electronAPI) {
-      this.showSettingsStatus(
-        "Demo mode: Settings saved and sync completed successfully!",
-        "success"
-      );
-      this.showDownloadToast(
-        "📊 Demo: Employee data downloaded successfully!",
-        "success"
-      );
-      await this.loadSyncInfo();
-      syncNowBtn.textContent = originalText;
-      syncNowBtn.disabled = false;
+  if (!this.electronAPI) {
+    this.showSettingsStatus(
+      "Demo mode: Settings saved and sync completed successfully!",
+      "success"
+    );
+    this.showDownloadToast(
+      "📊 Demo: Employee data downloaded successfully!",
+      "success"
+    );
+    await this.loadSyncInfo();
+    syncNowBtn.textContent = originalText;
+    syncNowBtn.disabled = false;
+    return;
+  }
+
+  try {
+    // First, save the settings
+    const settingsForm = document.getElementById("settingsForm");
+    if (!settingsForm) {
+      throw new Error("Settings form not found");
+    }
+
+    const formData = new FormData(settingsForm);
+
+    // Get server URL with proper null checking
+    const serverUrlInput =
+      formData.get("serverUrl") ||
+      document.getElementById("serverUrl")?.value;
+    if (!serverUrlInput) {
+      this.showSettingsStatus("Server URL is required", "error");
       return;
     }
 
-    try {
-      // First, save the settings
-      const settingsForm = document.getElementById("settingsForm");
-      if (!settingsForm) {
-        throw new Error("Settings form not found");
-      }
+    // Clean the base URL and ensure it doesn't already have the API endpoint
+    let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, ""); // Remove trailing slash
+    if (baseUrl.endsWith("/api/tables/emp_list/data")) {
+      baseUrl = baseUrl.replace("/api/tables/emp_list/data", "");
+    }
 
-      const formData = new FormData(settingsForm);
+    const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`;
 
-      // Get server URL with proper null checking
-      const serverUrlInput =
-        formData.get("serverUrl") ||
-        document.getElementById("serverUrl")?.value;
-      if (!serverUrlInput) {
-        this.showSettingsStatus("Server URL is required", "error");
-        return;
-      }
+    // Get other form values with fallbacks
+    const syncIntervalInput =
+      formData.get("syncInterval") ||
+      document.getElementById("syncInterval")?.value ||
+      "5";
+    const gracePeriodInput =
+      formData.get("gracePeriod") ||
+      document.getElementById("gracePeriod")?.value ||
+      "5";
+    const summarySyncIntervalInput =
+      formData.get("summarySyncInterval") ||
+      document.getElementById("summarySyncInterval")?.value ||
+      "10";
 
-      // Clean the base URL and ensure it doesn't already have the API endpoint
-      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, ""); // Remove trailing slash
-      if (baseUrl.endsWith("/api/tables/emp_list/data")) {
-        baseUrl = baseUrl.replace("/api/tables/emp_list/data", "");
-      }
+    const settings = {
+      server_url: fullServerUrl,
+      sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
+      summary_sync_interval: (
+        Number.parseInt(summarySyncIntervalInput) * 60000
+      ).toString(),
+      grace_period: gracePeriodInput,
+    };
 
-      const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`;
+    console.log("Saving settings:", settings); // Debug log
 
-      // Get other form values with fallbacks
-      const syncIntervalInput =
-        formData.get("syncInterval") ||
-        document.getElementById("syncInterval")?.value ||
-        "5";
-      const gracePeriodInput =
-        formData.get("gracePeriod") ||
-        document.getElementById("gracePeriod")?.value ||
-        "5";
-      const summarySyncIntervalInput =
-        formData.get("summarySyncInterval") ||
-        document.getElementById("summarySyncInterval")?.value ||
-        "10";
+    const saveResult = await this.electronAPI.updateSettings(settings);
 
-      const settings = {
-        server_url: fullServerUrl,
-        sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
-        summary_sync_interval: (
-          Number.parseInt(summarySyncIntervalInput) * 60000
-        ).toString(),
-        grace_period: gracePeriodInput,
-      };
-
-      console.log("Saving settings:", settings); // Debug log
-
-      const saveResult = await this.electronAPI.updateSettings(settings);
-
-      if (!saveResult.success) {
-        this.showSettingsStatus(
-          saveResult.error || "Error saving settings",
-          "error"
-        );
-        return;
-      }
-
-      // Update local sync settings
-      this.syncSettings.interval = Number.parseInt(settings.sync_interval);
-      this.summarySyncSettings.interval = Number.parseInt(
-        settings.summary_sync_interval
-      );
-
-      // Restart auto-sync with new intervals
-      this.startAutoSync();
-      this.startSummaryAutoSync();
-
-      // Update button text and show download toast for employee sync phase
-      syncNowBtn.textContent = "📥 Downloading Employees...";
-      this.showDownloadToast(
-        "🔄 Connecting to server and downloading employee data...",
-        "info"
-      );
-
-      // Then sync the employees
-      const employeeSyncResult = await this.electronAPI.syncEmployees();
-
-      if (!employeeSyncResult.success) {
-        this.showSettingsStatus(
-          `Settings saved, but employee sync failed: ${employeeSyncResult.error}`,
-          "warning"
-        );
-        this.showDownloadToast(
-          "❌ Failed to download employee data from server",
-          "error"
-        );
-        return;
-      }
-
-      // Show success toast for employee download
-      this.showDownloadToast(
-        "✅ Employee data downloaded successfully!",
-        "success"
-      );
-
-      // Update button text to show attendance sync phase
-      syncNowBtn.textContent = "📊 Uploading Attendance...";
-
-      // Then sync attendance with download toast
-      const attendanceSyncResult = await this.performAttendanceSync(
-        false,
-        0,
-        true
-      );
-
-      // Update button text to show summary sync phase
-      syncNowBtn.textContent = "📈 Uploading Summary...";
-
-      // Finally sync summary data
-      const summarySyncResult = await this.performSummarySync(false, 0, true);
-
-      if (
-        attendanceSyncResult &&
-        attendanceSyncResult.success &&
-        summarySyncResult &&
-        summarySyncResult.success
-      ) {
-        this.showSettingsStatus(
-          "Settings saved and all data synced successfully!",
-          "success"
-        );
-        await this.loadSyncInfo();
-        await this.loadSummaryInfo();
-        // Also refresh the main attendance data
-        await this.loadTodayAttendance();
-      } else if (attendanceSyncResult && attendanceSyncResult.success) {
-        this.showSettingsStatus(
-          "Settings saved, attendance synced, but summary sync had issues",
-          "warning"
-        );
-      } else {
-        this.showSettingsStatus(
-          "Settings saved, employees synced, but data sync had issues",
-          "warning"
-        );
-      }
-    } catch (error) {
-      console.error("Save and sync error:", error);
+    if (!saveResult.success) {
       this.showSettingsStatus(
-        `Error occurred during save and sync: ${error.message}`,
+        saveResult.error || "Error saving settings",
         "error"
       );
-      this.showDownloadToast("❌ Connection to server failed", "error");
-    } finally {
-      syncNowBtn.textContent = originalText;
-      syncNowBtn.disabled = false;
+      return;
     }
+
+    // Update local sync settings
+    this.syncSettings.interval = Number.parseInt(settings.sync_interval);
+    this.summarySyncSettings.interval = Number.parseInt(
+      settings.summary_sync_interval
+    );
+
+    // Restart auto-sync with new intervals
+    this.startAutoSync();
+    this.startSummaryAutoSync();
+
+    // Update button text and show download toast for validation phase
+    syncNowBtn.textContent = "🔍 Validating Data...";
+    this.showDownloadToast(
+      "🔄 Validating attendance calculations...",
+      "info"
+    );
+
+    // Validate all attendance data before sync
+    const validationResult = await this.electronAPI.validateAttendanceData({
+      autoCorrect: true,
+      updateSyncStatus: true,
+      validateStatistics: true,
+      rebuildSummary: true
+    });
+
+    if (validationResult.success && validationResult.data) {
+      // Access the validation data directly (not through a summary property)
+      const validationData = validationResult.data;
+      
+      // Check if we have the expected structure and show appropriate message
+      if (validationData.totalRecords !== undefined) {
+        const correctedRecords = validationData.correctedRecords || 0;
+        const totalRecords = validationData.totalRecords || 0;
+        
+        if (correctedRecords > 0) {
+          this.showDownloadToast(
+            `✅ Validated ${totalRecords} records (${correctedRecords} corrections)`,
+            "success"
+          );
+        } else {
+          this.showDownloadToast(
+            `✅ All ${totalRecords} records validated successfully`,
+            "success"
+          );
+        }
+      } else {
+        // Fallback message if structure is different
+        this.showDownloadToast("✅ Attendance validation completed", "success");
+      }
+    } else {
+      // Log warning but don't stop the sync process
+      console.warn("Attendance validation had issues:", validationResult.error);
+      this.showDownloadToast("⚠️ Validation completed with warnings", "warning");
+    }
+
+    // Update button text and show download toast for employee sync phase
+    syncNowBtn.textContent = "📥 Downloading Employees...";
+    this.showDownloadToast(
+      "🔄 Connecting to server and downloading employee data...",
+      "info"
+    );
+
+    // Then sync the employees
+    const employeeSyncResult = await this.electronAPI.syncEmployees();
+
+    if (!employeeSyncResult.success) {
+      this.showSettingsStatus(
+        `Settings saved, but employee sync failed: ${employeeSyncResult.error}`,
+        "warning"
+      );
+      this.showDownloadToast(
+        "❌ Failed to download employee data from server",
+        "error"
+      );
+      return;
+    }
+
+    // Show success toast for employee download
+    this.showDownloadToast(
+      "✅ Employee data downloaded successfully!",
+      "success"
+    );
+
+    // Update button text to show attendance sync phase
+    syncNowBtn.textContent = "📊 Uploading Attendance...";
+
+    // Then sync attendance with download toast
+    const attendanceSyncResult = await this.performAttendanceSync(
+      false,
+      0,
+      true
+    );
+
+    // Update button text to show summary sync phase
+    syncNowBtn.textContent = "📈 Uploading Summary...";
+
+    // Finally sync summary data
+    const summarySyncResult = await this.performSummarySync(false, 0, true);
+
+    if (
+      attendanceSyncResult &&
+      attendanceSyncResult.success &&
+      summarySyncResult &&
+      summarySyncResult.success
+    ) {
+      this.showSettingsStatus(
+        "Settings saved, data validated, and all synced successfully!",
+        "success"
+      );
+      await this.loadSyncInfo();
+      await this.loadSummaryInfo();
+      // Also refresh the main attendance data
+      await this.loadTodayAttendance();
+    } else if (attendanceSyncResult && attendanceSyncResult.success) {
+      this.showSettingsStatus(
+        "Settings saved, attendance synced, but summary sync had issues",
+        "warning"
+      );
+    } else {
+      this.showSettingsStatus(
+        "Settings saved, employees synced, but data sync had issues",
+        "warning"
+      );
+    }
+  } catch (error) {
+    console.error("Save and sync error:", error);
+    this.showSettingsStatus(
+      `Error occurred during save and sync: ${error.message}`,
+      "error"
+    );
+    this.showDownloadToast("❌ Connection to server failed", "error");
+  } finally {
+    syncNowBtn.textContent = originalText;
+    syncNowBtn.disabled = false;
   }
+}
 
   // New method for download-specific toast messages
   showDownloadToast(message, type = "info") {
@@ -1680,17 +1748,98 @@ this.setupImageWithFallback(photo, employee.uid, `${employee.first_name} ${emplo
   }
 
   async loadInitialData() {
-    // Show download toast for initial data loading
-    this.showDownloadToast("🔄 Loading initial data...", "info");
+  // Show download toast for initial data loading
+  this.showDownloadToast("🔄 Loading initial data...", "info");
 
-    try {
-      await Promise.all([this.loadTodayAttendance(), this.syncEmployees()]);
-      this.showDownloadToast("✅ Initial data loaded successfully!", "success");
-    } catch (error) {
-      console.error("Error loading initial data:", error);
-      this.showDownloadToast("❌ Failed to load initial data", "error");
-    }
+  try {
+    // First, validate attendance data for accurate time calculations
+    await this.validateAttendanceData();
+    
+    // Then load the regular data
+    await Promise.all([this.loadTodayAttendance(), this.syncEmployees()]);
+    
+    this.showDownloadToast("✅ Initial data loaded successfully!", "success");
+  } catch (error) {
+    console.error("Error loading initial data:", error);
+    this.showDownloadToast("❌ Failed to load initial data", "error");
   }
+}
+
+// New method to validate attendance data
+async validateAttendanceData() {
+  if (!this.electronAPI) {
+    console.log("Demo mode: Skipping attendance validation");
+    return { success: true, message: "Demo mode - validation skipped" };
+  }
+
+  try {
+    this.showDownloadToast("🔍 Validating attendance calculations...", "info");
+    
+    // Validate today's attendance data
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get validation result from the main process
+    const validationResult = await this.electronAPI.validateAttendanceData({
+      startDate: today,
+      endDate: today,
+      autoCorrect: true,
+      updateSyncStatus: true,
+      validateStatistics: true,
+      rebuildSummary: false
+    });
+
+    if (validationResult.success && validationResult.data) {
+      // The data structure from AttendanceValidationService.validationResults
+      const validationData = validationResult.data;
+      
+      // Check if we have the expected structure
+      if (validationData.totalRecords !== undefined) {
+        const correctedRecords = validationData.correctedRecords || 0;
+        const totalRecords = validationData.totalRecords || 0;
+        
+        if (correctedRecords > 0) {
+          console.log(`Validation completed: ${correctedRecords} records corrected out of ${totalRecords} total`);
+          this.showDownloadToast(
+            `✅ Validated ${totalRecords} records (${correctedRecords} corrections)`,
+            "success"
+          );
+          
+          // Mark summary data as changed if corrections were made
+          this.markSummaryDataChanged();
+          
+          // Trigger a sync for corrected data after a delay
+          setTimeout(() => {
+            this.performAttendanceSync(true); // Silent sync
+          }, 5000);
+        } else {
+          console.log(`Validation completed: All ${totalRecords} records are accurate`);
+          this.showDownloadToast(
+            `✅ All ${totalRecords} attendance records validated`,
+            "success"
+          );
+        }
+      } else {
+        // Fallback if structure is different
+        console.log("Validation completed with unknown result structure:", validationData);
+        this.showDownloadToast("✅ Attendance validation completed", "success");
+      }
+      
+      return validationResult;
+    } else {
+      const errorMessage = validationResult.error || "Unknown validation error";
+      console.warn("Attendance validation failed:", errorMessage);
+      this.showDownloadToast("⚠️ Attendance validation encountered issues", "warning");
+      return validationResult;
+    }
+    
+  } catch (error) {
+    console.error("Error during attendance validation:", error);
+    this.showDownloadToast("❌ Attendance validation failed", "error");
+    
+    // Don't throw the error - continue with loading even if validation fails
+    return { success: false, error: error.message };
+  }
+}
 
   async loadTodayAttendance() {
     try {

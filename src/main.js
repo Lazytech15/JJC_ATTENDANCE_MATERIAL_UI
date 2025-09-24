@@ -306,7 +306,7 @@ async function loadModules() {
 function loadRoutes() {
   const routes = {}
 
-  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb", "summary-sync"]
+  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb", "summary-sync", "validateTime"]
 
   routeModules.forEach((moduleName) => {
     try {
@@ -324,6 +324,7 @@ function loadRoutes() {
           getResourcePath(`src/api/routes/${moduleName}`),
           getResourcePath(`src/api/routes/${moduleName}.js`),
           getResourcePath(`src/database/models/${moduleName}.js`),
+          getResourcePath(`src/services/${moduleName}.js`),
         ]
 
         let foundPath = null
@@ -886,8 +887,6 @@ function registerIpcHandlers(routes) {
     return getResourcePath(path.join("profiles", filename))
   })
 
-  ipcMain.handle("open-settings", () => createSettingsWindow())
-
   // Additional utility handlers for preload script
   ipcMain.handle("file-exists", (event, filePath) => {
     try {
@@ -996,8 +995,65 @@ function registerIpcHandlers(routes) {
     "markAttendanceAsSynced",
   )
 
-// Replace your existing profile services handler registration section with this COMPLETE version:
+  
 
+  // Validate time route handlers
+  const validateTimeRoutes = routes.validateTime || {}
+  console.log("Validate time routes available:", Object.keys(validateTimeRoutes))
+  safelyRegisterHandler("validate-attendance-data", async (event, options = {}) => {
+  const validateTimeRoutes = routes.validateTime || {};
+  
+  if (!validateTimeRoutes.validateAttendanceData || typeof validateTimeRoutes.validateAttendanceData !== 'function') {
+    throw new Error('validateAttendanceData function is not available');
+  }
+  
+  try {
+    // Extract parameters from options object
+    const {
+      startDate = null,
+      endDate = null,
+      employeeUid = null,
+      autoCorrect = true,
+      updateSyncStatus = true,
+      validateStatistics = true,
+      rebuildSummary = true
+    } = options;
+    
+    console.log('IPC Handler - validateAttendanceData called with:', {
+      startDate, endDate, employeeUid, autoCorrect, updateSyncStatus, validateStatistics, rebuildSummary
+    });
+    
+    // Call the validation function with proper parameters
+    const result = await validateTimeRoutes.validateAttendanceData(
+      startDate,
+      endDate, 
+      employeeUid,
+      {
+        autoCorrect,
+        updateSyncStatus,
+        validateStatistics,
+        rebuildSummary
+      }
+    );
+    
+    return {
+      success: true,
+      data: result
+    };
+    
+  } catch (error) {
+    console.error('Error in validateAttendanceData IPC handler:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}, validateTimeRoutes, "validateAttendanceData");
+  safelyRegisterHandler("validate-today-attendance", validateTimeRoutes.validateTodayAttendance, validateTimeRoutes, "validateTodayAttendance")
+  safelyRegisterHandler("validate-employee-today-attendance", validateTimeRoutes.validateEmployeeTodayAttendance, validateTimeRoutes, "validateEmployeeTodayAttendance")
+  safelyRegisterHandler("validate-and-correct-unsynced-records", validateTimeRoutes.validateAndCorrectUnsyncedRecords, validateTimeRoutes, "validateAndCorrectUnsyncedRecords")
+  safelyRegisterHandler("validate-single-record", validateTimeRoutes.validateSingleRecord, validateTimeRoutes, "validateSingleRecord")
+  
 // Profile service handlers
 const profileServices = routes.profileServices || {}
 console.log("Profile services available:", Object.keys(profileServices))

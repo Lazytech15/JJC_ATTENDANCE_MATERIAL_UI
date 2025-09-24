@@ -109,7 +109,7 @@ function formatMinutes(minutes) {
   return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
 }
 
-// NEW FUNCTION: Apply 8-hour regular completion rule
+// FIXED VERSION: Apply 8-hour regular completion rule with proper early morning protection
 function apply8HourRegularRule(regularHours, overtimeHours, clockType = null, clockInTime = null) {
   const REQUIRED_REGULAR_HOURS = 8
 
@@ -129,7 +129,7 @@ function apply8HourRegularRule(regularHours, overtimeHours, clockType = null, cl
     const clockInMinutes = safeClockInTime.getHours() * 60 + safeClockInTime.getMinutes()
     const earlyMorningStart = 6 * 60 // 6:00 AM
     const morningStart = 8 * 60 // 8:00 AM
-    const earlyMorningGraceStart = earlyMorningStart - 5 // 5:55 AM
+    const earlyMorningGraceStart = earlyMorningStart - 60 // 5:55 AM
 
     // Check if employee qualified for early morning overtime (6:00-8:00 AM)
     if (clockInMinutes >= earlyMorningGraceStart && clockInMinutes < morningStart) {
@@ -176,30 +176,36 @@ function apply8HourRegularRule(regularHours, overtimeHours, clockType = null, cl
         console.log(`Calculated early morning overtime protection: ${maxEarlyMorningOvertime} hours`)
       }
 
-      // Protect the early morning overtime hours from conversion
+      // CRITICAL FIX: Protect ALL early morning overtime from conversion
       protectedOvertimeHours = Math.min(overtimeHours, maxEarlyMorningOvertime)
       convertibleOvertimeHours = Math.max(0, overtimeHours - protectedOvertimeHours)
       
       console.log(`Protected early morning overtime: ${protectedOvertimeHours} hours`)
       console.log(`Convertible overtime remaining: ${convertibleOvertimeHours} hours`)
       console.log(`=== END EARLY MORNING OVERTIME PROTECTION ===`)
+      
+      // ADDITIONAL FIX: If we have early morning overtime, don't convert ANY overtime to regular
+      if (protectedOvertimeHours > 0) {
+        console.log(`✓ EARLY MORNING OVERTIME DETECTED - NO CONVERSION TO REGULAR HOURS`)
+        console.log(`Final result: Regular=${regularHours}, Overtime=${overtimeHours} (all early morning overtime protected)`)
+        console.log(`=== END 8-HOUR RULE (EARLY MORNING PROTECTION ACTIVE) ===`)
+
+        return {
+          regularHours: regularHours,
+          overtimeHours: overtimeHours,
+        }
+      }
     }
   }
 
   // FIXED: Protect afternoon/evening overtime (17:00-22:00) from being converted to regular hours
   if (clockType === "afternoon_out" && clockInTime) {
-    const safeClockInTime = clockInTime instanceof Date ? clockInTime : new Date(clockInTime)
-    const safeClockOutTime = new Date() // This should be passed as a parameter, but for now we'll work with what we have
-    
-    // Note: In a full implementation, you'd want to pass clockOutTime as a parameter
-    // For now, we'll protect any overtime that extends beyond 17:00 (5:00 PM)
     console.log(`=== PROTECTING AFTERNOON OVERTIME ===`)
     console.log(`Afternoon session - protecting overtime hours from 17:00+ conversion`)
     
-    // Assuming all overtime in afternoon session is after 17:00 and should be protected
-    // This is a simplified approach - ideally you'd calculate the exact 17:00+ overtime
-    protectedOvertimeHours = overtimeHours // Protect all afternoon overtime
-    convertibleOvertimeHours = 0 // No afternoon overtime should be converted to regular
+    // Protect all afternoon overtime from conversion
+    protectedOvertimeHours = overtimeHours 
+    convertibleOvertimeHours = 0 
     
     console.log(`Protected afternoon overtime: ${protectedOvertimeHours} hours`)
     console.log(`Convertible overtime remaining: ${convertibleOvertimeHours} hours`)
@@ -312,116 +318,114 @@ function calculateContinuousHours(clockInTime, clockOutTime, startingSession) {
   const afternoonEnd = 17 * 60 // 5:00 PM
   const overtimeEnd = 22 * 60 // 10:00 PM (end of regular overtime)
   const regularGracePeriod = 5 // 5 minutes grace per hour for regular hours
-  const earlyMorningGracePeriod = 5 // Keep original 5 minutes for early morning
+  const earlyMorningGracePeriod = 60 // Keep original 5 minutes for early morning
 
   let totalRegularHours = 0
   let totalOvertimeHours = 0
 
-  // NEW ENHANCED EARLY MORNING RULE (6:00-8:00 only for overtime portion)
-  // Rule applies if: morning session + clock in between 6:00-8:00
-  const earlyMorningGraceStart = earlyMorningStart - earlyMorningGracePeriod // 5:55 AM
-  let earlyMorningOvertimeHours = 0
+// NEW ENHANCED EARLY MORNING RULE (6:00-8:00 only for overtime portion)
+// Rule applies if: morning session + clock in between 6:00-8:00
+const earlyMorningGraceStart = earlyMorningStart - earlyMorningGracePeriod // 5:55 AM
+let earlyMorningOvertimeHours = 0
 
-  if (startingSession === "morning" && clockInMinutes >= earlyMorningGraceStart && clockInMinutes < morningStart) {
-    // Must be before 8:00 AM to qualify for early morning overtime
+if (startingSession === "morning" && clockInMinutes >= earlyMorningGraceStart && clockInMinutes < morningStart) {
+  // Must be before 8:00 AM to qualify for early morning overtime
+  
+  console.log(`=== EARLY MORNING OVERTIME CALCULATION (6:00-8:00) ===`)
+  console.log(`Clock in: ${formatMinutes(clockInMinutes)} (qualifies for early morning overtime)`)
+
+  // FIXED: For clock-ins within grace period (6:00-6:05), award full 2 hours
+  if (clockInMinutes <= earlyMorningStart + regularGracePeriod) {
+    // Clock in between 5:55-6:05 AM - award full 2 hours for early morning period
+    console.log(`=== EARLY MORNING OVERTIME: On-time for 6:00 AM ===`)
+    console.log(`Clock in within 6:00 AM grace period: ${formatMinutes(clockInMinutes)} <= 6:05 AM`)
+    console.log(`Awarding full 2.0 overtime hours for entire 6:00-8:00 AM period`)
     
-    console.log(`=== EARLY MORNING OVERTIME CALCULATION (6:00-8:00) ===`)
-    console.log(`Clock in: ${formatMinutes(clockInMinutes)} (qualifies for early morning overtime)`)
+    earlyMorningOvertimeHours = 2.0 // Full 2 hours for on-time 6:00 AM arrival
+  } else {
+    // Late arrival - apply 30-minute rule for each hour, but only for time actually worked
+    console.log(`=== EARLY MORNING OVERTIME: Late arrival ===`)
+    console.log(`Clock in after 6:05 AM: ${formatMinutes(clockInMinutes)}`)
 
-    // Calculate overtime hours for the 6:00-8:00 AM period only
-    if (clockInMinutes <= earlyMorningStart + earlyMorningGracePeriod) {
-      // Up to 6:05 AM
-      console.log(`=== EARLY MORNING OVERTIME: On-time for 6:00 AM ===`)
-      console.log(`Clock in within 6:00 AM grace period: ${formatMinutes(clockInMinutes)} <= 6:05 AM`)
-      console.log(`Awarding 2 overtime hours for 6:00-8:00 AM period`)
+    // Calculate actual overtime based on time worked with 30-minute rule penalties
+    let calculatedOvertimeHours = 0
 
-      // Award 2 overtime hours for the 6:00-8:00 AM period
-      earlyMorningOvertimeHours = 2
+    // Hour 1: 6:00-7:00 AM
+    const hour1Start = 6 * 60 // 6:00 AM
+    const hour1End = 7 * 60 // 7:00 AM
+    const lateForHour1 = Math.max(0, clockInMinutes - hour1Start)
+
+    console.log(`Hour 1 (6:00-7:00): Clock in at ${formatMinutes(clockInMinutes)}, late by ${lateForHour1} minutes from 6:00 AM`)
+
+    if (clockInMinutes < hour1End) {
+      // Clocked in before 7:00 AM - check 30-minute rule for hour 1
+      if (lateForHour1 <= regularGracePeriod) {
+        // On time (within 5 min grace) - 1 full hour
+        calculatedOvertimeHours += 1
+        console.log(`Hour 1: 1.0 hour (on time - within ${regularGracePeriod} min grace)`)
+      } else if (lateForHour1 <= 30) {
+        // Late 6-30 minutes - 0.5 hours
+        calculatedOvertimeHours += 0.5
+        console.log(`Hour 1: 0.5 hours (late ${lateForHour1} min - within 30 min rule)`)
+      } else {
+        // More than 30 minutes late - VOID (0 hours)
+        console.log(`Hour 1: 0 hours (late ${lateForHour1} min - >30 min VOID)`)
+      }
     } else {
-      // Apply 30-minute rule for late early morning shifts (same as before)
-      console.log(`=== EARLY MORNING OVERTIME: Late arrival ===`)
-      console.log(`Clock in after 6:05 AM: ${formatMinutes(clockInMinutes)}`)
-
-      // Check each hour in the 6:00-8:00 AM period with 30-minute rule
-      let calculatedOvertimeHours = 0
-
-      // Hour 1: 6:00-7:00 AM
-      const hour1Start = 6 * 60 // 6:00 AM
-      const hour1End = 7 * 60 // 7:00 AM
-      const lateForHour1 = Math.max(0, clockInMinutes - hour1Start)
-
-      console.log(`Hour 1 (6:00-7:00): Late by ${lateForHour1} minutes`)
-
-      if (clockInMinutes < hour1End) {
-        // Clocked in before 7:00 AM
-        if (lateForHour1 <= 30) {
-          // Within 30-minute rule
-          if (lateForHour1 <= regularGracePeriod) {
-            calculatedOvertimeHours += 1 // On time, full hour
-            console.log(`Hour 1: 1.0 overtime hour (on time)`)
-          } else {
-            calculatedOvertimeHours += 0.5 // Late but within 30 min, half hour
-            console.log(`Hour 1: 0.5 overtime hour (late 6-30 min)`)
-          }
-        } else {
-          console.log(`Hour 1: 0 overtime hours (>30 min late - VOID)`)
-        }
-      } else {
-        console.log(`Hour 1: 0 overtime hours (missed entirely)`)
-      }
-
-      // Hour 2: 7:00-8:00 AM
-      const hour2Start = 7 * 60 // 7:00 AM
-      const hour2End = 8 * 60 // 8:00 AM
-      const lateForHour2 = Math.max(0, clockInMinutes - hour2Start)
-
-      console.log(`Hour 2 (7:00-8:00): Late by ${lateForHour2} minutes`)
-
-      if (clockInMinutes < hour2End) {
-        // Clocked in before 8:00 AM
-        if (lateForHour2 <= regularGracePeriod) {
-          calculatedOvertimeHours += 1 // On time (within 5 min grace), full hour
-          console.log(`Hour 2: 1.0 overtime hour (on time - within ${regularGracePeriod} min grace)`)
-        } else if (lateForHour2 < 30) {
-          // Less than 30 minutes
-          calculatedOvertimeHours += 0.5 // Late 6-29 min, half hour
-          console.log(`Hour 2: 0.5 overtime hour (late ${lateForHour2} min - between 6-29 min)`)
-        } else {
-          console.log(`Hour 2: 0 overtime hours (${lateForHour2} min late - >=30 min VOID)`)
-        }
-      } else {
-        console.log(`Hour 2: 0 overtime hours (missed entirely)`)
-      }
-
-      earlyMorningOvertimeHours = calculatedOvertimeHours
-      console.log(`Late early morning overtime calculation: ${calculatedOvertimeHours} overtime hours`)
+      console.log(`Hour 1: 0 hours (clocked in after 7:00 AM - missed entirely)`)
     }
 
-    totalOvertimeHours += earlyMorningOvertimeHours
-    console.log(`Early morning overtime hours added: ${earlyMorningOvertimeHours}`)
-    console.log(`=== END EARLY MORNING OVERTIME CALCULATION ===`)
+    // Hour 2: 7:00-8:00 AM
+    const hour2Start = 7 * 60 // 7:00 AM
+    const hour2End = 8 * 60 // 8:00 AM
+    const lateForHour2 = Math.max(0, clockInMinutes - hour2Start)
+
+    console.log(`Hour 2 (7:00-8:00): Clock in at ${formatMinutes(clockInMinutes)}, late by ${lateForHour2} minutes from 7:00 AM`)
+
+    if (clockInMinutes < hour2End) {
+      // Clocked in before 8:00 AM - check 30-minute rule for hour 2
+      if (lateForHour2 <= regularGracePeriod) {
+        // On time for hour 2 (within 5 min grace) - 1 full hour
+        calculatedOvertimeHours += 1
+        console.log(`Hour 2: 1.0 hour (on time - within ${regularGracePeriod} min grace)`)
+      } else if (lateForHour2 <= 30) {
+        // Late 6-30 minutes for hour 2 - 0.5 hours
+        calculatedOvertimeHours += 0.5
+        console.log(`Hour 2: 0.5 hours (late ${lateForHour2} min - within 30 min rule)`)
+      } else {
+        // More than 30 minutes late for hour 2 - VOID (0 hours)
+        console.log(`Hour 2: 0 hours (late ${lateForHour2} min - >30 min VOID)`)
+      }
+    } else {
+      console.log(`Hour 2: 0 hours (clocked in after 8:00 AM - missed entirely)`)
+    }
+
+    earlyMorningOvertimeHours = calculatedOvertimeHours
+    console.log(`Total calculated early morning overtime: ${calculatedOvertimeHours} hours`)
   }
+
+  totalOvertimeHours += earlyMorningOvertimeHours
+  console.log(`Early morning overtime hours added: ${earlyMorningOvertimeHours}`)
+  console.log(`=== END EARLY MORNING OVERTIME CALCULATION ===`)
+}
 
   // Continue with regular hours calculation for the full day
   if (startingSession === "morning") {
-    // Calculate morning hours (8:00-12:00) - regardless of early morning rule
+    // FIXED: Calculate morning hours (8:00-12:00) with proper lateness handling
     if (clockInMinutes < morningEnd && clockOutMinutes > morningStart) {
-      const morningStartTime = Math.max(clockInMinutes, morningStart)
-      const morningEndTime = Math.min(clockOutMinutes, morningEnd)
-
-      if (morningEndTime > morningStartTime) {
-        const morningHours = calculateRegularHours(
-          new Date(0, 0, 0, Math.floor(morningStartTime / 60), morningStartTime % 60),
-          new Date(0, 0, 0, Math.floor(morningEndTime / 60), morningEndTime % 60),
-          morningStart,
-          morningEnd,
-          regularGracePeriod,
-        )
-        totalRegularHours += morningHours
-        console.log(
-          `Morning hours (${formatMinutes(morningStartTime)} - ${formatMinutes(morningEndTime)}): ${morningHours}`,
-        )
-      }
+      // CRITICAL FIX: Pass the actual clock in time, not the max of clockIn and sessionStart
+      // This allows calculateRegularHours to properly apply lateness penalties
+      const morningHours = calculateRegularHours(
+        safeClockInTime, // Pass original clock in time
+        new Date(0, 0, 0, Math.floor(Math.min(clockOutMinutes, morningEnd) / 60), Math.min(clockOutMinutes, morningEnd) % 60),
+        morningStart,
+        morningEnd,
+        regularGracePeriod,
+      )
+      totalRegularHours += morningHours
+      console.log(
+        `Morning hours (${formatMinutes(clockInMinutes)} clocked in, session 8:00-12:00): ${morningHours}`,
+      )
     }
 
     // FIXED: Calculate afternoon hours (13:00-17:00) - only if clock out extends past lunch
@@ -430,6 +434,7 @@ function calculateContinuousHours(clockInTime, clockOutTime, startingSession) {
       const afternoonEndTime = Math.min(clockOutMinutes, afternoonEnd)
 
       if (afternoonEndTime > afternoonStartTime) {
+        // For afternoon in morning sessions, always use 13:00 as effective start since it's a continuation
         const afternoonHours = calculateRegularHours(
           new Date(0, 0, 0, Math.floor(afternoonStartTime / 60), afternoonStartTime % 60),
           new Date(0, 0, 0, Math.floor(afternoonEndTime / 60), afternoonEndTime % 60),
@@ -499,24 +504,20 @@ function calculateContinuousHours(clockInTime, clockOutTime, startingSession) {
       }
     }
 
-    // Calculate afternoon hours (13:00-17:00)
+    // FIXED: Calculate afternoon hours (13:00-17:00) with proper lateness handling
     if (effectiveAfternoonClockIn < afternoonEnd && clockOutMinutes > afternoonStart) {
-      const afternoonStartTime = Math.max(effectiveAfternoonClockIn, afternoonStart)
-      const afternoonEndTime = Math.min(clockOutMinutes, afternoonEnd)
-
-      if (afternoonEndTime > afternoonStartTime) {
-        const afternoonHours = calculateRegularHours(
-          new Date(0, 0, 0, Math.floor(effectiveAfternoonClockIn / 60), effectiveAfternoonClockIn % 60),
-          new Date(0, 0, 0, Math.floor(afternoonEndTime / 60), afternoonEndTime % 60),
-          afternoonStart,
-          afternoonEnd,
-          regularGracePeriod,
-        )
-        totalRegularHours += afternoonHours
-        console.log(
-          `Afternoon hours (${formatMinutes(afternoonStartTime)} - ${formatMinutes(afternoonEndTime)}): ${afternoonHours}`,
-        )
-      }
+      // CRITICAL FIX: For afternoon sessions, pass the actual clock in time to apply lateness rules
+      const afternoonHours = calculateRegularHours(
+        safeClockInTime, // Pass original clock in time for lateness calculation
+        new Date(0, 0, 0, Math.floor(Math.min(clockOutMinutes, afternoonEnd) / 60), Math.min(clockOutMinutes, afternoonEnd) % 60),
+        afternoonStart,
+        afternoonEnd,
+        regularGracePeriod,
+      )
+      totalRegularHours += afternoonHours
+      console.log(
+        `Afternoon hours (${formatMinutes(clockInMinutes)} clocked in, session 13:00-17:00): ${afternoonHours}`,
+      )
     }
 
     // Calculate regular overtime hours (17:00-22:00)
@@ -576,22 +577,21 @@ function calculateSimpleOvertimeHours(overtimeStartTime, clockOutMinutes) {
     return 0
   }
 
-  // Convert minutes to hours with 30-minute rounding
-  const exactHours = totalOvertimeMinutes / 60
-  const wholeHours = Math.floor(exactHours)
+  // FIXED: Ensure proper 30-minute rounding (round DOWN unless >= 30 minutes)
+  const wholeHours = Math.floor(totalOvertimeMinutes / 60)
   const remainingMinutes = totalOvertimeMinutes % 60
 
-  console.log(`Exact hours: ${exactHours}`)
   console.log(`Whole hours: ${wholeHours}`)
   console.log(`Remaining minutes: ${remainingMinutes}`)
 
   let finalHours = wholeHours
 
+  // 30-minute rounding rule: only round up if >= 30 minutes
   if (remainingMinutes >= 30) {
     finalHours += 0.5
-    console.log(`Added 0.5 hours for ${remainingMinutes} remaining minutes`)
+    console.log(`Added 0.5 hours for ${remainingMinutes} remaining minutes (>=30 min rule)`)
   } else if (remainingMinutes > 0) {
-    console.log(`${remainingMinutes} remaining minutes < 30 - no addition`)
+    console.log(`${remainingMinutes} remaining minutes < 30 - no addition (30-min rule)`)
   }
 
   console.log(`Final overtime hours: ${finalHours}`)
@@ -601,9 +601,9 @@ function calculateSimpleOvertimeHours(overtimeStartTime, clockOutMinutes) {
 }
 
 function calculateContinuousOvertimeHours(startMinutes, endMinutes) {
-    const totalMinutes = endMinutes - startMinutes
+  const totalMinutes = endMinutes - startMinutes
 
-  console.log(`=== EVENING OVERTIME CALCULATION WITH NEW RULE ===`)
+  console.log(`=== EVENING CONTINUOUS OVERTIME CALCULATION ===`)
   console.log(`Start: ${formatMinutes(startMinutes)} (${startMinutes} min)`)
   console.log(`End: ${formatMinutes(endMinutes)} (${endMinutes} min)`)
   console.log(`Total minutes: ${totalMinutes}`)
@@ -613,35 +613,70 @@ function calculateContinuousOvertimeHours(startMinutes, endMinutes) {
     return 0
   }
 
-  // Convert minutes to hours with NEW 25-55 minute rounding rule for evening sessions
-  const exactHours = totalMinutes / 60
-  const wholeHours = Math.floor(exactHours)
+  // FIXED: Evening continuous overtime uses special 25-44/45+ rounding rule
+  const wholeHours = Math.floor(totalMinutes / 60)
   const remainingMinutes = totalMinutes % 60
 
-  console.log(`Exact hours: ${exactHours}`)
   console.log(`Whole hours: ${wholeHours}`)
   console.log(`Remaining minutes: ${remainingMinutes}`)
 
   let finalHours = wholeHours
 
-  // NEW EVENING ROUNDING RULE:
-  // 25-55 minutes = 0.5 hours
-  // 55+ minutes = 1 hour
-  // 0-24 minutes = no addition
-  if (remainingMinutes >= 55) {
-    finalHours += 1
-    console.log(`Added 1.0 hour for ${remainingMinutes} remaining minutes (>=55 min rule)`)
+  // EVENING ROUNDING RULE: 25-44 minutes = 0.5 hours, 45+ minutes = 1.0 hour
+  if (remainingMinutes >= 45) {
+    finalHours += 1.0
+    console.log(`Added 1.0 hour for ${remainingMinutes} remaining minutes (>=45 min evening rule)`)
   } else if (remainingMinutes >= 25) {
     finalHours += 0.5
-    console.log(`Added 0.5 hours for ${remainingMinutes} remaining minutes (25-54 min rule)`)
+    console.log(`Added 0.5 hours for ${remainingMinutes} remaining minutes (25-44 min evening rule)`)
   } else if (remainingMinutes > 0) {
-    console.log(`${remainingMinutes} remaining minutes < 25 - no addition`)
+    console.log(`${remainingMinutes} remaining minutes < 25 - no addition (evening rule)`)
   }
 
-  console.log(`Final evening overtime hours: ${finalHours}`)
-  console.log(`=== END EVENING OVERTIME CALCULATION ===`)
+  console.log(`Final evening continuous overtime hours: ${finalHours}`)
+  console.log(`=== END EVENING CONTINUOUS OVERTIME CALCULATION ===`)
 
   return finalHours
+}
+
+function calculateEarlyMorningOvertimeFixed(clockInMinutes) {
+  const morningStart = 8 * 60 // 8:00 AM
+  const regularGracePeriod = 5 // 5 minutes
+  
+  // Early morning rules (6:00-8:00 AM)
+  const hour1Start = 6 * 60 // 6:00 AM
+  const hour1End = 7 * 60   // 7:00 AM
+  const hour2Start = 7 * 60 // 7:00 AM
+  const hour2End = 8 * 60   // 8:00 AM
+  
+  let totalOvertimeHours = 0
+
+  // Hour 1: 6:00-7:00 AM
+  const lateForHour1 = Math.max(0, clockInMinutes - hour1Start)
+  
+  if (clockInMinutes < hour1End) {
+    if (lateForHour1 <= regularGracePeriod) {
+      totalOvertimeHours += 1.0 // Full hour
+    } else if (lateForHour1 <= 30) {
+      totalOvertimeHours += 0.5 // Half hour
+    }
+    // > 30 minutes late = 0 hours (void)
+  }
+
+  // Hour 2: 7:00-8:00 AM
+  const lateForHour2 = Math.max(0, clockInMinutes - hour2Start)
+  
+  if (clockInMinutes < hour2End) {
+    if (lateForHour2 <= regularGracePeriod) {
+      totalOvertimeHours += 1.0 // Full hour
+    } else if (lateForHour2 <= 30) {
+      totalOvertimeHours += 0.5 // Half hour
+    }
+    // > 30 minutes late = 0 hours (void)
+  }
+
+  console.log(`Early morning overtime (fixed): ${totalOvertimeHours} hours`)
+  return totalOvertimeHours
 }
 
 
@@ -664,7 +699,7 @@ function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionE
   console.log(`- Clock in: ${formatMinutes(clockInMinutes)} -> Effective: ${formatMinutes(actualStartTime)}`)
   console.log(`- Clock out: ${formatMinutes(clockOutMinutes)} -> Effective: ${formatMinutes(actualEndTime)}`)
 
-  // Calculate total time worked in minutes, then round to nearest 30 minutes (0.5 hour)
+  // Calculate total time worked in minutes
   const totalMinutesWorked = actualEndTime - actualStartTime
   console.log(`- Total minutes worked: ${totalMinutesWorked}`)
 
@@ -675,36 +710,24 @@ function calculateRegularHours(clockInTime, clockOutTime, sessionStart, sessionE
   let finalHours = 0
 
   if (lateMinutes <= gracePeriod) {
-    // On time - give full credit for time worked, rounded up to nearest 0.5 hour
+    // On time (within grace period) - give full credit for time worked, rounded UP to nearest 0.5 hour
     finalHours = Math.ceil(totalMinutesWorked / 30) * 0.5
-    console.log(`- On time: ${totalMinutesWorked} minutes rounded up to nearest 0.5hr = ${finalHours} hours`)
-  } else if (lateMinutes <= 45) {
-    // Late but within 45-minute threshold - give time worked rounded to nearest 0.5 hour (not up)
-    finalHours = Math.round(totalMinutesWorked / 30) * 0.5
-    console.log(`- Late ${lateMinutes} min (≤45): ${totalMinutesWorked} minutes rounded to nearest 0.5hr = ${finalHours} hours`)
-  } else {
-    // More than 45 minutes late - deduct 1 hour from worked time
+    console.log(`- On time (≤${gracePeriod} min): ${totalMinutesWorked} minutes rounded UP to nearest 0.5hr = ${finalHours} hours`)
+} else if (lateMinutes <= 45) {
+  // Late but within 45-minute threshold - give time worked rounded DOWN to nearest 0.5 hour (no benefit of doubt)
+  finalHours = Math.floor(totalMinutesWorked / 30) * 0.5
+  console.log(`- Late ${lateMinutes} min (6-45 min range): ${totalMinutesWorked} minutes rounded DOWN to nearest 0.5hr = ${finalHours} hours`)
+} else {
+    // More than 45 minutes late - deduct 1 hour penalty from worked time
     const penalizedMinutes = Math.max(0, totalMinutesWorked - 60)
     finalHours = Math.round(penalizedMinutes / 30) * 0.5
-    console.log(`- Late ${lateMinutes} min (>45): ${totalMinutesWorked} - 60 penalty = ${penalizedMinutes} minutes = ${finalHours} hours`)
+    console.log(`- Late ${lateMinutes} min (>45 min): ${totalMinutesWorked} - 60 penalty = ${penalizedMinutes} minutes = ${finalHours} hours`)
   }
 
   console.log(`- Final regular hours: ${finalHours}`)
   return finalHours
 }
 
-
-
-function calculateOvertimeHours(regularEndTime, clockOutMinutes, overtimeStart, overtimeGracePeriod) {
-  // Overtime starts at overtimeStart (17:10) with grace period
-  const effectiveOvertimeStart = overtimeStart + overtimeGracePeriod // 17:15
-
-  if (clockOutMinutes <= effectiveOvertimeStart) {
-    return 0
-  }
-
-  return (clockOutMinutes - effectiveOvertimeStart) / 60
-}
 
 function calculateOvertimeSessionHours(clockInTime, clockOutTime, sessionGracePeriod) {
   // FIXED: Ensure parameters are Date objects
@@ -804,21 +827,18 @@ function calculateOriginalEveningSession(
     console.log(`- Remaining time after 18:00: ${remainingMinutes} minutes`)
 
     if (remainingMinutes > 0) {
-      // EVENING SESSION SPECIFIC RULE:
-      // 25-55 minutes = 0.5 hours
-      // 56+ minutes = 1 hour
-      // 0-24 minutes = no addition
+      // EVENING SESSION SPECIFIC RULE: 25-44 minutes = 0.5 hours, 45+ minutes = 1 hour
       const wholeHours = Math.floor(remainingMinutes / 60)
       const remainingFraction = remainingMinutes % 60
 
       let additionalHours = wholeHours
 
-      if (remainingFraction >= 56) {
+      if (remainingFraction >= 45) {
         additionalHours += 1
-        console.log(`- Added 1.0 hour for ${remainingFraction} remaining minutes (>=56 min evening rule)`)
+        console.log(`- Added 1.0 hour for ${remainingFraction} remaining minutes (>=45 min evening rule)`)
       } else if (remainingFraction >= 25) {
         additionalHours += 0.5
-        console.log(`- Added 0.5 hours for ${remainingFraction} remaining minutes (25-55 min evening rule)`)
+        console.log(`- Added 0.5 hours for ${remainingFraction} remaining minutes (25-44 min evening rule)`)
       } else if (remainingFraction > 0) {
         console.log(`- ${remainingFraction} remaining minutes < 25 - no addition (evening rule)`)
       }
@@ -1793,7 +1813,7 @@ function calculateContinuousHoursWithStats(clockInTime, clockOutTime, startingSe
   const overtimeEnd = 22 * 60 // 10:00 PM (end of regular overtime)
   const nightShiftEnd = 6 * 60 + 24 * 60 // 6:00 AM next day
   const regularGracePeriod = 5 // 5 minutes grace per hour for regular hours
-  const earlyMorningGracePeriod = 5 // Keep original 5 minutes for early morning
+  const earlyMorningGracePeriod = 60 // Keep original 5 minutes for early morning
 
   let totalRegularHours = 0
   let totalOvertimeHours = 0
@@ -1808,106 +1828,91 @@ function calculateContinuousHoursWithStats(clockInTime, clockOutTime, startingSe
   statisticsData.sessionEndMinutes = startingSession === "morning" ? morningEnd : afternoonEnd
   statisticsData.gracePeriodMinutes = regularGracePeriod
 
-  // NEW ENHANCED EARLY MORNING RULE (6:00-8:00 only for overtime portion)
-  // Rule applies if: morning session + clock in between 6:00-8:00
-  const earlyMorningGraceStart = earlyMorningStart - earlyMorningGracePeriod // 5:55 AM
-  let earlyMorningOvertimeHours = 0
+// NEW ENHANCED EARLY MORNING RULE (6:00-8:00 only for overtime portion)
+// Rule applies if: morning session + clock in between 6:00-8:00
+const earlyMorningGraceStart = earlyMorningStart - earlyMorningGracePeriod // 5:55 AM
+let earlyMorningOvertimeHours = 0
 
-  if (startingSession === "morning" && clockInMinutes >= earlyMorningGraceStart && clockInMinutes < morningStart) {
-    // Must be before 8:00 AM to qualify for early morning overtime
+if (startingSession === "morning" && clockInMinutes >= earlyMorningGraceStart && clockInMinutes < morningStart) {
+  // Must be before 8:00 AM to qualify for early morning overtime
+  
+  console.log(`=== EARLY MORNING OVERTIME CALCULATION (6:00-8:00) ===`)
+  console.log(`Clock in: ${formatMinutes(clockInMinutes)} (qualifies for early morning overtime)`)
 
-    console.log(`=== EARLY MORNING OVERTIME CALCULATION (6:00-8:00) ===`)
-    console.log(`Clock in: ${formatMinutes(clockInMinutes)} (qualifies for early morning overtime)`)
+  // FIXED: For clock-ins within grace period (6:00-6:05), award full 2 hours
+  if (clockInMinutes <= earlyMorningStart + regularGracePeriod) {
+    // Clock in between 5:55-6:05 AM - award full 2 hours for early morning period
+    console.log(`=== EARLY MORNING OVERTIME: On-time for 6:00 AM ===`)
+    console.log(`Clock in within 6:00 AM grace period: ${formatMinutes(clockInMinutes)} <= 6:05 AM`)
+    console.log(`Awarding full 2.0 overtime hours for entire 6:00-8:00 AM period`)
+    
+    earlyMorningOvertimeHours = 2.0 // Full 2 hours for on-time 6:00 AM arrival
+  } else {
+    // Late arrival - apply 30-minute rule for each hour, but only for time actually worked
+    console.log(`=== EARLY MORNING OVERTIME: Late arrival ===`)
+    console.log(`Clock in after 6:05 AM: ${formatMinutes(clockInMinutes)}`)
 
-    statisticsData.earlyMorningRuleApplied = true
-    statisticsData.specialNotes = "Early morning overtime rule applied (6:00-8:00 AM)"
+    // Calculate actual overtime based on time worked with 30-minute rule penalties
+    let calculatedOvertimeHours = 0
 
-    // Calculate overtime hours for the 6:00-8:00 AM period only
-    if (clockInMinutes <= earlyMorningStart + earlyMorningGracePeriod) {
-      // Up to 6:05 AM
-      console.log(`=== EARLY MORNING OVERTIME: On-time for 6:00 AM ===`)
-      console.log(`Clock in within 6:00 AM grace period: ${formatMinutes(clockInMinutes)} <= 6:05 AM`)
-      console.log(`Awarding 2 overtime hours for 6:00-8:00 AM period`)
+    // Hour 1: 6:00-7:00 AM
+    const hour1Start = 6 * 60 // 6:00 AM
+    const hour1End = 7 * 60 // 7:00 AM
+    const lateForHour1 = Math.max(0, clockInMinutes - hour1Start)
 
-      // Award 2 overtime hours for the 6:00-8:00 AM period
-      earlyMorningOvertimeHours = 2
-      statisticsData.gracePeriodApplied = true
+    console.log(`Hour 1 (6:00-7:00): Clock in at ${formatMinutes(clockInMinutes)}, late by ${lateForHour1} minutes from 6:00 AM`)
+
+    if (clockInMinutes < hour1End) {
+      // Clocked in before 7:00 AM - check 30-minute rule for hour 1
+      if (lateForHour1 <= regularGracePeriod) {
+        // On time (within 5 min grace) - 1 full hour
+        calculatedOvertimeHours += 1
+        console.log(`Hour 1: 1.0 hour (on time - within ${regularGracePeriod} min grace)`)
+      } else if (lateForHour1 <= 30) {
+        // Late 6-30 minutes - 0.5 hours
+        calculatedOvertimeHours += 0.5
+        console.log(`Hour 1: 0.5 hours (late ${lateForHour1} min - within 30 min rule)`)
+      } else {
+        // More than 30 minutes late - VOID (0 hours)
+        console.log(`Hour 1: 0 hours (late ${lateForHour1} min - >30 min VOID)`)
+      }
     } else {
-      // Apply 30-minute rule for late early morning shifts (same as before)
-      console.log(`=== EARLY MORNING OVERTIME: Late arrival ===`)
-      console.log(`Clock in after 6:05 AM: ${formatMinutes(clockInMinutes)}`)
-
-      // Check each hour in the 6:00-8:00 AM period with 30-minute rule
-      let calculatedOvertimeHours = 0
-      let hour1OvertimeHours = 0
-      let hour2OvertimeHours = 0
-
-      // Hour 1: 6:00-7:00 AM
-      const hour1Start = 6 * 60 // 6:00 AM
-      const hour1End = 7 * 60 // 7:00 AM
-      const lateForHour1 = Math.max(0, clockInMinutes - hour1Start)
-
-      console.log(`Hour 1 (6:00-7:00): Late by ${lateForHour1} minutes`)
-
-      if (clockInMinutes < hour1End) {
-        // Clocked in before 7:00 AM
-        if (lateForHour1 <= 30) {
-          // Within 30-minute rule
-          if (lateForHour1 <= regularGracePeriod) {
-            hour1OvertimeHours = 1 // On time, full hour
-            console.log(`Hour 1: 1.0 overtime hour (on time)`)
-          } else {
-            hour1OvertimeHours = 0.5 // Late but within 30 min, half hour
-            console.log(`Hour 1: 0.5 overtime hour (late 6-30 min)`)
-          }
-        } else {
-          console.log(`Hour 1: 0 overtime hours (>30 min late - VOID)`)
-        }
-      } else {
-        console.log(`Hour 1: 0 overtime hours (missed entirely)`)
-      }
-
-      calculatedOvertimeHours += hour1OvertimeHours
-
-      // Hour 2: 7:00-8:00 AM
-      const hour2Start = 7 * 60 // 7:00 AM
-      const hour2End = 8 * 60 // 8:00 AM
-      const lateForHour2 = Math.max(0, clockInMinutes - hour2Start)
-
-      console.log(`Hour 2 (7:00-8:00): Late by ${lateForHour2} minutes`)
-
-      if (clockInMinutes < hour2End) {
-        // Clocked in before 8:00 AM
-        if (lateForHour2 <= regularGracePeriod) {
-          hour2OvertimeHours = 1 // On time (within 5 min grace), full hour
-          console.log(`Hour 2: 1.0 overtime hour (on time - within ${regularGracePeriod} min grace)`)
-        } else if (lateForHour2 < 30) {
-          // Less than 30 minutes
-          hour2OvertimeHours = 0.5 // Late 6-29 min, half hour
-          console.log(`Hour 2: 0.5 overtime hour (late ${lateForHour2} min - between 6-29 min)`)
-        } else {
-          console.log(`Hour 2: 0 overtime hours (${lateForHour2} min late - >=30 min VOID)`)
-        }
-      } else {
-        console.log(`Hour 2: 0 overtime hours (missed entirely)`)
-      }
-
-      calculatedOvertimeHours += hour2OvertimeHours
-      earlyMorningOvertimeHours = calculatedOvertimeHours
-
-      // Update statistics for detailed breakdown
-      statisticsData.earlyMorningHour1Hours = hour1OvertimeHours
-      statisticsData.earlyMorningHour2Hours = hour2OvertimeHours
-      statisticsData.lateArrivalMinutes = Math.max(lateForHour1, 0)
-
-      console.log(`Late early morning overtime calculation: ${calculatedOvertimeHours} overtime hours`)
+      console.log(`Hour 1: 0 hours (clocked in after 7:00 AM - missed entirely)`)
     }
 
-    totalOvertimeHours += earlyMorningOvertimeHours
-    statisticsData.earlyArrivalOvertimeHours = earlyMorningOvertimeHours
-    console.log(`Early morning overtime hours added: ${earlyMorningOvertimeHours}`)
-    console.log(`=== END EARLY MORNING OVERTIME CALCULATION ===`)
+    // Hour 2: 7:00-8:00 AM
+    const hour2Start = 7 * 60 // 7:00 AM
+    const hour2End = 8 * 60 // 8:00 AM
+    const lateForHour2 = Math.max(0, clockInMinutes - hour2Start)
+
+    console.log(`Hour 2 (7:00-8:00): Clock in at ${formatMinutes(clockInMinutes)}, late by ${lateForHour2} minutes from 7:00 AM`)
+
+    if (clockInMinutes < hour2End) {
+      // Clocked in before 8:00 AM - check 30-minute rule for hour 2
+      if (lateForHour2 <= regularGracePeriod) {
+        // On time for hour 2 (within 5 min grace) - 1 full hour
+        calculatedOvertimeHours += 1
+        console.log(`Hour 2: 1.0 hour (on time - within ${regularGracePeriod} min grace)`)
+      } else if (lateForHour2 <= 30) {
+        // Late 6-30 minutes for hour 2 - 0.5 hours
+        calculatedOvertimeHours += 0.5
+        console.log(`Hour 2: 0.5 hours (late ${lateForHour2} min - within 30 min rule)`)
+      } else {
+        // More than 30 minutes late for hour 2 - VOID (0 hours)
+        console.log(`Hour 2: 0 hours (late ${lateForHour2} min - >30 min VOID)`)
+      }
+    } else {
+      console.log(`Hour 2: 0 hours (clocked in after 8:00 AM - missed entirely)`)
+    }
+
+    earlyMorningOvertimeHours = calculatedOvertimeHours
+    console.log(`Total calculated early morning overtime: ${calculatedOvertimeHours} hours`)
   }
+
+  totalOvertimeHours += earlyMorningOvertimeHours
+  console.log(`Early morning overtime hours added: ${earlyMorningOvertimeHours}`)
+  console.log(`=== END EARLY MORNING OVERTIME CALCULATION ===`)
+}
 
   // Continue with regular hours calculation for the full day
   if (startingSession === "morning") {
