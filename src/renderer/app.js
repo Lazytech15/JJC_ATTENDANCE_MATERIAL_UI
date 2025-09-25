@@ -8,12 +8,6 @@ class AttendanceApp {
     this.barcodeTimeout = null; // Add timeout for barcode handling
     this.autoSyncInterval = null; // Auto-sync interval
     this.summaryAutoSyncInterval = null; // Summary auto-sync interval
-
-    // NEW: Add scanning queue management
-    this.scanQueue = [];
-    this.isProcessingScan = false;
-    this.maxQueueSize = 10; // Prevent memory issues
-
     this.syncSettings = {
       enabled: true,
       interval: 5 * 60 * 1000, // Default 5 minutes
@@ -892,13 +886,22 @@ class AttendanceApp {
     const settingsForm = document.getElementById("settingsForm");
     const syncNowBtn = document.getElementById("syncNowBtn");
 
+    let canScan = true;
 
-barcodeInput.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    this.handleScan(); // This now adds to queue instead of processing immediately
-  }
-});
+    barcodeInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+
+        if (canScan) {
+          canScan = false;
+          this.handleScan();
+
+          setTimeout(() => {
+            canScan = true;
+          }, 1500);
+        }
+      }
+    });
 
     barcodeInput.addEventListener("input", (e) => {
       const inputType = document.querySelector(
@@ -1384,7 +1387,6 @@ barcodeInput.addEventListener("keypress", (e) => {
 
   connectWebSocket() {
     try {
-
       this.ws = new WebSocket("ws://localhost:8080");
 
       this.ws.onopen = () => {
@@ -1489,221 +1491,91 @@ barcodeInput.addEventListener("keypress", (e) => {
   }
 
   async handleScan() {
-  // Clear any pending timeouts
-  if (this.barcodeTimeout) {
-    clearTimeout(this.barcodeTimeout);
-  }
-
-  const input = document.getElementById("barcodeInput").value.trim();
-  const inputType = document.querySelector(
-    'input[name="inputType"]:checked'
-  ).value;
-
-  console.log(input);
-
-  if (!input) {
-    this.showStatus("Please enter a barcode or ID number", "error");
-    this.focusInput();
-    return;
-  }
-
-  // Check for duplicate scan
-  if (this.isDuplicateScan(input)) {
-    this.showStatus(
-      "Duplicate scan detected - please wait before scanning again",
-      "warning"
-    );
-    this.focusInput();
-    return;
-  }
-
-  // Add to queue instead of processing immediately
-  this.addToScanQueue(input, inputType);
-}
-
-addToScanQueue(input, inputType) {
-  // Prevent queue overflow
-  if (this.scanQueue.length >= this.maxQueueSize) {
-    this.showStatus("Too many rapid scans - please wait", "warning");
-    this.clearInput();
-    return;
-  }
-
-  // Check if this input is already in the queue
-  const alreadyInQueue = this.scanQueue.some(item => item.input === input);
-  if (alreadyInQueue) {
-    this.showStatus("Scan already in queue - please wait", "info");
-    this.clearInput();
-    return;
-  }
-
-  // Add to queue with timestamp
-  this.scanQueue.push({
-    input,
-    inputType,
-    timestamp: Date.now(),
-    id: `scan-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-  });
-
-  // Update last scan data for duplicate prevention
-  this.updateLastScanData(input);
-  
-  // Clear input immediately
-  this.clearInput();
-
-  // Show queue status
-  this.showQueueStatus();
-
-  // Start processing if not already processing
-  if (!this.isProcessingScan) {
-    this.processNextScan();
-  }
-}
-
-async processNextScan() {
-  if (this.isProcessingScan || this.scanQueue.length === 0) {
-    return;
-  }
-
-  this.isProcessingScan = true;
-
-  try {
-    while (this.scanQueue.length > 0) {
-      const scanData = this.scanQueue.shift(); // Remove from front of queue
-      
-      // Show which scan is being processed
-      this.showStatus(
-        `Processing scan ${this.scanQueue.length + 1} of ${this.scanQueue.length + 1}...`,
-        "info"
-      );
-
-      await this.processSingleScan(scanData);
-      
-      // Small delay between scans to prevent overwhelming the system
-      await new Promise(resolve => setTimeout(resolve, 500));
+    // Clear any pending timeouts
+    if (this.barcodeTimeout) {
+      clearTimeout(this.barcodeTimeout);
     }
-  } catch (error) {
-    console.error("Error processing scan queue:", error);
-    this.showStatus("Error processing scans", "error");
-  } finally {
-    this.isProcessingScan = false;
-    this.hideQueueStatus();
-    this.focusInput();
-  }
-}
 
-async processSingleScan(scanData) {
-  const { input, inputType, timestamp } = scanData;
-  
-  // Check if scan is too old (optional - remove stale scans)
-  const maxAge = 30000; // 30 seconds
-  if (Date.now() - timestamp > maxAge) {
-    console.log(`Skipping stale scan: ${input}`);
-    return;
-  }
+    const input = document.getElementById("barcodeInput").value.trim();
+    const inputType = document.querySelector(
+      'input[name="inputType"]:checked'
+    ).value;
 
-  // Show loading screen for this specific scan
-  this.showLoadingScreen();
-  
-  // Disable input during processing
-  const barcodeInput = document.getElementById("barcodeInput");
-  const submitButton = document.getElementById("manualSubmit");
-  const originalText = submitButton.textContent;
+    if (!input) {
+      this.showStatus("Please enter a barcode or ID number", "error");
+      this.focusInput();
+      return;
+    }
 
-  barcodeInput.disabled = true;
-  submitButton.textContent = "Processing...";
-  submitButton.disabled = true;
-
-  try {
-    console.log(`Processing scan: ${input} (type: ${inputType})`);
-    
-    const result = await this.electronAPI.clockAttendance({
-      input: input,
-      inputType: inputType,
-    });
-
-    if (result.success) {
-      // Wait for loading screen (minimum 0.5 seconds)
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      this.hideLoadingScreen();
-      this.showEmployeeDisplay(result.data);
-      await this.loadTodayAttendance();
+    // Check for duplicate scan
+    if (this.isDuplicateScan(input)) {
       this.showStatus(
-        `✅ Attendance recorded for ${result.data.employee.first_name} ${result.data.employee.last_name}`,
-        "success"
+        "Duplicate scan detected - please wait before scanning again",
+        "warning"
       );
+      this.focusInput();
+      return;
+    }
 
-      // Mark summary data as changed
-      this.markSummaryDataChanged();
+    // Update last scan data to prevent duplicates
+    this.updateLastScanData(input);
 
-      // Trigger automatic sync after successful attendance recording
-      setTimeout(() => {
-        this.performAttendanceSync(true); // Silent sync
-      }, 3000);
-      
-    } else {
-      // Wait for loading screen (minimum 2 seconds)
+    // Show 2-second loading screen
+    this.showLoadingScreen();
+
+    // Disable input and button during processing
+    const barcodeInput = document.getElementById("barcodeInput");
+    const submitButton = document.getElementById("manualSubmit");
+    const originalText = submitButton.textContent;
+
+    barcodeInput.disabled = true;
+    submitButton.textContent = "Processing...";
+    submitButton.disabled = true;
+
+    try {
+      const result = await this.electronAPI.clockAttendance({
+        input: input,
+        inputType: inputType,
+      });
+
+      if (result.success) {
+        // Wait for loading screen (0.5 seconds minimum)
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        this.hideLoadingScreen();
+        this.showEmployeeDisplay(result.data);
+        this.clearInput();
+        await this.loadTodayAttendance();
+        this.showStatus("Attendance recorded successfully", "success");
+
+        // NEW: Mark summary data as changed since new attendance affects summary
+        this.markSummaryDataChanged();
+
+        // Trigger automatic sync after successful attendance recording
+        setTimeout(() => {
+          this.performAttendanceSync(true); // Silent sync
+        }, 3000);
+      } else {
+        // Wait for loading screen (2 seconds minimum)
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        this.hideLoadingScreen();
+        this.showStatus(result.error || "Employee not found", "error");
+        this.focusInput();
+      }
+    } catch (error) {
+      console.error("Clock error:", error);
+      // Wait for loading screen (2 seconds minimum)
       await new Promise((resolve) => setTimeout(resolve, 2000));
       this.hideLoadingScreen();
-      this.showStatus(
-        `❌ ${result.error || "Employee not found"} (ID: ${input})`,
-        "error"
-      );
-    }
-  } catch (error) {
-    console.error("Clock error:", error);
-    // Wait for loading screen (minimum 2 seconds)
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    this.hideLoadingScreen();
-    this.showStatus(`❌ System error for ID: ${input}`, "error");
-  } finally {
-    // Restore input and button
-    barcodeInput.disabled = false;
-    submitButton.textContent = originalText;
-    submitButton.disabled = false;
-  }
-}
-
-showQueueStatus() {
-  let queueStatus = document.getElementById("queueStatus");
-  
-  if (!queueStatus) {
-    queueStatus = document.createElement("div");
-    queueStatus.id = "queueStatus";
-    queueStatus.className = "queue-status";
-    
-    // Insert after the barcode input section
-    const inputSection = document.querySelector(".barcode-section") || 
-                         document.querySelector(".input-section") ||
-                         document.getElementById("barcodeInput").parentElement;
-    
-    if (inputSection && inputSection.parentElement) {
-      inputSection.parentElement.insertBefore(queueStatus, inputSection.nextSibling);
-    } else {
-      document.body.appendChild(queueStatus);
+      this.showStatus("System error occurred", "error");
+      this.focusInput();
+    } finally {
+      // Restore input and button
+      barcodeInput.disabled = false;
+      submitButton.textContent = originalText;
+      submitButton.disabled = false;
     }
   }
-
-  if (this.scanQueue.length > 0) {
-    queueStatus.innerHTML = `
-      <div class="queue-indicator">
-        📋 <strong>${this.scanQueue.length}</strong> scan${this.scanQueue.length !== 1 ? 's' : ''} in queue
-        ${this.isProcessingScan ? '<span class="processing">⚡ Processing...</span>' : ''}
-      </div>
-    `;
-    queueStatus.style.display = "block";
-  } else {
-    queueStatus.style.display = "none";
-  }
-}
-
-hideQueueStatus() {
-  const queueStatus = document.getElementById("queueStatus");
-  if (queueStatus) {
-    queueStatus.style.display = "none";
-  }
-}
 
  async setupImageWithFallback(imgElement, employee_uid, altText) {
   if (!imgElement || !employee_uid) return
@@ -2566,42 +2438,33 @@ setTimeout(() => {
     }, 4000);
   }
 
+  // Clean up when app is being destroyed
   destroy() {
-  this.stopAutoSync();
+    this.stopAutoSync();
 
-  // Clear scan queue
-  this.scanQueue = [];
-  this.isProcessingScan = false;
+    if (this.employeeDisplayTimeout) {
+      clearTimeout(this.employeeDisplayTimeout);
+    }
 
-  if (this.employeeDisplayTimeout) {
-    clearTimeout(this.employeeDisplayTimeout);
+    if (this.barcodeTimeout) {
+      clearTimeout(this.barcodeTimeout);
+    }
+
+    if (this.ws) {
+      this.ws.close();
+    }
+
+    // Clean up image load attempts
+    this.imageLoadAttempts.clear();
+
+    // Clean up download toast
+    const downloadToast = document.getElementById("downloadToast");
+    if (downloadToast && downloadToast.hideTimeout) {
+      clearTimeout(downloadToast.hideTimeout);
+    }
+
+    console.log("AttendanceApp destroyed and cleaned up");
   }
-
-  if (this.barcodeTimeout) {
-    clearTimeout(this.barcodeTimeout);
-  }
-
-  if (this.ws) {
-    this.ws.close();
-  }
-
-  // Clean up image load attempts
-  this.imageLoadAttempts.clear();
-
-  // Clean up download toast
-  const downloadToast = document.getElementById("downloadToast");
-  if (downloadToast && downloadToast.hideTimeout) {
-    clearTimeout(downloadToast.hideTimeout);
-  }
-
-  // Clean up queue status
-  const queueStatus = document.getElementById("queueStatus");
-  if (queueStatus) {
-    queueStatus.remove();
-  }
-
-  console.log("AttendanceApp destroyed and cleaned up");
-}
 }
 
 // Initialize app when DOM is loaded
