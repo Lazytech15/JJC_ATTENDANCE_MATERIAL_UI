@@ -16,7 +16,6 @@ const {
 const { broadcastUpdate } = require("../../services/websocket")
 const profileService = require("../../services/profileService")
 const dateService = require("../../services/dateService")
-const settingsRoutes = require("./settings")
 
 // Enhanced clockAttendance function with daily summary updates
 async function clockAttendance(event, { input, inputType = "barcode" }) {
