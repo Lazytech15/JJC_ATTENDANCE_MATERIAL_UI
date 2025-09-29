@@ -1,7 +1,10 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog } = require("electron")
+
+const { app, BrowserWindow, ipcMain, Menu, dialog, systemPreferences } = require("electron")
 const path = require("path")
 const fs = require("fs")
 const { autoUpdater } = require("electron-updater")
+const LRU = require('lru-cache')
+const { getDatabase  } = require("./database/setup");
 
 // Configure auto-updater
 autoUpdater.autoDownload = false
@@ -25,6 +28,520 @@ let mainWindow
 let settingsWindow
 let webExportServer
 let updateDownloadStarted = false
+
+let profileCache
+let imageCache
+let rendererCache
+let dbInstance = null
+
+function initializeCaches() {
+  console.log("=== INITIALIZING PERFORMANCE CACHES ===");
+  
+  try {
+    
+    profileCache = new LRU({
+      max: 500, // Maximum 500 cached profiles
+      maxSize: 5000000, // 5MB max memory usage
+      sizeCalculation: (value, key) => {
+        try {
+          return JSON.stringify(value).length;
+        } catch (error) {
+          return 1000; // Fallback size estimate
+        }
+      },
+      ttl: 1000 * 60 * 30, // 30 minutes TTL
+      allowStale: false,
+      updateAgeOnGet: true,
+      dispose: (value, key, reason) => {
+        console.log(`Profile cache disposed: ${key} (${reason})`);
+      }
+    });
+    
+    imageCache = new LRU({
+      max: 200, // Maximum 200 cached images  
+      maxSize: 20000000, // 20MB max for images
+      sizeCalculation: (value, key) => {
+        try {
+          if (typeof value === 'string') {
+            return value.length;
+          }
+          if (Buffer.isBuffer(value)) {
+            return value.length;
+          }
+          return 1000; // Fallback size estimate
+        } catch (error) {
+          return 1000;
+        }
+      },
+      ttl: 1000 * 60 * 60, // 1 hour TTL for images
+      allowStale: false,
+      updateAgeOnGet: true,
+      dispose: (value, key, reason) => {
+        console.log(`Image cache disposed: ${key} (${reason})`);
+      }
+    });
+    
+    rendererCache = new Map();
+    
+    console.log("✓ CACHES INITIALIZED SUCCESSFULLY");
+    console.log(`Profile cache config: max=${profileCache.max}, maxSize=${profileCache.maxSize}`);
+    console.log(`Image cache config: max=${imageCache.max}, maxSize=${imageCache.maxSize}`);
+    
+    return true;
+  } catch (error) {
+    console.error("❌ Cache initialization failed:", error);
+    // Fallback to regular Maps if LRU fails
+    profileCache = new Map();
+    imageCache = new Map(); 
+    rendererCache = new Map();
+    console.log("Fallback to Map-based caches");
+    return false;
+  }
+}
+
+// Database optimization function
+async function optimizeDatabase(db) {
+  if (!db) return
+  
+  console.log("Applying database optimizations...")
+  
+  try {
+    // SQLite performance pragmas
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('cache_size = 50000')
+    db.pragma('temp_store = MEMORY')
+    db.pragma('mmap_size = 67108864') // 64MB memory mapping
+    
+    // Create performance indexes
+    const indexes = [
+      "CREATE INDEX IF NOT EXISTS idx_barcode ON employees(uid)",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_barcode ON attendance(employee_uid)",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_timestamp ON attendance(timestamp)",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_sync ON attendance(synced)",
+      "CREATE INDEX IF NOT EXISTS idx_barcode_active ON employees(uid, status) WHERE status = 1",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_today ON attendance(employee_uid, date) WHERE date = date('now')"
+    ]
+    
+    for (const indexSQL of indexes) {
+      try {
+        db.exec(indexSQL)
+      } catch (error) {
+        console.warn("Index creation warning:", error.message)
+      }
+    }
+    
+    console.log("✓ Database optimizations applied")
+  } catch (error) {
+    console.error("Database optimization error:", error)
+  }
+}
+
+async function loadProfileWithCache(barcode) {
+  if (!barcode) {
+    console.warn("loadProfileWithCache: No barcode provided");
+    return null;
+  }
+
+  const cacheKey = `profile_${barcode}`;
+  
+  // Check cache first
+  if (profileCache && profileCache.has && profileCache.has(cacheKey)) {
+    console.log(`✓ Cache hit for profile: ${barcode}`);
+    const cached = profileCache.get(cacheKey);
+    
+    // Validate cached data
+    if (cached && typeof cached === 'object' && cached.uid) {
+      return cached;
+    } else {
+      console.warn(`Invalid cached data for ${barcode}, removing from cache`);
+      profileCache.delete(cacheKey);
+    }
+  }
+  
+  try {
+    // Ensure database is available
+    if (!dbInstance) {
+      console.log("Database not available, attempting to initialize...");
+      const modules = await loadModules();
+      if (modules.setupDatabase) {
+        dbInstance = await modules.setupDatabase();
+      }
+      
+      if (!dbInstance) {
+        dbInstance = getDatabase();
+      }
+      
+      if (!dbInstance) {
+        console.error("Failed to get database instance for profile loading");
+        return null;
+      }
+    }
+    
+    // Load from database
+    const profile = await getProfileFromDB(barcode);
+    if (!profile || !profile.uid) {
+      console.log(`No profile found for barcode: ${barcode}`);
+      return null;
+    }
+    
+    console.log(`Loading profile from DB: ${barcode}`);
+    
+    // Load image if exists
+    let imageBase64 = null;
+    const imageCacheKey = `image_${barcode}`;
+    
+    // Check image cache first
+    if (imageCache && imageCache.has && imageCache.has(imageCacheKey)) {
+      imageBase64 = imageCache.get(imageCacheKey);
+      console.log(`Image cache hit for: ${barcode}`);
+    } else if (profile.imagePath) {
+      try {
+        const imagePath = getResourcePath(path.join("profiles", profile.imagePath));
+        console.log(`Loading image from: ${imagePath}`);
+        
+        if (fs.existsSync(imagePath)) {
+          const stats = fs.statSync(imagePath);
+          if (stats.size > 0) {
+            const imageBuffer = fs.readFileSync(imagePath);
+            imageBase64 = imageBuffer.toString('base64');
+            
+            // Cache the image
+            if (imageCache && imageCache.set) {
+              imageCache.set(imageCacheKey, imageBase64);
+              console.log(`✓ Image cached for: ${barcode} (${stats.size} bytes)`);
+            }
+          } else {
+            console.warn(`Image file is empty: ${imagePath}`);
+          }
+        } else {
+          console.log(`Image file not found: ${imagePath}`);
+        }
+      } catch (error) {
+        console.warn(`Image load error for ${barcode}:`, error.message);
+      }
+    }
+    
+    const result = {
+      ...profile,
+      image: imageBase64,
+      cached_at: new Date().toISOString(),
+      cache_source: 'database'
+    };
+    
+    // Cache the complete profile
+    if (profileCache && profileCache.set) {
+      profileCache.set(cacheKey, result);
+      console.log(`✓ Profile cached: ${barcode}`);
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error(`Error loading profile ${barcode}:`, error);
+    return null;
+  }
+}
+
+async function preloadFrequentProfiles(database = null) {
+  const db = database || (dbInstance ? dbInstance : getDatabase());
+  
+  if (!db) {
+    console.warn("No database instance available for preloading profiles");
+    return;
+  }
+  
+  console.log("Preloading frequent profiles...");
+  
+  try {
+    // Check if tables exist
+    const tables = db.prepare(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' AND name IN ('attendance', 'employees')
+    `).all();
+    
+    const hasAttendance = tables.some(t => t.name === 'attendance')
+    const hasEmployees = tables.some(t => t.name === 'employees')
+    
+    console.log(`Available tables: ${tables.map(t => t.name).join(', ')}`)
+    
+    if (!hasEmployees) {
+      console.warn("Employees table not found, skipping profile preloading");
+      return;
+    }
+    
+    let frequentProfiles = [];
+    
+    if (hasAttendance) {
+      // Try to get recent/frequent employees from attendance
+      const attendanceColumns = db.prepare(`PRAGMA table_info(attendance)`).all();
+      const attendanceColumnNames = attendanceColumns.map(col => col.name);
+      console.log("Attendance columns:", attendanceColumnNames);
+      
+      // Build query based on available columns
+      let attendanceQuery = null;
+      
+      if (attendanceColumnNames.includes('employee_uid') && attendanceColumnNames.includes('timestamp')) {
+        attendanceQuery = `
+          SELECT employee_uid, COUNT(*) as scan_count 
+          FROM attendance 
+          WHERE datetime(timestamp) >= datetime('now', '-7 days')
+          GROUP BY employee_uid 
+          ORDER BY scan_count DESC, MAX(timestamp) DESC
+          LIMIT 50
+        `;
+      } else if (attendanceColumnNames.includes('employee_uid') && attendanceColumnNames.includes('date')) {
+        attendanceQuery = `
+          SELECT employee_uid, COUNT(*) as scan_count 
+          FROM attendance 
+          WHERE date >= date('now', '-7 days')
+          GROUP BY employee_uid 
+          ORDER BY scan_count DESC
+          LIMIT 50
+        `;
+      } else if (attendanceColumnNames.includes('uid')) {
+        attendanceQuery = `
+          SELECT uid as employee_uid, COUNT(*) as scan_count 
+          FROM attendance 
+          WHERE datetime(timestamp) >= datetime('now', '-7 days')
+          GROUP BY uid 
+          ORDER BY scan_count DESC
+          LIMIT 50
+        `;
+      }
+      
+      if (attendanceQuery) {
+        try {
+          frequentProfiles = db.prepare(attendanceQuery).all();
+          console.log(`Found ${frequentProfiles.length} frequent profiles from attendance`)
+        } catch (queryError) {
+          console.warn("Attendance query failed:", queryError.message)
+        }
+      }
+    }
+    
+    // Fallback: get active employees if no attendance data
+    if (frequentProfiles.length === 0) {
+      console.log("No frequent profiles from attendance, loading active employees...");
+      
+      const employeeColumns = db.prepare(`PRAGMA table_info(employees)`).all();
+      const employeeColumnNames = employeeColumns.map(col => col.name);
+      console.log("Employee columns:", employeeColumnNames);
+      
+      let employeeQuery = `SELECT uid as employee_uid FROM employees`;
+      
+      if (employeeColumnNames.includes('status')) {
+        employeeQuery += ` WHERE status = 1`;
+      }
+      
+      if (employeeColumnNames.includes('last_accessed')) {
+        employeeQuery += ` ORDER BY last_accessed DESC`;
+      } else if (employeeColumnNames.includes('created_at')) {
+        employeeQuery += ` ORDER BY created_at DESC`;
+      }
+      
+      employeeQuery += ` LIMIT 30`;
+      
+      try {
+        frequentProfiles = db.prepare(employeeQuery).all().map(emp => ({
+          employee_uid: emp.employee_uid,
+          scan_count: 1
+        }));
+        console.log(`Found ${frequentProfiles.length} active employees for preloading`)
+      } catch (queryError) {
+        console.error("Employee query failed:", queryError.message)
+        return;
+      }
+    }
+    
+    if (frequentProfiles.length === 0) {
+      console.log("No profiles available for preloading");
+      return;
+    }
+    
+    console.log(`Starting preload of ${frequentProfiles.length} profiles`);
+    
+    // Preload in background with better error tracking
+    setTimeout(async () => {
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+      
+      for (const { employee_uid } of frequentProfiles) {
+        if (!employee_uid) {
+          errorCount++;
+          continue;
+        }
+        
+        try {
+          const profile = await loadProfileWithCache(employee_uid);
+          if (profile) {
+            successCount++;
+          } else {
+            errorCount++;
+            errors.push(`No profile data for ${employee_uid}`);
+          }
+        } catch (error) {
+          errorCount++;
+          errors.push(`${employee_uid}: ${error.message}`);
+        }
+        
+        // Small delay to prevent overwhelming the system
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      console.log(`✓ Profile preloading complete - Success: ${successCount}, Errors: ${errorCount}`);
+      
+      if (errors.length > 0 && errors.length <= 10) {
+        console.log("Preload errors:", errors);
+      } else if (errors.length > 10) {
+        console.log(`${errors.length} preload errors (showing first 5):`, errors.slice(0, 5));
+      }
+    }, 1000);
+    
+  } catch (error) {
+    console.error("Profile preloading error:", error);
+  }
+}
+
+// Updated database setup function to properly initialize dbInstance
+async function initializeDatabaseAndCaches() {
+  try {
+    console.log("Initializing database and caches...");
+    
+    // Initialize caches first
+    initializeCaches();
+    
+    // Load and setup database
+    const modules = await loadModules();
+    if (modules.setupDatabase) {
+      dbInstance = await modules.setupDatabase();
+      
+      if (dbInstance) {
+        console.log("Database instance created successfully");
+        
+        // Apply database optimizations
+        await optimizeDatabase(dbInstance);
+        
+        // Start profile preloading after database is ready
+        setTimeout(() => {
+          preloadFrequentProfiles(dbInstance);
+        }, 1000);
+      } else {
+        console.warn("Database setup did not return a database instance");
+      }
+    }
+    
+    return dbInstance;
+  } catch (error) {
+    console.error("Database and cache initialization failed:", error);
+    return null;
+  }
+}
+
+// Cache management functions
+function clearExpiredCaches() {
+  if (profileCache) {
+    const beforeSize = profileCache.size
+    profileCache.purgeStale()
+    console.log(`Cleared ${beforeSize - profileCache.size} expired profile cache entries`)
+  }
+  
+  if (imageCache) {
+    const beforeSize = imageCache.size
+    imageCache.purgeStale()
+    console.log(`Cleared ${beforeSize - imageCache.size} expired image cache entries`)
+  }
+}
+
+function getCacheStatistics() {
+  try {
+    const stats = {
+      profileCache: {
+        size: profileCache && profileCache.size ? profileCache.size : 0,
+        max: profileCache && profileCache.max ? profileCache.max : 0,
+        hits: profileCache && profileCache.calculatedSize ? profileCache.calculatedSize : 0
+      },
+      imageCache: {
+        size: imageCache && imageCache.size ? imageCache.size : 0,
+        max: imageCache && imageCache.max ? imageCache.max : 0,
+        hits: imageCache && imageCache.calculatedSize ? imageCache.calculatedSize : 0
+      },
+      rendererCache: {
+        size: rendererCache ? rendererCache.size : 0
+      }
+    };
+    
+    console.log("Cache statistics:", stats);
+    return stats;
+  } catch (error) {
+    console.error("Error getting cache statistics:", error);
+    return {
+      profileCache: { size: 0, max: 0, hits: 0 },
+      imageCache: { size: 0, max: 0, hits: 0 },
+      rendererCache: { size: 0 }
+    };
+  }
+}
+
+// Enhanced IPC handlers with caching
+function registerCacheIpcHandlers() {
+  console.log("Registering cache IPC handlers...")
+  
+  // Fast profile lookup with cache
+  ipcMain.handle("get-profile-fast", async (event, barcode) => {
+    try {
+      const profile = await loadProfileWithCache(barcode)
+      return {
+        success: true,
+        data: profile,
+        cached: profileCache.has(`profile_${barcode}`)
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+  
+  // Cache management
+  ipcMain.handle("clear-profile-cache", async () => {
+    try {
+      profileCache.clear()
+      imageCache.clear()
+      rendererCache.clear()
+      
+      return {
+        success: true,
+        message: "All caches cleared"
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+  
+  // Get cache statistics
+  ipcMain.handle("get-cache-stats", async () => {
+    try {
+      return {
+        success: true,
+        data: getCacheStatistics()
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+  
+  console.log("✓ Cache IPC handlers registered")
+}
 
 // Auto-updater configuration and event handlers
 function setupAutoUpdater() {
@@ -77,7 +594,6 @@ function setupAutoUpdater() {
 
     dialog.showMessageBox(mainWindow, dialogOpts).then((returnValue) => {
       if (returnValue.response === 0) {
-        // User clicked "Download Now"
         console.log('User chose to download update')
         autoUpdater.downloadUpdate()
         updateDownloadStarted = true
@@ -163,7 +679,6 @@ function setupAutoUpdater() {
 
     dialog.showMessageBox(mainWindow, dialogOpts).then((returnValue) => {
       if (returnValue.response === 0) {
-        // User clicked "Restart Now"
         console.log('User chose to restart now')
         autoUpdater.quitAndInstall(false, true)
       } else {
@@ -181,7 +696,6 @@ function setupAutoUpdater() {
   })
 }
 
-
 // Improved path resolution that works in both dev and production
 function getResourcePath(relativePath) {
   const possiblePaths = []
@@ -189,24 +703,24 @@ function getResourcePath(relativePath) {
   if (isDev) {
     // Development mode - try multiple possible locations
     possiblePaths.push(
-      path.join(__dirname, relativePath), // Direct from main directory
-      path.join(__dirname, "src", relativePath), // From src/ subdirectory
-      path.join(process.cwd(), relativePath), // From current working directory
-      path.join(process.cwd(), "src", relativePath), // From src/ in working directory
-      path.join(app.getAppPath(), relativePath), // From app path
-      path.join(app.getAppPath(), "src", relativePath), // From src/ in app path
+      path.join(__dirname, relativePath),
+      path.join(__dirname, "src", relativePath),
+      path.join(process.cwd(), relativePath),
+      path.join(process.cwd(), "src", relativePath),
+      path.join(app.getAppPath(), relativePath),
+      path.join(app.getAppPath(), "src", relativePath),
     )
   } else {
     // Production mode - try multiple fallback locations
     const resourcesPath = process.resourcesPath || path.dirname(process.execPath)
     possiblePaths.push(
-      path.join(resourcesPath, "app", "src", relativePath), // Standard ASAR structure
-      path.join(resourcesPath, "app", relativePath), // Alternative ASAR structure
-      path.join(app.getAppPath(), "src", relativePath), // Unpacked app structure
-      path.join(app.getAppPath(), relativePath), // Direct app structure
-      path.join(resourcesPath, relativePath), // Direct resources structure
-      path.join(__dirname, "src", relativePath), // Fallback to dirname
-      path.join(__dirname, relativePath), // Last resort
+      path.join(resourcesPath, "app", "src", relativePath),
+      path.join(resourcesPath, "app", relativePath),
+      path.join(app.getAppPath(), "src", relativePath),
+      path.join(app.getAppPath(), relativePath),
+      path.join(resourcesPath, relativePath),
+      path.join(__dirname, "src", relativePath),
+      path.join(__dirname, relativePath),
     )
   }
 
@@ -225,29 +739,7 @@ function getResourcePath(relativePath) {
   console.log("Searched paths:")
   possiblePaths.forEach((p, i) => console.log(`  ${i + 1}. ${p}`))
 
-  // Debug: Show what's actually in some key directories
-  const debugDirs = [
-    __dirname,
-    path.join(__dirname, "src"),
-    process.cwd(),
-    path.join(process.cwd(), "src"),
-    app.getAppPath(),
-  ]
-
-  debugDirs.forEach((dir) => {
-    if (fs.existsSync(dir)) {
-      try {
-        const contents = fs.readdirSync(dir)
-        console.log(`Contents of ${dir}:`, contents)
-      } catch (error) {
-        console.log(`Cannot read ${dir}: ${error.message}`)
-      }
-    } else {
-      console.log(`Directory doesn't exist: ${dir}`)
-    }
-  })
-
-  return possiblePaths[0] // Return first path as fallback
+  return possiblePaths[0]
 }
 
 // Enhanced async module loading with better error handling
@@ -256,14 +748,13 @@ async function loadModules() {
 
   try {
     console.log("Loading database module...")
-    const dbPath = getResourcePath("database/setup")
+    const dbPath = getResourcePath("./database/setup")
     console.log("Database module path:", dbPath)
     const { setupDatabase } = require(dbPath)
     modules.setupDatabase = setupDatabase
     console.log("✓ Database module loaded")
   } catch (error) {
     console.error("✗ Failed to load database module:", error.message)
-    console.error("Error stack:", error.stack)
     modules.setupDatabase = () => Promise.resolve()
   }
 
@@ -276,7 +767,6 @@ async function loadModules() {
     console.log("✓ WebSocket module loaded")
   } catch (error) {
     console.error("✗ Failed to load WebSocket module:", error.message)
-    console.error("Error stack:", error.stack)
     modules.startWebSocketServer = () => {}
   }
 
@@ -289,7 +779,6 @@ async function loadModules() {
     console.log("✓ WebExportServer module loaded")
   } catch (error) {
     console.error("✗ Failed to load WebExportServer module:", error.message)
-    console.error("Error stack:", error.stack)
     modules.WebExportServer = class {
       constructor() {}
       start() {
@@ -448,6 +937,9 @@ function createMainWindow() {
       contextIsolation: true,
       enableRemoteModule: false,
       preload: fs.existsSync(preloadPath) ? preloadPath : undefined,
+      webSecurity: true, // Keep security enabled
+      allowRunningInsecureContent: false,
+      experimentalFeatures: true,
     },
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     show: false,
@@ -632,12 +1124,46 @@ function createApplicationMenu() {
     }
   ]
 
-  const menu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(menu)
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+function createSettingsWindow() {
+  if (settingsWindow) {
+    settingsWindow.focus()
+    return
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 600,
+    height: 500,
+    parent: mainWindow,
+    modal: true,
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: getResourcePath("preload.js")
+    }
+  })
+
+  const settingsPath = getResourcePath("renderer/settings.html")
+  if (fs.existsSync(settingsPath)) {
+    settingsWindow.loadFile(settingsPath)
+  } else {
+    console.error("Settings file not found")
+    settingsWindow.close()
+    return
+  }
+
+  settingsWindow.on("closed", () => {
+    settingsWindow = null
+  })
 }
 
 // Enhanced IPC handlers for updater
 function registerUpdaterIpcHandlers() {
+  console.log("Registering updater IPC handlers...")
   // Manual update check
   ipcMain.handle("check-for-updates", async () => {
     if (!isDev) {
@@ -727,68 +1253,187 @@ function registerUpdaterIpcHandlers() {
   })
 }
 
-// Your existing app.whenReady() with enhancements
 app.whenReady().then(async () => {
   try {
-    console.log("App ready event fired, initializing...")
+    console.log("App ready event fired, initializing...");
 
-    // Load modules dynamically
-    console.log("Loading modules...")
-    const modules = await loadModules()
-
-    // Load routes
-    console.log("Loading routes...")
-    const routes = loadRoutes()
-
-    // Initialize database
-    console.log("Setting up database...")
+    // === STEP 1: Initialize Database ===
+    console.log("=== INITIALIZING DATABASE ===");
     try {
-      await modules.setupDatabase()
-      console.log("✓ Database setup complete")
-    } catch (error) {
-      console.error("✗ Database setup failed:", error.message)
+      const modules = await loadModules();
+      
+      if (modules.setupDatabase) {
+        console.log("Calling setupDatabase...");
+        dbInstance = await modules.setupDatabase();
+        
+        if (!dbInstance) {
+          console.log("Direct database initialization fallback...");
+          const { getDatabase, setupDatabase: directSetup } = require(getResourcePath("./database/setup"));
+          
+          try {
+            if (directSetup) {
+              dbInstance = await directSetup();
+            } else {
+              dbInstance = getDatabase();
+            }
+          } catch (directError) {
+            console.error("Direct database setup failed:", directError);
+          }
+        }
+        
+        if (dbInstance) {
+          console.log("✓ DATABASE INITIALIZED SUCCESSFULLY");
+          await optimizeDatabase(dbInstance);
+          
+          // Verify database has data
+          try {
+            const employeeCount = dbInstance.prepare("SELECT COUNT(*) as count FROM employees").get();
+            console.log(`Database contains ${employeeCount.count} employees`);
+          } catch (countError) {
+            console.error("Error checking employee count:", countError);
+          }
+        } else {
+          console.error("❌ CRITICAL: ALL DATABASE INITIALIZATION METHODS FAILED");
+        }
+      }
+    } catch (dbError) {
+      console.error("❌ Database initialization error:", dbError);
     }
 
-    // Start WebSocket server
-    console.log("Starting WebSocket server...")
-    try {
-      modules.startWebSocketServer()
-      console.log("✓ WebSocket server started")
-    } catch (error) {
-      console.error("✗ WebSocket server failed:", error.message)
-    }
-
-    // Start Web Export Server
-    console.log("Starting Web Export Server...")
-    try {
-      webExportServer = new modules.WebExportServer(3001)
-      await webExportServer.start()
-      console.log("✓ Web Export Server started on port 3001")
-    } catch (error) {
-      console.error("✗ Web Export Server failed:", error.message)
-    }
-
-    // Create main window
-    createMainWindow()
-
-    // Set up enhanced menu
-    createApplicationMenu()
-
-    // Register IPC handlers (your existing ones)
-    registerIpcHandlers(routes)
+    // === STEP 2: Initialize Caches ===
+    console.log("=== INITIALIZING CACHES ===");
+    const cacheInitSuccess = initializeCaches();
     
-    // Register updater IPC handlers
-    registerUpdaterIpcHandlers()
+    if (cacheInitSuccess) {
+      console.log("✓ CACHES INITIALIZED");
+      
+      // Verify cache instances
+      console.log(`Profile cache available: ${!!profileCache} (${profileCache ? profileCache.size || 0 : 0} items)`);
+      console.log(`Image cache available: ${!!imageCache} (${imageCache ? imageCache.size || 0 : 0} items)`);
+    } else {
+      console.error("❌ Cache initialization failed");
+    }
 
-    console.log("✓ App initialization complete")
+    // === STEP 3: Start Services ===
+    try {
+      modules.startWebSocketServer();
+      console.log("✓ WebSocket server started");
+    } catch (error) {
+      console.error("WebSocket server failed:", error.message);
+    }
+
+    try {
+      webExportServer = new modules.WebExportServer(3001);
+      await webExportServer.start();
+      console.log("✓ Web Export Server started");
+    } catch (error) {
+      console.error("Web Export Server failed:", error.message);
+    }
+
+
+    
+    const routes = loadRoutes();
+    registerIpcHandlers(routes); // All other handlers
+    registerUpdaterIpcHandlers(); // Updater handlers
+
+        // === STEP 3: Register ALL IPC Handlers IMMEDIATELY ===
+    console.log("=== REGISTERING ALL IPC HANDLERS ===");
+    registerCacheIpcHandlers(); // Cache handlers first
+    
+    console.log("✓ ALL IPC HANDLERS REGISTERED");
+
+    // === STEP 4: Start Services ===
+    try {
+      const modules = await loadModules();
+      modules.startWebSocketServer();
+      console.log("✓ WebSocket server started");
+
+      webExportServer = new modules.WebExportServer(3001);
+      await webExportServer.start();
+      console.log("✓ Web Export Server started");
+    } catch (error) {
+      console.error("Service startup failed:", error.message);
+    }
+
+    // === STEP 5: Create Main Window (handlers are ready) ===
+    createMainWindow();
+    createApplicationMenu();
+
+    // === STEP 6: Preload Data (everything is ready) ===
+    if (dbInstance && profileCache && imageCache) {
+      console.log("=== STARTING DATA PRELOAD ===");
+      setTimeout(async () => {
+        try {
+          await preloadFrequentProfiles(dbInstance);
+          console.log("✓ Profile preloading completed");
+          
+          console.log("Cache status after preloading:");
+          console.log(`  Profile cache: ${profileCache.size || 0} items`);
+          console.log(`  Image cache: ${imageCache.size || 0} items`);
+          
+        } catch (preloadError) {
+          console.error("Profile preloading error:", preloadError);
+        }
+      }, 2000);
+    }
+
+    console.log("✓ App initialization sequence completed");
+    
   } catch (error) {
-    console.error("✗ Error during app initialization:", error)
-
-    // Still create window even if other parts fail
-    console.log("Creating window despite initialization errors...")
-    createMainWindow()
+    console.error("❌ Critical error during app initialization:", error);
+    createMainWindow();
   }
-})
+});
+
+async function getProfileFromDB(barcode) {
+  // Ensure database exists
+  if (!dbInstance) {
+    console.log("Initializing database for profile lookup...");
+    try {
+      const modules = await loadModules();
+      if (modules.setupDatabase) {
+        dbInstance = await modules.setupDatabase();
+      } else {
+        dbInstance = getDatabase();
+      }
+    } catch (error) {
+      console.error("Database initialization failed:", error);
+      return null;
+    }
+  }
+
+  if (!dbInstance) {
+    console.error("No database available for profile lookup");
+    return null;
+  }
+
+  try {
+    const stmt = dbInstance.prepare(`
+      SELECT * FROM employees 
+      WHERE uid = ? AND (status = 1 OR status IS NULL)
+      LIMIT 1
+    `);
+    const profile = stmt.get(barcode);
+    
+    if (profile) {
+      console.log(`Profile found: ${barcode} -> ${profile.first_name} ${profile.last_name}`);
+    } else {
+      console.log(`No profile found for barcode: ${barcode}`);
+    }
+    
+    return profile;
+  } catch (error) {
+    console.error("Profile lookup error:", error);
+    return null;
+  }
+}
+
+// Cache cleanup interval (run every 30 minutes)
+setInterval(() => {
+  clearExpiredCaches();
+}, 30 * 60 * 1000);
+
+console.log("✓ Enhanced preloading system initialized");
 
 // Your existing app event handlers with update cleanup
 app.on("window-all-closed", () => {
@@ -878,10 +1523,48 @@ function registerIpcHandlers(routes) {
   console.log("Registering IPC handlers...")
   console.log("Available route modules:", Object.keys(routes))
 
+   // Preload profiles for scanning session
+ipcMain.handle("preload-scanning-session", async (event, barcodes = []) => {
+  try {
+    console.log(`Preloading ${barcodes.length} profiles for scanning session`)
+    
+    const results = await Promise.allSettled(
+      barcodes.map(barcode => loadProfileWithCache(barcode))
+    )
+    
+    const successful = results.filter(r => r.status === 'fulfilled').length
+    
+    return {
+      success: true,
+      preloaded: successful,
+      total: barcodes.length,
+      message: `Preloaded ${successful}/${barcodes.length} profiles`
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
   // Basic handlers
   ipcMain.handle("get-asset-path", (event, filename) => {
     return getResourcePath(path.join("assets", filename))
   })
+
+  ipcMain.handle('read-file-as-base64', async (event, filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      const buffer = fs.readFileSync(filePath);
+      const base64 = buffer.toString('base64');
+      return { success: true, data: base64 };
+    }
+    return { success: false, error: 'File not found' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
   ipcMain.handle("get-profile-path", (event, filename) => {
     return getResourcePath(path.join("profiles", filename))
@@ -916,6 +1599,44 @@ function registerIpcHandlers(routes) {
     }
   })
 
+  ipcMain.handle("get-cache-stats", async () => {
+  try {
+    return {
+      success: true,
+      data: getCacheStatistics()
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+ipcMain.handle("get-app-version", () => {
+  return {
+    success: true,
+    version: app.getVersion(),
+    isDev: isDev
+  }
+})
+
+ipcMain.handle("get-profile-fast", async (event, barcode) => {
+  try {
+    const profile = await loadProfileWithCache(barcode)
+    return {
+      success: true,
+      data: profile,
+      cached: profileCache && profileCache.has ? profileCache.has(`profile_${barcode}`) : false
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
   // Employee route handlers
   const employeeRoutes = routes.employees || {}
   console.log("Employee routes available:", Object.keys(employeeRoutes))
@@ -935,7 +1656,7 @@ function registerIpcHandlers(routes) {
   console.log("Daily summary routes available:", Object.keys(dailysummary))
   safelyRegisterHandler("get-daily-summary", dailysummary.getDailySummary, dailysummary, "getDailySummary")
 
-  // Summary sync handlers (FIXED: using bracket notation for hyphenated property)
+  // Summary sync handlers
   const summarySync = routes["summary-sync"] || {}
   console.log("Summary sync routes available:", Object.keys(summarySync))
   safelyRegisterHandler("get-All-daily-summary-for-sync", summarySync.getAllDailySummaryForSync, summarySync, "getAllDailySummaryForSync")
@@ -943,8 +1664,6 @@ function registerIpcHandlers(routes) {
   safelyRegisterHandler("get-unsynced-daily-summary-count", summarySync.getUnsyncedDailySummaryCount, summarySync, "getUnsyncedDailySummaryCount")
   safelyRegisterHandler("force-sync-all-daily-summary", summarySync.forceSyncAllDailySummary, summarySync, "forceSyncAllDailySummary")
   safelyRegisterHandler("get-daily-summary-last-sync-time", summarySync.getDailySummaryLastSyncTime, summarySync, "getDailySummaryLastSyncTime")
-
-  // NEW: Additional summary sync handlers for enhanced functionality
   safelyRegisterHandler("mark-summary-data-changed", summarySync.markSummaryDataChanged, summarySync, "markSummaryDataChanged")
   safelyRegisterHandler("get-summary-data-change-status", summarySync.getSummaryDataChangeStatus, summarySync, "getSummaryDataChangeStatus")
   safelyRegisterHandler("reset-summary-data-change-status", summarySync.resetSummaryDataChangeStatus, summarySync, "resetSummaryDataChangeStatus")
@@ -994,8 +1713,6 @@ function registerIpcHandlers(routes) {
     attendanceSyncRoutes,
     "markAttendanceAsSynced",
   )
-
-  
 
   // Validate time route handlers
   const validateTimeRoutes = routes.validateTime || {}
@@ -1058,7 +1775,7 @@ function registerIpcHandlers(routes) {
 const profileServices = routes.profileServices || {}
 console.log("Profile services available:", Object.keys(profileServices))
 
-// FIXED: Properly wrap the checkProfileImages handler to avoid passing event object
+// Profile images check handler
 ipcMain.handle("check-profile-images", async (event, employeeUids) => {
   try {
     console.log("IPC Handler - check-profile-images called with:", typeof employeeUids, employeeUids)

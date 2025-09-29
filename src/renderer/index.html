@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JJC Attendance Management System</title>
+  <script defer src="./face-api.min.js"></script>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap");
 
@@ -1488,6 +1489,259 @@
         font-size: 0.8rem;
       }
     }
+
+    /* Performance Panel Styles */
+.performance-section {
+  padding: 20px 0;
+}
+
+.performance-title {
+  color: #2c3e50;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.performance-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.performance-stat {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.performance-stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(45deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%);
+  pointer-events: none;
+}
+
+.performance-stat .stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.performance-stat .stat-detail {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-top: 4px;
+}
+
+.cache-details {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.cache-details h4 {
+  color: #2c3e50;
+  margin-bottom: 16px;
+  font-size: 1.1rem;
+}
+
+.cache-breakdown {
+  display: grid;
+  gap: 12px;
+}
+
+.cache-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+}
+
+.cache-type {
+  font-weight: 600;
+  color: #495057;
+}
+
+.cache-info {
+  color: #6c757d;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.performance-actions {
+  margin-bottom: 24px;
+}
+
+.performance-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.performance-buttons .btn {
+  padding: 12px 16px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.performance-buttons .btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.performance-buttons .btn:active {
+  transform: translateY(0);
+}
+
+.btn-info {
+  background: linear-gradient(135deg, #17a2b8, #138496);
+  border: none;
+  color: white;
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #ffc107, #e0a800);
+  border: none;
+  color: #212529;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  border: none;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #6c757d, #545b62);
+  border: none;
+}
+
+.performance-tips {
+  background: #e7f3ff;
+  border: 1px solid #b6d7ff;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.performance-tips h4 {
+  color: #0056b3;
+  margin-bottom: 12px;
+  font-size: 1.1rem;
+}
+
+.tips-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tips-list li {
+  padding: 6px 0;
+  position: relative;
+  padding-left: 20px;
+  color: #495057;
+}
+
+.tips-list li::before {
+  content: '💡';
+  position: absolute;
+  left: 0;
+  top: 6px;
+}
+
+/* Cache Statistics Display */
+.cache-stats {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin-top: 4px;
+}
+
+.cache-stats span {
+  display: inline-block;
+  padding: 2px 6px;
+  background: rgba(0,123,255,0.1);
+  border-radius: 3px;
+  margin: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .performance-stats {
+    grid-template-columns: 1fr;
+  }
+  
+  .performance-buttons {
+    grid-template-columns: 1fr;
+  }
+  
+  .cache-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+/* Loading states */
+.performance-stat.loading .stat-value::after {
+  content: '...';
+  animation: dots 1.5s infinite;
+}
+
+@keyframes dots {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  80%, 100% { opacity: 0; }
+}
+
+/* Success/Error states for buttons */
+.btn.success {
+  background: linear-gradient(135deg, #28a745, #1e7e34) !important;
+}
+
+.btn.error {
+  background: linear-gradient(135deg, #dc3545, #c82333) !important;
+}
+
+.btn.loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.btn.loading::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: auto;
+  border: 2px solid transparent;
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
   </style>
 </head>
 
@@ -1631,211 +1885,302 @@
     <div class="status-message" id="statusMessage"></div>
 
     <!-- Settings Modal -->
-    <div class="settings-modal" id="settingsModal">
-      <div class="settings-content elevation-4">
-        <div class="settings-header">
-          <h2>Settings & Reports</h2>
-          <button class="close-btn" id="closeSettings">&times;</button>
-        </div>
+<div class="settings-modal" id="settingsModal">
+  <div class="settings-content elevation-4">
+    <div class="settings-header">
+      <h2>Settings & Reports</h2>
+      <button class="close-btn" id="closeSettings">&times;</button>
+    </div>
 
-        <!-- Added tabbed navigation for settings -->
-        <div class="settings-tabs">
-          <button class="settings-tab active" data-tab="general">
-            ⚙️ General Settings
-          </button>
-          <button class="settings-tab" data-tab="reports">
-            📊 Daily Reports
-          </button>
-          <button class="settings-tab" data-tab="sync">🔄 Sync Status</button>
-        </div>
+    <!-- Added tabbed navigation for settings -->
+    <div class="settings-tabs">
+      <button class="settings-tab active" data-tab="general">
+        ⚙️ General Settings
+      </button>
+      <button class="settings-tab" data-tab="reports">
+        📊 Daily Reports
+      </button>
+      <button class="settings-tab" data-tab="sync">🔄 Sync Status</button>
+      <button class="settings-tab" data-tab="performance">
+        ⚡ Performance
+      </button>
+    </div>
 
-        <div class="settings-body">
-          <div id="settingsStatusMessage" style="display: none"></div>
+    <div class="settings-body">
+      <div id="settingsStatusMessage" style="display: none"></div>
 
-          <!-- General Settings Panel -->
-          <div class="settings-panel active" id="generalPanel">
-            <form id="settingsForm">
-              <div class="form-group">
-                <label for="serverUrl">Server URL</label>
-                <input type="url" id="serverUrl" name="server_url" placeholder="" />
-                <div class="help-text">
-                  URL to fetch employee data from your server
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="syncInterval">Sync Interval (minutes)</label>
-                <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5" />
-                <div class="help-text">
-                  How often to sync attendance data (1-1440 minutes)
-                </div>
-              </div>
-
-              <!-- MISSING FIELD - ADD THIS -->
-              <div class="form-group">
-                <label for="summarySyncInterval">Summary Sync Interval (minutes)</label>
-                <input type="number" id="summarySyncInterval" name="summary_sync_interval" min="1" max="1440"
-                  placeholder="10" />
-                <div class="help-text">
-                  How often to sync daily summary data (1-1440 minutes)
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="gracePeriod">Grace Period (minutes)</label>
-                <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5" />
-                <div class="help-text">
-                  Late arrival tolerance (0-30 minutes)
-                </div>
-              </div>
-
-              <div class="button-group">
-                <button type="button" class="btn btn-success" id="syncNowBtn">
-                  🔄 Sync Now
-                </button>
-                <button type="button" class="btn btn-secondary" id="cancelSettings">
-                  ✕ Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <!-- Daily Reports Panel -->
-          <!-- Added daily attendance summary to settings as a separate tab -->
-          <div class="settings-panel" id="reportsPanel">
-            <div class="summary-section">
-              <div class="summary-header">
-                <h3 class="summary-title">
-                  <span>📊</span>
-                  Daily Attendance Summary
-                </h3>
-
-                <!-- Date Range Filter Section -->
-                <div class="date-filter-section">
-                  <div class="date-range-container">
-                    <div class="date-input-group">
-                      <label for="startDate">From:</label>
-                      <input type="date" id="startDate" class="date-input" />
-                    </div>
-                    <div class="date-input-group">
-                      <label for="endDate">To:</label>
-                      <input type="date" id="endDate" class="date-input" />
-                    </div>
-                    <div class="date-actions">
-                      <button class="btn btn-primary btn-sm" id="applyDateFilter">
-                        🔍 Filter
-                      </button>
-                      <button class="btn btn-secondary btn-sm" id="clearDateFilter">
-                        🗑️ Clear
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Quick Date Range Buttons -->
-                  <div class="quick-date-buttons">
-                    <button class="btn btn-outline btn-sm" data-range="today">
-                      Today
-                    </button>
-                    <button class="btn btn-outline btn-sm" data-range="yesterday">
-                      Yesterday
-                    </button>
-                    <button class="btn btn-outline btn-sm" data-range="week">
-                      This Week
-                    </button>
-                    <button class="btn btn-outline btn-sm" data-range="month">
-                      This Month
-                    </button>
-                    <button class="btn btn-outline btn-sm" data-range="last7">
-                      Last 7 Days
-                    </button>
-                    <button class="btn btn-outline btn-sm" data-range="last30">
-                      Last 30 Days
-                    </button>
-                  </div>
-                </div>
-
-                <button class="download-btn elevation-1" id="downloadExcelBtn">
-                  📥 Download Excel
-                </button>
-              </div>
-
-              <!-- Summary Stats -->
-              <div class="summary-stats" id="summaryStats">
-                <div class="stat-card">
-                  <div class="stat-label">Total Records</div>
-                  <div class="stat-value" id="totalRecords">-</div>
-                </div>
-                <div class="stat-card">
-                  <div class="stat-label">Date Range</div>
-                  <div class="stat-value" id="dateRangeText">All Records</div>
-                </div>
-                <div class="stat-card">
-                  <div class="stat-label">Total Hours</div>
-                  <div class="stat-value" id="totalHours">-</div>
-                </div>
-              </div>
-
-              <div class="summary-table-container">
-                <table class="summary-table" id="dailySummaryTable">
-                  <thead>
-                    <tr>
-                      <th>Employee Name</th>
-                      <th>First Name</th>
-                      <th>Last Name</th>
-                      <th>Department</th>
-                      <th>ID Number</th>
-                      <th>Date</th>
-                      <th>First Clock In</th>
-                      <th>Last Clock Out</th>
-                      <th>Morning In</th>
-                      <th>Morning Out</th>
-                      <th>Afternoon In</th>
-                      <th>Afternoon Out</th>
-                      <th>Evening In</th>
-                      <th>Evening Out</th>
-                      <th>Overtime In</th>
-                      <th>Overtime Out</th>
-                      <th>Regular Hours</th>
-                      <th>Overtime Hours</th>
-                      <th>Total Hours</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="summaryTableBody">
-                    <tr>
-                      <td colspan="20" class="loading">Loading...</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+      <!-- General Settings Panel -->
+      <div class="settings-panel active" id="generalPanel">
+        <form id="settingsForm">
+          <div class="form-group">
+            <label for="serverUrl">Server URL</label>
+            <input type="url" id="serverUrl" name="server_url" placeholder="" />
+            <div class="help-text">
+              URL to fetch employee data from your server
             </div>
           </div>
 
-          <!-- Sync Status Panel -->
-          <div class="settings-panel" id="syncPanel">
-            <div class="sync-info" id="syncInfo" style="display: block">
-              <h3>📊 Sync Information</h3>
-              <p id="employeeCount">Employees in database: Loading...</p>
-              <p id="lastSync">Last sync: Loading...</p>
-              <p id="profileStatus">Profile images: Loading...</p>
+          <div class="form-group">
+            <label for="syncInterval">Sync Interval (minutes)</label>
+            <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5" />
+            <div class="help-text">
+              How often to sync attendance data (1-1440 minutes)
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="summarySyncInterval">Summary Sync Interval (minutes)</label>
+            <input type="number" id="summarySyncInterval" name="summary_sync_interval" min="1" max="1440"
+              placeholder="10" />
+            <div class="help-text">
+              How often to sync daily summary data (1-1440 minutes)
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="gracePeriod">Grace Period (minutes)</label>
+            <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5" />
+            <div class="help-text">
+              Late arrival tolerance (0-30 minutes)
+            </div>
+          </div>
+
+          <div class="button-group">
+            <button type="button" class="btn btn-success" id="syncNowBtn">
+              🔄 Sync Now
+            </button>
+            <button type="button" class="btn btn-secondary" id="cancelSettings">
+              ✕ Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Daily Reports Panel -->
+      <div class="settings-panel" id="reportsPanel">
+        <div class="summary-section">
+          <div class="summary-header">
+            <h3 class="summary-title">
+              <span>📊</span>
+              Daily Attendance Summary
+            </h3>
+
+            <!-- Date Range Filter Section -->
+            <div class="date-filter-section">
+              <div class="date-range-container">
+                <div class="date-input-group">
+                  <label for="startDate">From:</label>
+                  <input type="date" id="startDate" class="date-input" />
+                </div>
+                <div class="date-input-group">
+                  <label for="endDate">To:</label>
+                  <input type="date" id="endDate" class="date-input" />
+                </div>
+                <div class="date-actions">
+                  <button class="btn btn-primary btn-sm" id="applyDateFilter">
+                    🔍 Filter
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="clearDateFilter">
+                    🗑️ Clear
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick Date Range Buttons -->
+              <div class="quick-date-buttons">
+                <button class="btn btn-outline btn-sm" data-range="today">
+                  Today
+                </button>
+                <button class="btn btn-outline btn-sm" data-range="yesterday">
+                  Yesterday
+                </button>
+                <button class="btn btn-outline btn-sm" data-range="week">
+                  This Week
+                </button>
+                <button class="btn btn-outline btn-sm" data-range="month">
+                  This Month
+                </button>
+                <button class="btn btn-outline btn-sm" data-range="last7">
+                  Last 7 Days
+                </button>
+                <button class="btn btn-outline btn-sm" data-range="last30">
+                  Last 30 Days
+                </button>
+              </div>
             </div>
 
-            <div class="sync-info" id="attendanceSyncInfo" style="display: block; margin-top: 16px">
-              <h3>📋 Attendance Sync Status</h3>
-              <div class="sync-info-item">
-                <strong>Unsynced Records:</strong> Loading...
-              </div>
-              <div class="sync-info-item">
-                <strong>Auto-sync:</strong> Loading...
-              </div>
-              <div class="sync-info-item">
-                <strong>Next sync:</strong> Loading...
+            <button class="download-btn elevation-1" id="downloadExcelBtn">
+              📥 Download Excel
+            </button>
+          </div>
+
+          <!-- Summary Stats -->
+          <div class="summary-stats" id="summaryStats">
+            <div class="stat-card">
+              <div class="stat-label">Total Records</div>
+              <div class="stat-value" id="totalRecords">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Date Range</div>
+              <div class="stat-value" id="dateRangeText">All Records</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Total Hours</div>
+              <div class="stat-value" id="totalHours">-</div>
+            </div>
+          </div>
+
+          <div class="summary-table-container">
+            <table class="summary-table" id="dailySummaryTable">
+              <thead>
+                <tr>
+                  <th>Employee Name</th>
+                  <th>First Name</th>
+                  <th>Last Name</th>
+                  <th>Department</th>
+                  <th>ID Number</th>
+                  <th>Date</th>
+                  <th>First Clock In</th>
+                  <th>Last Clock Out</th>
+                  <th>Morning In</th>
+                  <th>Morning Out</th>
+                  <th>Afternoon In</th>
+                  <th>Afternoon Out</th>
+                  <th>Evening In</th>
+                  <th>Evening Out</th>
+                  <th>Overtime In</th>
+                  <th>Overtime Out</th>
+                  <th>Regular Hours</th>
+                  <th>Overtime Hours</th>
+                  <th>Total Hours</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="summaryTableBody">
+                <tr>
+                  <td colspan="20" class="loading">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sync Status Panel -->
+      <div class="settings-panel" id="syncPanel">
+        <div class="sync-info" id="syncInfo" style="display: block">
+          <h3>📊 Sync Information</h3>
+          <p id="employeeCount">Employees in database: Loading...</p>
+          <p id="lastSync">Last sync: Loading...</p>
+          <p id="profileStatus">Profile images: Loading...</p>
+          <div id="cacheInfo" style="margin-top: 16px;">
+            <div class="sync-info-item">
+              <strong>Cache Performance:</strong>
+              <div class="cache-stats">
+                <span>Profiles: 0 cached</span> |
+                <span>Images: 0 cached</span> |
+                <span>Preloaded: 0 ready</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="sync-info" id="attendanceSyncInfo" style="display: block; margin-top: 16px">
+          <h3>📋 Attendance Sync Status</h3>
+          <div class="sync-info-item">
+            <strong>Unsynced Records:</strong> Loading...
+          </div>
+          <div class="sync-info-item">
+            <strong>Auto-sync:</strong> Loading...
+          </div>
+          <div class="sync-info-item">
+            <strong>Next sync:</strong> Loading...
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Panel -->
+      <div class="settings-panel" id="performancePanel">
+        <div class="performance-section">
+          <h3 class="performance-title">⚡ Performance & Cache Management</h3>
+          
+          <div class="performance-stats" id="performanceStats">
+            <div class="stat-card performance-stat">
+              <div class="stat-label">Main Process Cache</div>
+              <div class="stat-value" id="mainProcessCacheSize">Loading...</div>
+              <div class="stat-detail">Profiles & Images</div>
+            </div>
+            <div class="stat-card performance-stat">
+              <div class="stat-label">Renderer Cache</div>
+              <div class="stat-value" id="rendererCacheSize">Loading...</div>
+              <div class="stat-detail">Local Storage</div>
+            </div>
+            <div class="stat-card performance-stat">
+              <div class="stat-label">Preloaded Profiles</div>
+              <div class="stat-value" id="preloadedCount">Loading...</div>
+              <div class="stat-detail">Ready for Scanning</div>
+            </div>
+            <div class="stat-card performance-stat">
+              <div class="stat-label">Cache Hit Rate</div>
+              <div class="stat-value" id="cacheHitRate">Loading...</div>
+              <div class="stat-detail">Performance Metric</div>
+            </div>
+          </div>
+
+          <div class="cache-details" id="cacheDetails">
+            <h4>Cache Details</h4>
+            <div class="cache-breakdown">
+              <div class="cache-item">
+                <span class="cache-type">Profile Cache:</span>
+                <span class="cache-info" id="profileCacheInfo">0/500 slots used</span>
+              </div>
+              <div class="cache-item">
+                <span class="cache-type">Image Cache:</span>
+                <span class="cache-info" id="imageCacheInfo">0/200 slots used</span>
+              </div>
+              <div class="cache-item">
+                <span class="cache-type">Memory Usage:</span>
+                <span class="cache-info" id="memoryUsage">Calculating...</span>
+              </div>
+              <div class="cache-item">
+                <span class="cache-type">Last Cleanup:</span>
+                <span class="cache-info" id="lastCleanup">Never</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="performance-actions">
+            <div class="button-group performance-buttons">
+              <button type="button" class="btn btn-info" id="showCacheStatsBtn">
+                📊 Show Cache Stats
+              </button>
+              <button type="button" class="btn btn-warning" id="clearCacheBtn">
+                🗑️ Clear All Caches
+              </button>
+              <button type="button" class="btn btn-primary" id="preloadProfilesBtn">
+                ⚡ Preload Profiles
+              </button>
+              <button type="button" class="btn btn-secondary" id="refreshStatsBtn">
+                🔄 Refresh Stats
+              </button>
+            </div>
+          </div>
+
+          <div class="performance-tips">
+            <h4>Performance Tips</h4>
+            <ul class="tips-list">
+              <li>Cache automatically preloads frequently scanned employees</li>
+              <li>Images are cached for 5 minutes to improve scanning speed</li>
+              <li>Clear cache if experiencing memory issues</li>
+              <li>Preload profiles before busy scanning periods</li>
+              <li>Cache statistics update every 2 minutes automatically</li>
+            </ul>
           </div>
         </div>
       </div>
     </div>
+  </div>
+</div>
 
     <!-- Download Toast -->
     <div class="download-toast" id="downloadToast"></div>

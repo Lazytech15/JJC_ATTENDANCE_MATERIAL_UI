@@ -209,7 +209,7 @@ async function updateRecentDailySummaries(db) {
         const success = updateDailyAttendanceSummary(employee_uid, date, db)
         if (success) {
           updateCount++
-          console.log(`✓ Updated daily summary for employee ${employee_uid} on ${date}`)
+          // console.log(`✓ Updated daily summary for employee ${employee_uid} on ${date}`)
         } else {
           errorCount++
           console.log(`✗ Failed to update daily summary for employee ${employee_uid} on ${date}`)

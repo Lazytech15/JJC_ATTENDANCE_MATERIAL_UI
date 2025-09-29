@@ -663,7 +663,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
   }
   
   try {
-    console.log(`Updating daily attendance summary for employee ${employeeUid} on ${date}`)
+    // console.log(`Updating daily attendance summary for employee ${employeeUid} on ${date}`)
     
     // Get employee information
     const employee = db.prepare(`
@@ -887,7 +887,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       summaryData.total_minutes_worked, summaryData.break_time_minutes, summaryData.last_updated
     )
     
-    console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
+    // console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
     return true
     
   } catch (error) {

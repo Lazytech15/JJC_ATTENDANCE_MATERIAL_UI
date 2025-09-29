@@ -98,7 +98,7 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       // ENHANCED: Update daily attendance summary after successful clock-out
       setTimeout(() => {
         updateDailyAttendanceSummary(employee.uid, today, db)
-        console.log(`✓ Daily attendance summary updated for employee ${employee.uid}`)
+        // console.log(`✓ Daily attendance summary updated for employee ${employee.uid}`)
       }, 100)
 
       // Broadcast clock-out message
