@@ -1382,11 +1382,11 @@ async preloadEmployeeImage(employee_uid, altText) {
 
       // Clean the base URL and ensure it doesn't already have the API endpoint
       let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, ""); // Remove trailing slash
-      if (baseUrl.endsWith("/api/tables/emp_list/data")) {
-        baseUrl = baseUrl.replace("/api/tables/emp_list/data", "");
+      if (baseUrl.endsWith("/api/employees")) {
+        baseUrl = baseUrl.replace("/api/employees", "");
       }
 
-      const fullServerUrl = `${baseUrl}/api/tables/emp_list/data`;
+      const fullServerUrl = `${baseUrl}/api/employees`;
 
       // Get other form values with fallbacks
       const syncIntervalInput =
@@ -1918,6 +1918,8 @@ async preloadEmployeeImage(employee_uid, altText) {
       );
 
       const result = await this.electronAPI.syncEmployees();
+
+      console.log("Employee sync result:", result);
 
       if (result.success) {
         this.showDownloadToast(

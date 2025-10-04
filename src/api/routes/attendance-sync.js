@@ -18,7 +18,7 @@ async function syncAttendanceToServer() {
     
     // Extract base URL by removing the endpoint part
     const fullUrl = serverUrlRow.value
-    const baseUrl = fullUrl.replace('/api/tables/emp_list/data', '')
+    const baseUrl = fullUrl.replace('/api/employees', '')
     const syncEndpoint = `${baseUrl}/api/attendance`
     
     console.log('Syncing attendance to:', syncEndpoint)

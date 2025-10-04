@@ -1,4 +1,3 @@
-
 const { getDatabase, updateDailyAttendanceSummary } = require("../../database/setup")
 const fetch = require('node-fetch')
 
@@ -16,15 +15,15 @@ async function syncDailySummaryToServer(ignoreTransactionErrors = false) {
     
     // Extract base URL and create daily summary endpoint
     const fullUrl = serverUrlRow.value
-    const baseUrl = fullUrl.replace('/api/tables/emp_list/data', '')
-    const syncEndpoint = `${baseUrl}/api/dailysummary`
+    const baseUrl = fullUrl.replace('/api/employees', '')
+    const syncEndpoint = `${baseUrl}/api/daily-summary`
     
     console.log('Syncing daily summary to:', syncEndpoint)
     
     // FIRST: Update daily summaries for recent attendance data
     await updateRecentDailySummaries(db)
     
-    // Get ALL daily summary records (removed the last sync condition)
+    // Get ALL daily summary records
     const summaryStmt = db.prepare(`
       SELECT 
         id,
@@ -78,9 +77,9 @@ async function syncDailySummaryToServer(ignoreTransactionErrors = false) {
       }
     }
     
-    console.log(`Syncing ${allRecords.length} daily summary records (ALL records)`)
+    console.log(`Syncing ${allRecords.length} daily summary records`)
     
-    // Send data to server
+    // Send data to server in the format expected by PHP endpoint
     const response = await fetch(syncEndpoint, {
       method: 'POST',
       headers: {
@@ -93,29 +92,6 @@ async function syncDailySummaryToServer(ignoreTransactionErrors = false) {
     
     if (!response.ok) {
       const errorText = await response.text()
-      
-      // Check if this is the transaction rollback error we want to ignore
-      if (ignoreTransactionErrors && errorText.includes('cannot rollback - no transaction is active')) {
-        console.warn('Ignoring transaction rollback error as requested:', errorText)
-        
-        // Still update the sync timestamp since data was likely processed
-        const currentTimestamp = new Date().toISOString()
-        const updateSyncTimestamp = db.prepare(`
-          INSERT OR REPLACE INTO settings (key, value, updated_at) 
-          VALUES ('last_daily_summary_sync', ?, ?)
-        `)
-        
-        updateSyncTimestamp.run(currentTimestamp, currentTimestamp)
-        
-        return {
-          success: true,
-          message: `Sync completed with ignored transaction error. Synced ${allRecords.length} records.`,
-          syncedCount: allRecords.length,
-          warning: 'Transaction rollback error was ignored',
-          serverResponse: { error: errorText }
-        }
-      }
-      
       throw new Error(`Server responded with status ${response.status}: ${errorText}`)
     }
     
@@ -133,8 +109,11 @@ async function syncDailySummaryToServer(ignoreTransactionErrors = false) {
     
     return {
       success: true,
-      message: `Successfully synced ${allRecords.length} daily summary records (ALL records)`,
+      message: result.message || `Successfully synced ${allRecords.length} daily summary records`,
       syncedCount: allRecords.length,
+      processedCount: result.processed_count || 0,
+      duplicateCount: result.duplicate_count || 0,
+      errorCount: result.error_count || 0,
       serverResponse: result
     }
     
@@ -143,7 +122,8 @@ async function syncDailySummaryToServer(ignoreTransactionErrors = false) {
     return {
       success: false,
       message: `Failed to sync daily summary: ${error.message}`,
-      syncedCount: 0
+      syncedCount: 0,
+      error: error.message
     }
   }
 }
@@ -209,10 +189,9 @@ async function updateRecentDailySummaries(db) {
         const success = updateDailyAttendanceSummary(employee_uid, date, db)
         if (success) {
           updateCount++
-          // console.log(`✓ Updated daily summary for employee ${employee_uid} on ${date}`)
         } else {
           errorCount++
-          console.log(`✗ Failed to update daily summary for employee ${employee_uid} on ${date}`)
+          console.log(`Failed to update daily summary for employee ${employee_uid} on ${date}`)
         }
       } catch (error) {
         errorCount++
@@ -249,7 +228,7 @@ async function syncAttendanceAndUpdateSummary() {
     
     return {
       success: true,
-      attendanceSync: true, // Replace with actual attendance sync result
+      attendanceSync: true,
       dailySummaryUpdate: updateResult,
       dailySummarySync: syncResult
     }
@@ -263,7 +242,7 @@ async function syncAttendanceAndUpdateSummary() {
   }
 }
 
-// Modified debug function - now shows ALL records will be synced
+// Debug function - shows status of records to be synced
 async function debugDailySummaryStatus() {
   const db = getDatabase()
   
@@ -280,12 +259,12 @@ async function debugDailySummaryStatus() {
     `)
     const recentResult = recentStmt.get()
     
-    // Get last sync time (for reference only)
+    // Get last sync time
     const lastSyncStmt = db.prepare("SELECT value FROM settings WHERE key = 'last_daily_summary_sync'")
     const lastSyncRow = lastSyncStmt.get()
     const lastSyncTime = lastSyncRow ? lastSyncRow.value : null
     
-    // Get some sample records that will be synced (ALL records now)
+    // Get some sample records
     const sampleStmt = db.prepare(`
       SELECT 
         employee_uid,
@@ -316,12 +295,12 @@ async function debugDailySummaryStatus() {
     return {
       totalDailySummaryRecords: totalResult.total,
       recentDailySummaryRecords: recentResult.recent,
-      recordsToSyncNext: totalResult.total, // ALL records will be synced now
+      recordsToSyncNext: totalResult.total,
       lastSyncTime: lastSyncTime,
       currentTime: new Date().toISOString(),
       attendanceRecordsMissingSummary: missingResult.missing,
       sampleRecords: sampleRecords,
-      note: "ALL daily summary records will be synced on next sync call"
+      note: "All daily summary records will be synced on next sync call"
     }
     
   } catch (error) {
@@ -330,7 +309,7 @@ async function debugDailySummaryStatus() {
   }
 }
 
-// Modified function - now returns count of ALL records since we sync everything
+// Get count of all records (since we sync everything)
 async function getUnsyncedDailySummaryCount() {
   const db = getDatabase()
   
@@ -341,7 +320,7 @@ async function getUnsyncedDailySummaryCount() {
     return {
       success: true,
       count: result.count,
-      note: "This count represents ALL records since we now sync everything each time"
+      note: "This count represents all records since we sync everything each time"
     }
   } catch (error) {
     console.error('Error getting daily summary count:', error)
@@ -388,7 +367,7 @@ async function getAllDailySummaryForSync(limit = 1000) {
   }
 }
 
-async function forceSyncAllDailySummary(ignoreTransactionErrors = false) {
+async function forceSyncAllDailySummary() {
   const db = getDatabase()
   
   try {
@@ -418,16 +397,18 @@ async function forceSyncAllDailySummary(ignoreTransactionErrors = false) {
     
     console.log(`Rebuilt ${rebuildCount} daily summaries`)
     
-    // Now perform the sync with error ignore option
-    const result = await syncDailySummaryToServer(ignoreTransactionErrors)
+    // Now perform the sync
+    const result = await syncDailySummaryToServer()
     
     return {
       success: result.success,
       message: `Force sync completed: ${result.message} (Rebuilt ${rebuildCount} summaries)`,
       syncedCount: result.syncedCount,
       rebuiltCount: rebuildCount,
-      serverResponse: result.serverResponse,
-      warning: result.warning
+      processedCount: result.processedCount,
+      duplicateCount: result.duplicateCount,
+      errorCount: result.errorCount,
+      serverResponse: result.serverResponse
     }
     
   } catch (error) {
@@ -450,7 +431,7 @@ async function getDailySummaryLastSyncTime() {
     return {
       success: true,
       lastSync: result ? result.value : null,
-      note: "This timestamp is for reference only - ALL records are synced each time now"
+      note: "This timestamp is for reference - all records are synced each time"
     }
   } catch (error) {
     console.error('Error getting last sync time:', error)
@@ -468,7 +449,6 @@ module.exports = {
   getAllDailySummaryForSync,
   forceSyncAllDailySummary,
   getDailySummaryLastSyncTime,
-  // Exports
   updateRecentDailySummaries,
   syncAttendanceAndUpdateSummary,
   debugDailySummaryStatus
