@@ -10,6 +10,8 @@ const { getDatabase  } = require("./database/setup");
 autoUpdater.autoDownload = false
 autoUpdater.autoInstallOnAppQuit = true
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // Determine if we're in development
 const isDev = process.env.NODE_ENV === "development" || process.argv.includes("--dev")
 

@@ -33,16 +33,16 @@ class SyncService {
           },
           signal: controller.signal
         })
-        
+
         // Clear timeout if request succeeds
         clearTimeout(timeoutId)
       } catch (fetchError) {
         clearTimeout(timeoutId)
-        
+
         if (fetchError.name === 'AbortError') {
           throw new Error("Request timed out after 30 seconds. Please check your network connection and server status.")
         }
-        
+
         // Handle other network errors
         if (fetchError.code === 'ENOTFOUND') {
           throw new Error("Cannot reach server. Please check the server URL and your network connection.")
@@ -51,7 +51,7 @@ class SyncService {
         } else if (fetchError.code === 'ETIMEDOUT') {
           throw new Error("Connection timed out. Please check your network connection.")
         }
-        
+
         throw fetchError
       }
 
@@ -66,6 +66,8 @@ class SyncService {
       let employees = []
       if (Array.isArray(data)) {
         employees = data
+      } else if (data.employees && Array.isArray(data.employees)) {  // ← Add this check
+        employees = data.employees
       } else if (data.data && Array.isArray(data.data)) {
         employees = data.data
       } else {
@@ -77,16 +79,16 @@ class SyncService {
       // Filter and map employee data
       const mappedEmployees = employees
         .map((emp) => ({
-          uid: emp.uid,
-          id_number: emp.id_number,
-          id_barcode: emp.id_barcode,
-          first_name: emp.first_name,
-          middle_name: emp.middle_name,
-          last_name: emp.last_name,
+          uid: emp.id,  // ← API uses 'id', not 'uid'
+          id_number: emp.idNumber,  // ← camelCase in API
+          id_barcode: emp.idBarcode,  // ← camelCase in API
+          first_name: emp.firstName,  // ← camelCase in API
+          middle_name: emp.middleName,  // ← camelCase in API
+          last_name: emp.lastName,  // ← camelCase in API
           email: emp.email,
           department: emp.department,
           status: emp.status || "Active",
-          profile_picture: emp.profile_picture,
+          profile_picture: emp.profilePicture,  // ← camelCase in API
         }))
         .filter((emp) => emp.uid && emp.first_name && emp.last_name)
 
@@ -155,15 +157,15 @@ class SyncService {
       console.log(`Validate before sync: ${validateBeforeSync}`)
 
       let validationResult = null
-      
+
       // Step 1: Validate data before sync if requested
       if (validateBeforeSync) {
         console.log(`Step 1: Validating attendance data...`)
-        
+
         if (dateRange) {
           validationResult = await validateAttendanceData(
-            dateRange.startDate, 
-            dateRange.endDate, 
+            dateRange.startDate,
+            dateRange.endDate,
             employeeUid,
             {
               autoCorrect: true,
@@ -195,7 +197,7 @@ class SyncService {
 
       // Step 2: Get unsynced attendance records
       console.log(`Step 2: Retrieving unsynced attendance records...`)
-      
+
       let unsyncedQuery = `
         SELECT 
           a.id,
@@ -247,7 +249,7 @@ class SyncService {
 
       // Step 3: Process records in batches
       console.log(`Step 3: Syncing records in batches of ${batchSize}...`)
-      
+
       let totalSynced = 0
       let totalErrors = 0
       const syncResults = []
@@ -260,7 +262,7 @@ class SyncService {
         console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} records)...`)
 
         const batchResult = await this.syncAttendanceBatch(batch, syncEndpoint, maxRetries)
-        
+
         syncResults.push(batchResult)
         totalSynced += batchResult.successCount
         totalErrors += batchResult.errorCount
@@ -370,7 +372,7 @@ class SyncService {
           } else {
             const errorText = await response.text()
             lastError = new Error(`Server error ${response.status}: ${errorText}`)
-            
+
             if (attempt < maxRetries) {
               console.log(`⚠️  Retry ${attempt}/${maxRetries} for record ${record.id}: ${lastError.message}`)
               await new Promise(resolve => setTimeout(resolve, 1000 * attempt)) // Exponential backoff
@@ -382,7 +384,7 @@ class SyncService {
           if (error.name === 'AbortError') {
             lastError = new Error('Request timeout')
           }
-          
+
           if (attempt < maxRetries) {
             console.log(`⚠️  Retry ${attempt}/${maxRetries} for record ${record.id}: ${lastError.message}`)
             await new Promise(resolve => setTimeout(resolve, 1000 * attempt)) // Exponential backoff
@@ -418,10 +420,10 @@ class SyncService {
             updated_at = CURRENT_TIMESTAMP 
         WHERE id IN (${placeholders})
       `)
-      
+
       updateQuery.run(...recordIds)
       console.log(`Marked ${recordIds.length} records as synced in database`)
-      
+
     } catch (error) {
       console.error('Error marking records as synced:', error)
     }
@@ -432,7 +434,7 @@ class SyncService {
    */
   static async syncTodayAttendance(options = {}) {
     const today = new Date().toISOString().split('T')[0]
-    
+
     return await this.syncAttendanceData({
       ...options,
       dateRange: {
@@ -459,7 +461,7 @@ class SyncService {
   static async getAttendanceSyncStatus(dateRange = null) {
     try {
       const db = getDatabase()
-      
+
       let query = `
         SELECT 
           COUNT(*) as total_records,
@@ -480,7 +482,7 @@ class SyncService {
       }
 
       const stats = db.prepare(query).get(...params)
-      
+
       // Get unsynced records by date
       let unsyncedByDateQuery = `
         SELECT 
@@ -490,16 +492,16 @@ class SyncService {
         FROM attendance 
         WHERE is_synced = 0
       `
-      
+
       if (dateRange) {
         unsyncedByDateQuery += ` AND date BETWEEN ? AND ?`
       }
-      
+
       unsyncedByDateQuery += ` GROUP BY date ORDER BY date DESC LIMIT 10`
-      
+
       const unsyncedByDate = db.prepare(unsyncedByDateQuery).all(...(dateRange ? params : []))
 
-      const syncPercentage = stats.total_records > 0 
+      const syncPercentage = stats.total_records > 0
         ? ((stats.synced_records / stats.total_records) * 100).toFixed(2)
         : 100
 
@@ -543,7 +545,7 @@ class SyncService {
 
     console.log(`Starting enhanced auto-sync with ${interval}ms interval`)
     console.log(`- Sync employees: ${syncEmployees}`)
-    console.log(`- Sync attendance: ${syncAttendance}`) 
+    console.log(`- Sync attendance: ${syncAttendance}`)
     console.log(`- Validate before sync: ${validateBeforeSync}`)
     console.log(`- Sync profiles: ${syncProfiles}`)
 
@@ -558,8 +560,8 @@ class SyncService {
     }
 
     if (syncAttendance) {
-      const attendanceSync = await this.syncAttendanceData({ 
-        validateBeforeSync: validateBeforeSync 
+      const attendanceSync = await this.syncAttendanceData({
+        validateBeforeSync: validateBeforeSync
       })
       if (attendanceSync.success) {
         console.log(`Initial attendance sync completed: ${attendanceSync.message}`)
@@ -580,7 +582,7 @@ class SyncService {
     // Set up periodic sync
     setInterval(async () => {
       console.log("Running scheduled enhanced sync...")
-      
+
       // Sync employees
       if (syncEmployees) {
         const employeeResult = await this.syncEmployees()
@@ -593,8 +595,8 @@ class SyncService {
 
       // Sync attendance with validation
       if (syncAttendance) {
-        const attendanceResult = await this.syncAttendanceData({ 
-          validateBeforeSync: validateBeforeSync 
+        const attendanceResult = await this.syncAttendanceData({
+          validateBeforeSync: validateBeforeSync
         })
         if (attendanceResult.success) {
           console.log(`Scheduled attendance sync: ${attendanceResult.message}`)
@@ -617,7 +619,7 @@ class SyncService {
   }
 
   // Existing profile sync methods remain unchanged...
-  
+
   static async syncProfileImagesBulk(employees) {
     try {
       const db = getDatabase()
@@ -640,7 +642,7 @@ class SyncService {
 
       // Check which profiles are already downloaded
       const profileCheck = await ProfileService.checkProfileImages(employeeUids)
-      
+
       console.log(`Profile status check: ${profileCheck.downloaded}/${profileCheck.total} already exist locally`)
 
       if (profileCheck.missingUids.length === 0) {
@@ -662,7 +664,7 @@ class SyncService {
         profileCheck.missingUids,
         (progress) => {
           console.log(`Bulk profile sync progress: ${progress.stage} - ${progress.message}`)
-          
+
           if (progress.stage === 'downloaded') {
             console.log("Profile ZIP downloaded, extracting...")
           } else if (progress.stage === 'extracted') {
@@ -675,7 +677,7 @@ class SyncService {
 
       if (bulkResult.success) {
         const totalDownloaded = profileCheck.downloaded + Object.keys(bulkResult.profiles).length
-        
+
         console.log(`Bulk profile sync completed successfully:`)
         console.log(`- Previously downloaded: ${profileCheck.downloaded}`)
         console.log(`- Newly downloaded: ${Object.keys(bulkResult.profiles).length}`)
@@ -693,7 +695,7 @@ class SyncService {
         }
       } else {
         console.error("Bulk profile download failed, falling back to individual downloads...")
-        
+
         // Fallback to individual downloads for missing profiles
         const fallbackResult = await this.syncProfileImagesIndividual(
           profileCheck.missingUids.map(uid => employees.find(emp => emp.uid === uid)).filter(Boolean)
@@ -711,10 +713,10 @@ class SyncService {
 
     } catch (error) {
       console.error("Bulk profile sync error:", error)
-      
+
       // Final fallback to individual sync
       console.log("Attempting fallback to individual profile downloads...")
-      
+
       try {
         const fallbackResult = await this.syncProfileImagesIndividual(employees)
         return {
@@ -764,7 +766,7 @@ class SyncService {
           await ProfileService.downloadAndStoreProfile(employee.uid, baseUrl)
           downloadedCount++
           console.log(`Downloaded profile for employee ${employee.uid} (${downloadedCount}/${employees.length})`)
-          
+
           // Small delay to prevent overwhelming the server
           await new Promise(resolve => setTimeout(resolve, 250)) // Increased delay for individual downloads
         } catch (error) {
@@ -774,7 +776,7 @@ class SyncService {
       }
 
       console.log(`Individual profile sync completed: ${downloadedCount} downloaded, ${errorCount} errors`)
-      
+
       return {
         success: true,
         downloaded: downloadedCount,
@@ -802,11 +804,11 @@ class SyncService {
   static async syncMissingProfiles() {
     try {
       const db = getDatabase()
-      
+
       // Get all employees from database
       const employeesStmt = db.prepare("SELECT uid, first_name, last_name FROM employees WHERE status = 'Active'")
       const employees = employeesStmt.all()
-      
+
       if (employees.length === 0) {
         return {
           success: true,
@@ -833,7 +835,7 @@ class SyncService {
       }
 
       // Sync only the missing profiles
-      const missingEmployees = profileCheck.missingUids.map(uid => 
+      const missingEmployees = profileCheck.missingUids.map(uid =>
         employees.find(emp => emp.uid === uid)
       ).filter(Boolean)
 
@@ -853,11 +855,11 @@ class SyncService {
   static async getProfileSyncStatus() {
     try {
       const db = getDatabase()
-      
+
       // Get all active employees
       const employeesStmt = db.prepare("SELECT uid, first_name, last_name, department FROM employees WHERE status = 'Active'")
       const employees = employeesStmt.all()
-      
+
       if (employees.length === 0) {
         return {
           success: true,
@@ -907,10 +909,10 @@ class SyncService {
   static async testConnection(serverUrl) {
     try {
       console.log(`Testing connection to: ${serverUrl}`)
-      
+
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout for test
-      
+
       const response = await fetch(serverUrl, {
         method: 'HEAD', // Just check if server responds
         headers: {
@@ -918,25 +920,25 @@ class SyncService {
         },
         signal: controller.signal
       })
-      
+
       clearTimeout(timeoutId)
-      
-      return { 
-        success: response.ok, 
+
+      return {
+        success: response.ok,
         status: response.status,
         message: response.ok ? 'Connection successful' : `Server returned status ${response.status}`
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: 'Connection test timed out after 10 seconds'
         }
       }
-      
-      return { 
-        success: false, 
-        error: error.message 
+
+      return {
+        success: false,
+        error: error.message
       }
     }
   }
@@ -946,12 +948,12 @@ class SyncService {
     try {
       const baseUrl = serverUrl.split("/api")[0]
       const syncUrl = `${baseUrl}/api/attendance/sync`
-      
+
       console.log(`Testing attendance sync endpoint: ${syncUrl}`)
-      
+
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
-      
+
       const response = await fetch(syncUrl, {
         method: 'OPTIONS', // Check if endpoint accepts POST requests
         headers: {
@@ -960,27 +962,27 @@ class SyncService {
         },
         signal: controller.signal
       })
-      
+
       clearTimeout(timeoutId)
-      
+
       return {
         success: response.ok || response.status === 404, // 404 might mean endpoint exists but no OPTIONS handler
         status: response.status,
-        message: response.ok ? 'Attendance sync endpoint is accessible' : 
-                response.status === 404 ? 'Attendance sync endpoint exists (no OPTIONS support)' :
-                `Attendance sync endpoint returned status ${response.status}`
+        message: response.ok ? 'Attendance sync endpoint is accessible' :
+          response.status === 404 ? 'Attendance sync endpoint exists (no OPTIONS support)' :
+            `Attendance sync endpoint returned status ${response.status}`
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: 'Attendance sync test timed out after 15 seconds'
         }
       }
-      
-      return { 
-        success: false, 
-        error: error.message 
+
+      return {
+        success: false,
+        error: error.message
       }
     }
   }
@@ -989,12 +991,12 @@ class SyncService {
     try {
       const baseUrl = serverUrl.split("/api")[0]
       const bulkUrl = `${baseUrl}/api/profile/bulk/simple`
-      
+
       console.log(`Testing bulk profile endpoint: ${bulkUrl}`)
-      
+
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
-      
+
       const response = await fetch(bulkUrl, {
         method: 'GET',
         headers: {
@@ -1003,9 +1005,9 @@ class SyncService {
         },
         signal: controller.signal
       })
-      
+
       clearTimeout(timeoutId)
-      
+
       if (response.ok) {
         const data = await response.json()
         return {
@@ -1023,15 +1025,15 @@ class SyncService {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: 'Bulk profile test timed out after 15 seconds'
         }
       }
-      
-      return { 
-        success: false, 
-        error: error.message 
+
+      return {
+        success: false,
+        error: error.message
       }
     }
   }
@@ -1039,7 +1041,7 @@ class SyncService {
   // NEW: Comprehensive connection test for all endpoints
   static async testAllConnections(serverUrl) {
     console.log(`Running comprehensive connection tests...`)
-    
+
     const results = {
       employee_sync: await this.testConnection(serverUrl),
       attendance_sync: await this.testAttendanceSyncConnection(serverUrl),
@@ -1049,9 +1051,9 @@ class SyncService {
     }
 
     // Determine overall success
-    results.overall_success = results.employee_sync.success && 
-                             (results.attendance_sync.success || results.attendance_sync.status === 404) &&
-                             results.bulk_profiles.success
+    results.overall_success = results.employee_sync.success &&
+      (results.attendance_sync.success || results.attendance_sync.status === 404) &&
+      results.bulk_profiles.success
 
     console.log(`Connection test results:`)
     console.log(`- Employee sync: ${results.employee_sync.success ? '✅' : '❌'} ${results.employee_sync.message || results.employee_sync.error}`)
@@ -1069,7 +1071,7 @@ class SyncService {
     setInterval(async () => {
       console.log("Running scheduled profile sync...")
       const result = await this.syncMissingProfiles()
-      
+
       if (result.success) {
         if (result.alreadyComplete) {
           console.log("Scheduled profile sync: All profiles up to date")
@@ -1096,7 +1098,7 @@ class SyncService {
     } = options
 
     console.log(`=== MANUAL ATTENDANCE DATA VALIDATION ===`)
-    
+
     try {
       const validationResult = await validateAttendanceData(
         startDate,
@@ -1137,13 +1139,13 @@ class SyncService {
   static async getSyncDashboard() {
     try {
       console.log(`Generating sync dashboard data...`)
-      
+
       // Get attendance sync status
       const attendanceStatus = await this.getAttendanceSyncStatus()
-      
+
       // Get profile sync status
       const profileStatus = await this.getProfileSyncStatus()
-      
+
       // Get last sync times
       const db = getDatabase()
       const lastSyncStmt = db.prepare("SELECT key, value FROM settings WHERE key IN ('last_sync', 'last_attendance_sync')")
@@ -1151,7 +1153,7 @@ class SyncService {
       lastSyncStmt.all().forEach(row => {
         syncTimes[row.key] = row.value ? new Date(parseInt(row.value)).toISOString() : null
       })
-      
+
       // Get validation status for recent data (last 7 days)
       const sevenDaysAgo = new Date()
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -1171,7 +1173,7 @@ class SyncService {
             totalRecords: recentValidationResult.totalRecords,
             validRecords: recentValidationResult.validRecords,
             issueRecords: recentValidationResult.correctedRecords + recentValidationResult.errorRecords,
-            dataIntegrityPercentage: recentValidationResult.totalRecords > 0 
+            dataIntegrityPercentage: recentValidationResult.totalRecords > 0
               ? ((recentValidationResult.validRecords / recentValidationResult.totalRecords) * 100).toFixed(2)
               : 100
           }
@@ -1182,7 +1184,7 @@ class SyncService {
         },
         lastEmployeeSync: syncTimes.last_sync,
         systemHealth: {
-          attendanceDataIntegrity: recentValidationResult.totalRecords > 0 
+          attendanceDataIntegrity: recentValidationResult.totalRecords > 0
             ? ((recentValidationResult.validRecords / recentValidationResult.totalRecords) * 100).toFixed(2)
             : 100,
           syncUpToDate: (attendanceStatus.unsyncedRecords || 0) === 0,

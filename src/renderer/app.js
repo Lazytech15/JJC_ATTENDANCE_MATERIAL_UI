@@ -62,7 +62,7 @@ class AttendanceApp {
   async init() {
     this.setupEventListeners();
     this.startClock();
-    // this.connectWebSocket();
+    this.connectWebSocket();
 
     // PERFORMANCE: Initialize caches and preload data FIRST
     await this.initializePerformanceCaches();
@@ -826,13 +826,13 @@ async preloadEmployeeImage(employee_uid, altText) {
       "ms"
     );
 
-    // this.autoSyncInterval = setInterval(() => {
-    //   this.performAttendanceSync(true);
-    // }, this.syncSettings.interval);
+    this.autoSyncInterval = setInterval(() => {
+      this.performAttendanceSync(true);
+    }, this.syncSettings.interval);
 
-    // setTimeout(() => {
-    //   this.performAttendanceSync(true, 0, true);
-    // }, 10000);
+    setTimeout(() => {
+      this.performAttendanceSync(true, 0, true);
+    }, 10000);
   }
 
   // Start automatic summary sync
@@ -2297,36 +2297,36 @@ async preloadEmployeeImage(employee_uid, altText) {
     setInterval(updateClock, 1000);
   }
 
-  // connectWebSocket() {
-  //   try {
-  //     this.ws = new WebSocket("ws://localhost:8080");
+  connectWebSocket() {
+    try {
+      this.ws = new WebSocket("ws://localhost:8080");
 
-  //     this.ws.onopen = () => {
-  //       console.log("WebSocket connected");
-  //       this.updateConnectionStatus(true);
-  //     };
+      this.ws.onopen = () => {
+        console.log("WebSocket connected");
+        this.updateConnectionStatus(true);
+      };
 
-  //     this.ws.onmessage = (event) => {
-  //       const message = JSON.parse(event.data);
-  //       this.handleWebSocketMessage(message);
-  //     };
+      this.ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        this.handleWebSocketMessage(message);
+      };
 
-  //     this.ws.onclose = () => {
-  //       console.log("WebSocket disconnected");
-  //       this.updateConnectionStatus(false);
-  //       // Reconnect after 5 seconds
-  //       setTimeout(() => this.connectWebSocket(), 5000);
-  //     };
+      this.ws.onclose = () => {
+        console.log("WebSocket disconnected");
+        this.updateConnectionStatus(false);
+        // Reconnect after 5 seconds
+        setTimeout(() => this.connectWebSocket(), 5000);
+      };
 
-  //     this.ws.onerror = (error) => {
-  //       console.error("WebSocket error:", error);
-  //       this.updateConnectionStatus(false);
-  //     };
-  //   } catch (error) {
-  //     console.error("Failed to connect WebSocket:", error);
-  //     this.updateConnectionStatus(false);
-  //   }
-  // }
+      this.ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        this.updateConnectionStatus(false);
+      };
+    } catch (error) {
+      console.error("Failed to connect WebSocket:", error);
+      this.updateConnectionStatus(false);
+    }
+  }
 
   updateConnectionStatus(isOnline) {
     const statusElement = document.getElementById("connectionStatus");
@@ -2705,9 +2705,9 @@ async preloadEmployeeImage(employee_uid, altText) {
             this.markSummaryDataChanged();
 
             // Trigger a sync for corrected data after a delay
-            // setTimeout(() => {
-            //   this.performAttendanceSync(true); // Silent sync
-            // }, 5000);
+            setTimeout(() => {
+              this.performAttendanceSync(true); // Silent sync
+            }, 5000);
           } else {
             console.log(
               `Validation completed: All ${totalRecords} records are accurate`
@@ -4109,9 +4109,9 @@ class OptimizedAttendanceApp extends AttendanceApp {
     }
 
     // Queue sync after all UI updates
-    // setTimeout(() => {
-    //   this.performAttendanceSync(true);
-    // }, 2000);
+    setTimeout(() => {
+      this.performAttendanceSync(true);
+    }, 2000);
   }
 
   // Optimized input focus with selection
