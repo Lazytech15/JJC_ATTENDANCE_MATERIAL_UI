@@ -352,8 +352,9 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_time ON attendance (clock_time)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_type ON attendance (clock_type)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance (employee_uid, date)",
-      "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'",
-      "CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (id_barcode)",
+      // REMOVED: Problematic partial index with LIKE
+      // "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'",
+      "CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (scanned_barcode)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_id_number ON attendance (id_number)",
       
       // Indexes for statistics table
@@ -363,7 +364,8 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_stats_clock_out_id ON attendance_statistics (clock_out_id)",
       "CREATE INDEX IF NOT EXISTS idx_stats_employee_date ON attendance_statistics (employee_uid, date)",
       "CREATE INDEX IF NOT EXISTS idx_stats_session_type ON attendance_statistics (session_type)",
-      "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
+      // REMOVED: Problematic partial index
+      // "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
       "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)",
       
       // NEW: Indexes for daily attendance summary table
@@ -373,8 +375,9 @@ function createIndexes() {
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_number ON daily_attendance_summary (id_number)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_id_barcode ON daily_attendance_summary (id_barcode)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_department ON daily_attendance_summary (department)",
-      "CREATE INDEX IF NOT EXISTS idx_daily_summary_overtime ON daily_attendance_summary (has_overtime) WHERE has_overtime = 1",
-      "CREATE INDEX IF NOT EXISTS idx_daily_summary_incomplete ON daily_attendance_summary (is_incomplete) WHERE is_incomplete = 1",
+      // CHANGED: Simple index without WHERE clause
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_overtime ON daily_attendance_summary (has_overtime)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_incomplete ON daily_attendance_summary (is_incomplete)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_total_hours ON daily_attendance_summary (total_hours)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_name ON daily_attendance_summary (employee_name)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_last_updated ON daily_attendance_summary (last_updated)"
