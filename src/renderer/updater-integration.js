@@ -24,7 +24,6 @@ function enhanceSettingsWithUpdater() {
   updatePanel.innerHTML = `
     <div class="sync-info">
       <h3>🔄 Application Updates</h3>
-      
       <div class="form-group">
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
           <div style="flex: 1;">

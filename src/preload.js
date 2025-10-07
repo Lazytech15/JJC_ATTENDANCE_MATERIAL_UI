@@ -75,6 +75,39 @@ contextBridge.exposeInMainWorld("electronAPI", {
   validateAndCorrectUnsyncedRecords: () => ipcRenderer.invoke("validate-and-correct-unsynced-records"),
   validateSingleRecord: () => ipcRenderer.invoke("validate-single-record"),
 
+invoke: (channel, ...args) => {
+  const validChannels = [
+    'get-profile-fast',
+    'get-profiles-path',
+    'save-face-descriptor',
+    'read-face-descriptor',
+    'delete-face-descriptor',
+    'clear-all-face-descriptors',
+    'generate-face-descriptor-from-image',
+    'generate-descriptor-for-employee',
+    'initialize-server-edit-sync',
+    'check-server-edits',
+    'get-server-edit-sync-history',
+    'get-server-edit-last-sync',
+    'start-server-edit-auto-sync',
+    'stop-server-edit-auto-sync'
+  ];
+  if (validChannels.includes(channel)) {
+    return ipcRenderer.invoke(channel, ...args);
+  }
+},
+
+
+// Listener for server edit updates
+  onServerEditsApplied: (callback) => {
+    ipcRenderer.on('server-edits-applied', (event, data) => callback(data));
+  },
+  
+  // Remove listener
+  removeServerEditsListener: () => {
+    ipcRenderer.removeAllListeners('server-edits-applied');
+  },
+
   // Cache operations (PRESERVED - these are important for fast data access)
   getCacheStats: () => ipcRenderer.invoke('get-cache-stats'),
   clearProfileCache: () => ipcRenderer.invoke('clear-profile-cache'),

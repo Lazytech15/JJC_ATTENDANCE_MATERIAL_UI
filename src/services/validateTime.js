@@ -18,93 +18,99 @@ class AttendanceValidationService {
   }
 
   /**
-   * Main validation function - validates all attendance records for a date range
-   */
-  async validateAttendanceData(startDate = null, endDate = null, employeeUid = null, options = {}) {
-    const {
-      autoCorrect = true,
-      updateSyncStatus = true,
-      validateStatistics = true,
-      rebuildSummary = true
-    } = options
+ * Main validation function - validates all attendance records for a date range
+ */
+async validateAttendanceData(startDate = null, endDate = null, employeeUid = null, options = {}) {
+  const {
+    autoCorrect = true,
+    updateSyncStatus = true,
+    validateStatistics = false,
+    rebuildSummary = true,
+    apply8HourRule = true  // NEW: Enable/disable 8-hour rule application
+  } = options
 
-    console.log(`=== STARTING ATTENDANCE DATA VALIDATION ===`)
-    console.log(`Date range: ${startDate || 'all'} to ${endDate || 'all'}`)
-    console.log(`Employee: ${employeeUid || 'all'}`)
-    console.log(`Auto-correct: ${autoCorrect}`)
+  console.log(`=== STARTING ATTENDANCE DATA VALIDATION ===`)
+  console.log(`Date range: ${startDate || 'all'} to ${endDate || 'all'}`)
+  console.log(`Employee: ${employeeUid || 'all'}`)
+  console.log(`Auto-correct: ${autoCorrect}`)
+  console.log(`Apply 8-hour rule: ${apply8HourRule}`)
+  
+  this.resetValidationResults()
+
+  try {
+    // Get all attendance records to validate
+    const attendanceRecords = this.getAttendanceRecordsToValidate(startDate, endDate, employeeUid)
     
-    this.resetValidationResults()
+    console.log(`Found ${attendanceRecords.length} attendance records to validate`)
+    this.validationResults.totalRecords = attendanceRecords.length
 
-    try {
-      // Get all attendance records to validate
-      const attendanceRecords = this.getAttendanceRecordsToValidate(startDate, endDate, employeeUid)
-      
-      console.log(`Found ${attendanceRecords.length} attendance records to validate`)
-      this.validationResults.totalRecords = attendanceRecords.length
+    // Group records by employee and date for proper validation
+    const groupedRecords = this.groupRecordsByEmployeeAndDate(attendanceRecords)
 
-      // Group records by employee and date for proper validation
-      const groupedRecords = this.groupRecordsByEmployeeAndDate(attendanceRecords)
-
-      // Validate each employee's daily attendance
-      for (const [employeeUid, employeeDates] of Object.entries(groupedRecords)) {
-        for (const [date, records] of Object.entries(employeeDates)) {
-          await this.validateEmployeeDailyAttendance(
-            parseInt(employeeUid), 
-            date, 
-            records, 
-            { autoCorrect, updateSyncStatus }
-          )
-        }
-      }
-
-      // Validate statistics if requested
-      if (validateStatistics) {
-        await this.validateAttendanceStatistics(startDate, endDate, employeeUid, { autoCorrect })
-      }
-
-      // Rebuild daily summary if requested
-      if (rebuildSummary && this.validationResults.correctedRecords > 0) {
-        console.log(`Rebuilding daily attendance summary for corrected records...`)
-        const { successCount } = require('../database/setup').rebuildDailyAttendanceSummary(
-          startDate || '2024-01-01', 
-          endDate || new Date().toISOString().split('T')[0], 
-          this.db
+    // Validate each employee's daily attendance
+    for (const [employeeUid, employeeDates] of Object.entries(groupedRecords)) {
+      for (const [date, records] of Object.entries(employeeDates)) {
+        await this.validateEmployeeDailyAttendance(
+          parseInt(employeeUid), 
+          date, 
+          records, 
+          { autoCorrect, updateSyncStatus, apply8HourRule }  // Pass apply8HourRule option
         )
-        console.log(`Rebuilt ${successCount} daily summary records`)
       }
-
-      console.log(`=== VALIDATION COMPLETED ===`)
-      this.logValidationSummary()
-
-      return this.validationResults
-
-    } catch (error) {
-      console.error('Error during attendance validation:', error)
-      throw error
     }
+
+    // Validate statistics if requested
+    if (validateStatistics) {
+      await this.validateAttendanceStatistics(startDate, endDate, employeeUid, { autoCorrect })
+    }
+
+    // Rebuild daily summary if requested
+    if (rebuildSummary && this.validationResults.correctedRecords > 0) {
+      console.log(`Rebuilding daily attendance summary for corrected records...`)
+      const { successCount } = require('../database/setup').rebuildDailyAttendanceSummary(
+        startDate || '2024-01-01', 
+        endDate || new Date().toISOString().split('T')[0], 
+        this.db
+      )
+      console.log(`Rebuilt ${successCount} daily summary records`)
+    }
+
+    console.log(`=== VALIDATION COMPLETED ===`)
+    this.logValidationSummary()
+
+    return this.validationResults
+
+  } catch (error) {
+    console.error('Error during attendance validation:', error)
+    throw error
   }
+}
 
   /**
-   * Validate a single employee's attendance for a specific date
-   */
-  async validateEmployeeDailyAttendance(employeeUid, date, records, options = {}) {
-    const { autoCorrect = true, updateSyncStatus = true } = options
-    
-    console.log(`\n--- Validating ${records.length} records for employee ${employeeUid} on ${date} ---`)
+ * Validate a single employee's attendance for a specific date
+ */
+async validateEmployeeDailyAttendance(employeeUid, date, records, options = {}) {
+  const { autoCorrect = true, updateSyncStatus = true, apply8HourRule = true } = options
+  
+  console.log(`\n--- Validating ${records.length} records for employee ${employeeUid} on ${date} ---`)
 
-    // Sort records by clock time
-    const sortedRecords = records.sort((a, b) => new Date(a.clock_time) - new Date(b.clock_time))
+  // Sort records by clock time
+  const sortedRecords = records.sort((a, b) => new Date(a.clock_time) - new Date(b.clock_time))
+  
+  // Validate each clock-out record
+  for (let i = 0; i < sortedRecords.length; i++) {
+    const record = sortedRecords[i]
     
-    // Validate each clock-out record
-    for (let i = 0; i < sortedRecords.length; i++) {
-      const record = sortedRecords[i]
-      
-      // Only validate clock-out records (they contain the calculated hours)
-      if (record.clock_type.endsWith('_out')) {
-        await this.validateClockOutRecord(record, sortedRecords, { autoCorrect, updateSyncStatus })
-      }
+    // Only validate clock-out records (they contain the calculated hours)
+    if (record.clock_type.endsWith('_out')) {
+      await this.validateClockOutRecord(record, sortedRecords, { 
+        autoCorrect, 
+        updateSyncStatus,
+        apply8HourRule  // Pass the option down
+      })
     }
   }
+}
 
   /**
    * Validate a single clock-out record
@@ -553,6 +559,8 @@ async function validateSingleRecord(recordId, options = {}) {
     throw error
   }
 }
+
+
 
 module.exports = {
   AttendanceValidationService,

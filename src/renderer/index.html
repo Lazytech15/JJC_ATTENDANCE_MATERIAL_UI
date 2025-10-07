@@ -5,7 +5,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JJC Attendance Management System</title>
-  <script defer src="./face-api.min.js"></script>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap");
 
@@ -1742,6 +1741,310 @@
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+
+/* Server Edit Sync Section */
+#serverEditSyncInfo {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+#serverEditSyncInfo .sync-info-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+#serverEditSyncInfo .sync-info-item:last-child {
+  border-bottom: none;
+}
+
+#serverEditSyncInfo strong {
+  color: #495057;
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+/* Status Badges */
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.success {
+  background: #d1f4e0;
+  color: #0f5132;
+}
+
+.status-badge.inactive {
+  background: #f8d7da;
+  color: #842029;
+}
+
+.status-badge.error {
+  background: #f8d7da;
+  color: #842029;
+}
+
+.status-badge.warning {
+  background: #fff3cd;
+  color: #664d03;
+}
+
+/* Sync History Table */
+.sync-history {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px solid #dee2e6;
+}
+
+.sync-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.sync-history-table th {
+  background: #e9ecef;
+  padding: 8px;
+  text-align: left;
+  font-weight: 600;
+  color: #495057;
+  border: 1px solid #dee2e6;
+}
+
+.sync-history-table td {
+  padding: 8px;
+  border: 1px solid #dee2e6;
+  color: #212529;
+}
+
+.sync-history-table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+/* Server Edit History Modal */
+#serverEditHistoryModal .modal-content {
+  max-width: 900px;
+}
+
+#serverEditHistoryModal .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+#serverEditHistoryModal .data-table th {
+  background: #007cff;
+  color: white;
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  border: 1px solid #0066cc;
+}
+
+#serverEditHistoryModal .data-table td {
+  padding: 10px 12px;
+  border: 1px solid #dee2e6;
+  color: #212529;
+}
+
+#serverEditHistoryModal .data-table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+#serverEditHistoryModal .data-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+.highlight-success {
+  color: #0f5132;
+  font-weight: 600;
+  background: #d1f4e0 !important;
+}
+
+.highlight-warning {
+  color: #664d03;
+  font-weight: 600;
+  background: #fff3cd !important;
+}
+
+.error-detail {
+  background: #f8d7da !important;
+}
+
+.error-detail td {
+  padding: 12px !important;
+}
+
+.error-detail pre {
+  margin: 8px 0 0 0;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+  color: #842029;
+}
+
+/* Button Groups */
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.primary-button,
+.secondary-button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.primary-button {
+  background: #007cff;
+  color: white;
+}
+
+.primary-button:hover {
+  background: #0066cc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 124, 255, 0.3);
+}
+
+.primary-button:active {
+  transform: translateY(0);
+}
+
+.primary-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.secondary-button {
+  background: #6c757d;
+  color: white;
+}
+
+.secondary-button:hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+}
+
+.secondary-button:active {
+  transform: translateY(0);
+}
+
+/* Loading State */
+.loading {
+  text-align: center;
+  padding: 20px;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .button-group {
+    flex-direction: column;
+  }
+
+  .primary-button,
+  .secondary-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .sync-history-table {
+    font-size: 11px;
+  }
+
+  .sync-history-table th,
+  .sync-history-table td {
+    padding: 6px;
+  }
+
+  #serverEditHistoryModal .modal-content {
+    max-width: 95%;
+    margin: 20px auto;
+  }
+
+  #serverEditHistoryModal .data-table {
+    font-size: 12px;
+  }
+
+  #serverEditHistoryModal .data-table th,
+  #serverEditHistoryModal .data-table td {
+    padding: 8px;
+  }
+}
+
+/* Animation for new updates */
+@keyframes highlightUpdate {
+  0% {
+    background: #cfe2ff;
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.updated-row {
+  animation: highlightUpdate 2s ease;
+}
+
+/* Server Edit Notification Toast */
+.download-toast.server-edit {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-left: 4px solid #f59e0b;
+}
+
+/* Section Description */
+.section-description {
+  color: #6c757d;
+  font-size: 14px;
+  margin: 8px 0 16px 0;
+  line-height: 1.5;
+}
+
+/* Settings Section Spacing */
+.settings-section {
+  margin-bottom: 32px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.settings-section h3 {
+  color: #212529;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
   </style>
 </head>
 
@@ -2160,6 +2463,9 @@
               <button type="button" class="btn btn-primary" id="preloadProfilesBtn">
                 ⚡ Preload Profiles
               </button>
+              <button id="openFaceRecognition" class="btn btn-primary">
+                📷 Face Recognition
+              </button>
               <button type="button" class="btn btn-secondary" id="refreshStatsBtn">
                 🔄 Refresh Stats
               </button>
@@ -2282,6 +2588,8 @@
   </script>
   <!-- Added SheetJS library for Excel export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="./FaceRecognitionManager.js"></script>
   <script src="./app.js"></script>
   <script src="./update.js"></script>
   <script src="./updater-integration.js"></script>

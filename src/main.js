@@ -1163,6 +1163,286 @@ function createSettingsWindow() {
   })
 }
 
+// Face-Recognition IPC handlers
+
+//face-recognition
+ipcMain.handle('get-profiles-path', async () => {
+  try {
+    const profilesPath = path.join(app.getPath('userData'), 'profiles');
+    return { success: true, path: profilesPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler to save face descriptor to disk
+ipcMain.handle('save-face-descriptor', async (event, { path: filePath, descriptor }) => {
+  try {
+    // Ensure directory exists
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    
+    // Save descriptor as JSON
+    const data = JSON.stringify({
+      descriptor: descriptor,
+      version: '1.0',
+      timestamp: new Date().toISOString()
+    }, null, 2);
+    
+    await fs.writeFile(filePath, data, 'utf8');
+    
+    return {
+      success: true,
+      path: filePath
+    };
+  } catch (error) {
+    console.error('Error saving face descriptor:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Handler to read face descriptor from disk
+ipcMain.handle('read-face-descriptor', async (event, filePath) => {
+  try {
+    // Check if file exists
+    await fs.access(filePath);
+    
+    // Read and parse descriptor
+    const data = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(data);
+    
+    return {
+      success: true,
+      data: parsed.descriptor,
+      timestamp: parsed.timestamp
+    };
+  } catch (error) {
+    // File doesn't exist or can't be read
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Optional: Handler to delete descriptor cache (for cleanup or refresh)
+ipcMain.handle('delete-face-descriptor', async (event, filePath) => {
+  try {
+    await fs.unlink(filePath);
+    return {
+      success: true,
+      path: filePath
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Optional: Handler to clear all descriptor caches in profiles directory
+ipcMain.handle('clear-all-face-descriptors', async (event, profilesPath) => {
+  try {
+    const files = await fs.readdir(profilesPath);
+    const descriptorFiles = files.filter(file => file.endsWith('.descriptor.json'));
+    
+    let deletedCount = 0;
+    for (const file of descriptorFiles) {
+      try {
+        await fs.unlink(path.join(profilesPath, file));
+        deletedCount++;
+      } catch (error) {
+        console.warn(`Failed to delete ${file}:`, error);
+      }
+    }
+    
+    return {
+      success: true,
+      deletedCount: deletedCount,
+      totalFound: descriptorFiles.length
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+ipcMain.handle('generate-face-descriptor-from-image', async (event, imagePath) => {
+  try {
+    // Check if image exists
+    await fs.access(imagePath);
+    
+    // Generate descriptor path
+    const descriptorPath = imagePath.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '.descriptor.json');
+    
+    // Return paths so renderer can generate descriptor
+    return {
+      success: true,
+      imagePath: imagePath,
+      descriptorPath: descriptorPath
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+ipcMain.handle('generate-descriptor-for-employee', async (event, employeeUID) => {
+  try {
+    const { app } = require('electron');
+    const profilesPath = path.join(app.getPath('userData'), 'profiles');
+    
+    // Find the image file for this employee
+    const possibleExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    let imagePath = null;
+    
+    for (const ext of possibleExtensions) {
+      const testPath = path.join(profilesPath, `${employeeUID}.${ext}`);
+      try {
+        await fs.access(testPath);
+        imagePath = testPath;
+        break;
+      } catch (err) {
+        // File doesn't exist, try next extension
+      }
+    }
+    
+    if (!imagePath) {
+      return {
+        success: false,
+        error: 'Profile image not found'
+      };
+    }
+    
+    // Generate descriptor path
+    const descriptorPath = imagePath.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '.descriptor.json');
+    
+    return {
+      success: true,
+      imagePath: imagePath,
+      descriptorPath: descriptorPath,
+      employeeUID: employeeUID
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Server Edit Sync IPC handlers
+
+  // Initialize server edit sync service
+  ipcMain.handle("initialize-server-edit-sync", async () => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+       const serverEditSync = require("./services/serverEditSync");
+      const result = await serverEditSync.initializeService();
+      
+      if (result.success) {
+        // Start auto-sync after initialization
+        serverEditSync.startAutoSync();
+        console.log("✓ Server edit sync initialized and started");
+      }
+      
+      return result;
+    } catch (error) {
+      console.error("Server edit sync initialization error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Check for server edits manually
+  ipcMain.handle("check-server-edits", async (event, silent = false) => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+      const serverEditSync = require("./services/serverEditSync");
+      const result = await serverEditSync.checkServerEdits(silent);
+      
+      // Notify renderer about updates if any changes
+      if (result.success && (result.updated > 0 || result.deleted > 0)) {
+        if (mainWindow) {
+          mainWindow.webContents.send("server-edits-applied", {
+            updated: result.updated,
+            deleted: result.deleted,
+            message: result.message
+          });
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      console.error("Check server edits error:", error);
+      return { 
+        success: false, 
+        error: error.message,
+        updated: 0,
+        deleted: 0
+      };
+    }
+  });
+
+  // Get sync history
+  ipcMain.handle("get-server-edit-sync-history", async (event, limit = 10) => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+      const serverEditSync = require("./services/serverEditSync");
+      const history = serverEditSync.getSyncHistory(limit);
+      return { success: true, data: history };
+    } catch (error) {
+      console.error("Get sync history error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get last sync info
+  ipcMain.handle("get-server-edit-last-sync", async () => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+      const serverEditSync = require("./services/serverEditSync");
+      return serverEditSync.getLastSyncInfo();
+    } catch (error) {
+      console.error("Get last sync info error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Start auto sync
+  ipcMain.handle("start-server-edit-auto-sync", async () => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+      const serverEditSync = require("./services/serverEditSync");
+      serverEditSync.startAutoSync();
+      return { success: true, message: "Auto-sync started" };
+    } catch (error) {
+      console.error("Start auto-sync error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Stop auto sync
+  ipcMain.handle("stop-server-edit-auto-sync", async () => {
+    try {
+      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
+      const serverEditSync = require("./services/serverEditSync");
+      serverEditSync.stopAutoSync();
+      return { success: true, message: "Auto-sync stopped" };
+    } catch (error) {
+      console.error("Stop auto-sync error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
 // Enhanced IPC handlers for updater
 function registerUpdaterIpcHandlers() {
   console.log("Registering updater IPC handlers...")
@@ -1334,9 +1614,22 @@ app.whenReady().then(async () => {
 
 
     
-    const routes = loadRoutes();
-    registerIpcHandlers(routes); // All other handlers
-    registerUpdaterIpcHandlers(); // Updater handlers
+     // Register all IPC handlers
+  const routes = loadRoutes();
+  registerIpcHandlers(routes);
+  registerUpdaterIpcHandlers();
+  registerCacheIpcHandlers();
+  registerServerEditSyncHandlers(); // ADD THIS LINE
+  
+  // Initialize server edit sync service
+  try {
+    const serverEditSync = require(getResourcePath("/services/serverEditSync"));
+    await serverEditSync.initializeService();
+    serverEditSync.startAutoSync();
+    console.log("✓ Server edit sync service initialized");
+  } catch (error) {
+    console.error("Failed to initialize server edit sync:", error);
+  }
 
         // === STEP 3: Register ALL IPC Handlers IMMEDIATELY ===
     console.log("=== REGISTERING ALL IPC HANDLERS ===");
@@ -1735,7 +2028,8 @@ ipcMain.handle("get-profile-fast", async (event, barcode) => {
       autoCorrect = true,
       updateSyncStatus = true,
       validateStatistics = true,
-      rebuildSummary = true
+      rebuildSummary = true,
+      apply8HourRule = true
     } = options;
     
     console.log('IPC Handler - validateAttendanceData called with:', {
@@ -1751,7 +2045,8 @@ ipcMain.handle("get-profile-fast", async (event, barcode) => {
         autoCorrect,
         updateSyncStatus,
         validateStatistics,
-        rebuildSummary
+        rebuildSummary,
+        apply8HourRule
       }
     );
     

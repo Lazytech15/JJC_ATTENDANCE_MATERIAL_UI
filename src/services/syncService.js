@@ -773,8 +773,27 @@ class SyncService {
           errorCount++
           console.error(`Failed to download profile for employee ${employee.uid}:`, error.message)
         }
-      }
 
+        // After image is saved successfully:
+    const localPath = await electronAPI.getLocalProfilePath(employee.uid);
+    
+    if (localPath.success && localPath.path) {
+      // Generate face descriptor in background
+      this.generateFaceDescriptorForProfile(employee.uid, localPath.path)
+        .then(result => {
+          if (result.success) {
+            console.log('Face descriptor generated successfully');
+          } else {
+            console.warn('Failed to generate face descriptor:', result.error);
+          }
+        })
+        .catch(error => {
+          console.error('Error generating face descriptor:', error);
+        });
+    }
+
+
+      }
       console.log(`Individual profile sync completed: ${downloadedCount} downloaded, ${errorCount} errors`)
 
       return {

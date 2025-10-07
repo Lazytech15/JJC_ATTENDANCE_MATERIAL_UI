@@ -57,8 +57,51 @@ class AttendanceApp {
     };
     this.summaryData = [];
     this.initializeDateRangeControls();
+    this.faceRecognitionManager = null;
+
+        // Server edit sync tracking
+    this.serverEditSyncEnabled = true;
+    this.serverEditSyncInterval = null;
+    this.lastServerEditCheck = null;
+    
+    // Initialize server edit sync listener
+    this.setupServerEditSyncListener();
+  }
+  
+  // Helper method to wait for face-api.js
+  waitForFaceApi(timeout = 15000) {
+    return new Promise((resolve) => {
+      // Check if already loaded
+      if (typeof faceapi !== 'undefined') {
+        console.log('face-api.js already loaded');
+        resolve(true);
+        return;
+      }
+      
+      const startTime = Date.now();
+      let attempts = 0;
+      
+      const checkInterval = setInterval(() => {
+        attempts++;
+        
+        if (typeof faceapi !== 'undefined') {
+          clearInterval(checkInterval);
+          console.log(`face-api.js loaded after ${attempts} attempts`);
+          resolve(true);
+        } else if (Date.now() - startTime > timeout) {
+          clearInterval(checkInterval);
+          console.warn(`Timeout waiting for face-api.js after ${attempts} attempts`);
+          resolve(false);
+        } else if (attempts % 10 === 0) {
+          console.log(`Still waiting for face-api.js... (attempt ${attempts})`);
+        }
+      }, 100);
+    });
   }
 
+  /**
+   * Update init() method to include server edit sync
+   */
   async init() {
     this.setupEventListeners();
     this.startClock();
@@ -71,9 +114,638 @@ class AttendanceApp {
     await this.loadSyncSettings();
     this.startAutoSync();
     this.startSummaryAutoSync();
+    
+    // Initialize server edit sync
+    await this.initializeServerEditSync(); // ADD THIS LINE
+    
     this.focusInput();
     this.startCacheMonitoring();
+
+    // Face recognition initialization
+    if (typeof FaceRecognitionManager !== 'undefined') {
+      this.faceRecognitionManager = new FaceRecognitionManager(this);
+      console.log('Face recognition manager created (lazy init)');
+    } else {
+      console.warn('FaceRecognitionManager not available');
+    }
   }
+
+// Add this new method for when user updates a profile image
+async onProfileImageUpdated(employeeUID) {
+  if (this.faceRecognitionManager) {
+    // Force regenerate descriptor for this employee
+    await this.faceRecognitionManager.refreshSingleDescriptor(employeeUID, true);
+    console.log(`Face descriptor refreshed for employee ${employeeUID}`);
+  }
+}
+
+async generateFaceDescriptorForProfile(employeeUID, imagePath) {
+  try {
+    console.log(`Generating face descriptor for employee ${employeeUID}...`);
+    
+    // Wait for face-api.js to be loaded
+    const faceApiLoaded = await this.waitForFaceApi(5000);
+    if (!faceApiLoaded) {
+      console.warn('face-api.js not loaded, skipping descriptor generation');
+      return { success: false, error: 'face-api.js not loaded' };
+    }
+    
+    // ⭐ ENSURE CPU BACKEND
+    try {
+      if (faceapi.tf && faceapi.tf.setBackend) {
+        await faceapi.tf.setBackend('cpu');
+        await faceapi.tf.ready();
+      }
+    } catch (error) {
+      console.warn('Could not set TensorFlow backend:', error);
+    }
+    
+    // Ensure models are loaded
+    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+      console.log('Loading face-api models for descriptor generation...');
+      await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('models');
+    }
+    
+    // Get descriptor path
+    const pathResult = await electronAPI.invoke('generate-face-descriptor-from-image', imagePath);
+    if (!pathResult.success) {
+      return { success: false, error: pathResult.error };
+    }
+    
+    // Load image and detect face
+    const img = await faceapi.fetchImage(imagePath);
+    const detection = await faceapi
+      .detectSingleFace(img)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+    
+    if (!detection) {
+      console.warn(`No face detected in profile image for ${employeeUID}`);
+      return { success: false, error: 'No face detected in image' };
+    }
+    
+    // Save descriptor to cache
+    const saveResult = await electronAPI.invoke('save-face-descriptor', {
+      path: pathResult.descriptorPath,
+      descriptor: Array.from(detection.descriptor)
+    });
+    
+    if (saveResult.success) {
+      console.log(`✓ Face descriptor generated and cached for ${employeeUID}`);
+      return { success: true, descriptorPath: pathResult.descriptorPath };
+    } else {
+      return { success: false, error: saveResult.error };
+    }
+    
+  } catch (error) {
+    console.error('Error generating face descriptor:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Add this method to AttendanceApp class
+async generateDescriptorsForAllProfiles() {
+  try {
+    console.log('Checking for profiles without descriptors...');
+    
+    const employeesResult = await electronAPI.getEmployees();
+    if (!employeesResult.success) return;
+    
+    const employees = employeesResult.data;
+    let generated = 0;
+    let skipped = 0;
+    let errors = 0;
+    
+    // Wait for face-api.js
+    const faceApiLoaded = await this.waitForFaceApi(5000);
+    if (!faceApiLoaded) {
+      console.warn('face-api.js not available for descriptor generation');
+      return;
+    }
+    
+    // ⭐ FORCE CPU BACKEND BEFORE LOADING MODELS
+    try {
+      if (faceapi.tf && faceapi.tf.setBackend) {
+        console.log('Setting TensorFlow backend to CPU...');
+        await faceapi.tf.setBackend('cpu');
+        await faceapi.tf.ready();
+        console.log('✓ TensorFlow backend set to CPU');
+      }
+    } catch (error) {
+      console.warn('Could not set TensorFlow backend:', error);
+      // Continue anyway - it will try to fall back to CPU
+    }
+    
+    // Load models if not loaded
+    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+      console.log('Loading face-api models on CPU...');
+      await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('models');
+      console.log('✓ Models loaded successfully');
+    }
+    
+    console.log(`Processing ${employees.length} employees for descriptor generation...`);
+    
+    for (const employee of employees) {
+      try {
+        const pathResult = await electronAPI.invoke('generate-descriptor-for-employee', employee.uid);
+        
+        if (!pathResult.success) {
+          skipped++;
+          continue;
+        }
+        
+        // Check if descriptor already exists
+        const descriptorExists = await electronAPI.invoke('read-face-descriptor', pathResult.descriptorPath);
+        if (descriptorExists.success) {
+          console.log(`Descriptor exists for ${employee.first_name} ${employee.last_name}, skipping`);
+          skipped++;
+          continue;
+        }
+        
+        // Generate new descriptor
+        console.log(`Generating descriptor for ${employee.first_name} ${employee.last_name}...`);
+        const result = await this.generateFaceDescriptorForProfile(employee.uid, pathResult.imagePath);
+        
+        if (result.success) {
+          generated++;
+          console.log(`✓ Generated descriptor for ${employee.first_name} ${employee.last_name}`);
+        } else {
+          errors++;
+          console.warn(`Failed to generate descriptor for ${employee.first_name} ${employee.last_name}: ${result.error}`);
+        }
+        
+        // Small delay to prevent blocking
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (error) {
+        errors++;
+        console.error(`Error generating descriptor for ${employee.uid}:`, error);
+      }
+    }
+    
+    console.log(`Descriptor generation complete: ${generated} generated, ${skipped} skipped, ${errors} errors`);
+    
+    return {
+      success: true,
+      generated,
+      skipped,
+      errors,
+      total: employees.length
+    };
+    
+  } catch (error) {
+    console.error('Error in bulk descriptor generation:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+
+  /**
+   * Setup listener for server edit updates
+   */
+  setupServerEditSyncListener() {
+    if (!this.electronAPI || !this.electronAPI.invoke) {
+      console.warn('Server edit sync not available in electronAPI');
+      return;
+    }
+
+    this.electronAPI.onServerEditsApplied((data) => {
+      console.log('Server edits received:', data);
+      
+      // Show notification to user
+      this.showServerEditNotification(data);
+      
+      // Refresh UI data
+      this.handleServerEditsApplied(data);
+    });
+
+    console.log('✓ Server edit sync listener initialized');
+  }
+
+  /**
+   * Initialize server edit sync on app start
+   */
+  async initializeServerEditSync() {
+    if (!this.electronAPI || !this.electronAPI.invoke) {
+  console.warn('Server edit sync not available');
+  return;
+}
+
+    try {
+      const result = await this.electronAPI.invoke('initialize-server-edit-sync');
+      
+      if (result.success) {
+        console.log('✓ Server edit sync initialized');
+        this.serverEditSyncEnabled = true;
+        
+        // Perform initial check after 1 minute
+        setTimeout(() => {
+          this.checkServerEdits(true);
+        }, 60000);
+      } else {
+        console.error('Failed to initialize server edit sync:', result.error);
+      }
+    } catch (error) {
+      console.error('Error initializing server edit sync:', error);
+    }
+  }
+
+  /**
+ * Enhanced checkServerEdits with validation callback
+ * Replace the existing checkServerEdits method with this
+ */
+async checkServerEdits(silent = false) {
+  if (!this.electronAPI || !this.electronAPI.invoke) {
+    return { success: false, error: 'API not available' };
+  }
+
+  try {
+    if (!silent) {
+      this.showDownloadToast('🔄 Syncing with server...', 'info');
+    }
+
+    const result = await this.electronAPI.invoke('check-server-edits', silent);
+
+    if (result.success) {
+      this.lastServerEditCheck = new Date();
+      
+      const hasChanges = result.uploaded > 0 || result.updated > 0 || result.deleted > 0;
+      
+      if (hasChanges) {
+        let message = '';
+        if (result.uploaded > 0) message += `Uploaded: ${result.uploaded} `;
+        if (result.updated > 0) message += `Updated: ${result.updated} `;
+        if (result.deleted > 0) message += `Deleted: ${result.deleted}`;
+        
+        if (!silent) {
+          this.showDownloadToast(`✅ ${message.trim()}`, 'success');
+        }
+        
+        // Refresh UI and validate
+        await this.handleServerEditsApplied({
+          uploaded: result.uploaded,
+          updated: result.updated,
+          deleted: result.deleted
+        });
+      } else {
+        if (!silent) {
+          this.showDownloadToast('✓ All records in sync', 'success');
+        }
+      }
+
+      return result;
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error('Error checking server edits:', error);
+    
+    if (!silent) {
+      this.showDownloadToast('❌ Sync failed', 'error');
+    }
+    
+    return { success: false, error: error.message };
+  }
+}
+
+  /**
+   * Show notification when server edits are applied
+   */
+  showServerEditNotification(data) {
+    const { updated, deleted, message } = data;
+    
+    let notificationMessage = '📝 Server Edits Applied\n';
+    
+    if (updated > 0) {
+      notificationMessage += `Updated: ${updated} record${updated > 1 ? 's' : ''}\n`;
+    }
+    
+    if (deleted > 0) {
+      notificationMessage += `Deleted: ${deleted} record${deleted > 1 ? 's' : ''}`;
+    }
+
+    // Show prominent notification
+    this.showDownloadToast(notificationMessage, 'info');
+    
+    // Also show in status bar
+    this.showStatus(message || 'Attendance records updated from server', 'success');
+
+    // Play notification sound if available
+    this.playNotificationSound();
+  }
+
+  /**
+ * Handle server edits being applied - refresh UI and validate
+ * Add this updated method to your AttendanceApp class
+ */
+async handleServerEditsApplied(data) {
+  try {
+    console.log('Handling server edits - refreshing UI data');
+
+    // Step 1: Refresh attendance data
+    await Promise.all([
+      this.loadTodayAttendance(),
+      this.loadDailySummary()
+    ]);
+
+    // Step 2: Validate and fix time calculations for affected records
+    if (data.updated > 0) {
+      console.log('Validating attendance data after server edits...');
+      await this.validateAttendanceData();
+    }
+
+    // Step 3: After validation, sync back to server
+    // The validation will fix regular_hours, overtime_hours, and is_late
+    // Then we need to upload those fixes back to the server
+    if (data.updated > 0) {
+      console.log('Syncing validated data back to server...');
+      
+      // Trigger a sync to upload any changes made during validation
+      setTimeout(async () => {
+        const syncResult = await this.electronAPI.invoke('check-server-edits', true);
+        if (syncResult.success && syncResult.uploaded > 0) {
+          console.log(`✓ Uploaded ${syncResult.uploaded} validated records to server`);
+        }
+      }, 2000); // Wait 2 seconds before syncing back
+    }
+
+    // Step 4: Update sync info if settings panel is open
+    if (document.getElementById('settingsModal')?.classList.contains('show')) {
+      await this.loadServerEditSyncInfo();
+    }
+
+    console.log('✓ UI refreshed and validated after server edits');
+  } catch (error) {
+    console.error('Error handling server edits:', error);
+  }
+}
+
+  /**
+ * Update the sync info display to show uploads too
+ * Replace the existing loadServerEditSyncInfo method
+ */
+async loadServerEditSyncInfo() {
+  if (!this.electronAPI || !this.electronAPI.invoke) {
+    return;
+  }
+
+  try {
+    const lastSyncResult = await this.electronAPI.invoke('get-server-edit-last-sync');
+    const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 5);
+
+    const syncInfoElement = document.getElementById('serverEditSyncInfo');
+    
+    if (!syncInfoElement) {
+      console.warn('serverEditSyncInfo element not found');
+      return;
+    }
+
+    let lastSyncText = 'Never';
+    let syncStats = '0 uploaded, 0 updated, 0 deleted';
+
+    if (lastSyncResult.success && lastSyncResult.lastSync) {
+      const lastSync = lastSyncResult.lastSync;
+      const syncDate = new Date(lastSync.created_at);
+      const now = new Date();
+      const minutesAgo = Math.floor((now - syncDate) / (1000 * 60));
+      
+      lastSyncText = minutesAgo < 1 ? 'Just now' : 
+                    minutesAgo < 60 ? `${minutesAgo} minutes ago` :
+                    syncDate.toLocaleString();
+
+      syncStats = `${lastSync.records_uploaded || 0} uploaded, ${lastSync.records_updated} updated, ${lastSync.records_deleted} deleted`;
+    }
+
+    syncInfoElement.innerHTML = `
+      <div class="sync-info-item">
+        <strong>Last Sync:</strong> ${lastSyncText}
+      </div>
+      <div class="sync-info-item">
+        <strong>Last Sync Results:</strong> ${syncStats}
+      </div>
+      <div class="sync-info-item">
+        <strong>Status:</strong> ${this.serverEditSyncEnabled ? 
+          '<span class="status-badge success">Active (every 2 min)</span>' : 
+          '<span class="status-badge inactive">Inactive</span>'}
+      </div>
+      ${historyResult.success && historyResult.data.length > 0 ? `
+        <div class="sync-history">
+          <strong>Recent Sync History:</strong>
+          <table class="sync-history-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Uploaded</th>
+                <th>Updated</th>
+                <th>Deleted</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${historyResult.data.map(log => `
+                <tr>
+                  <td>${new Date(log.created_at).toLocaleString()}</td>
+                  <td class="${(log.records_uploaded || 0) > 0 ? 'highlight-info' : ''}">
+                    ${log.records_uploaded || 0}
+                  </td>
+                  <td class="${log.records_updated > 0 ? 'highlight-success' : ''}">
+                    ${log.records_updated}
+                  </td>
+                  <td class="${log.records_deleted > 0 ? 'highlight-warning' : ''}">
+                    ${log.records_deleted}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+    `;
+  } catch (error) {
+    console.error('Error loading server edit sync info:', error);
+  }
+}
+
+  /**
+   * Play notification sound
+   */
+  playNotificationSound() {
+    try {
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzvLZizcIHGm98OScTQwOUKrm8K1gGgU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU=');
+      audio.volume = 0.3;
+      audio.play().catch(err => console.log('Could not play sound:', err));
+    } catch (error) {
+      // Sound playback failed, ignore
+    }
+  }
+
+  /**
+   * Add server edit sync button to settings
+   */
+  setupServerEditSyncUI() {
+    // Add check button to sync tab
+    const syncPanel = document.getElementById('syncPanel');
+    
+    if (!syncPanel) return;
+
+    const serverEditSection = document.createElement('div');
+    serverEditSection.className = 'settings-section';
+    serverEditSection.innerHTML = `
+      <h3>📝 Server Edit Sync</h3>
+      <p class="section-description">
+        Automatically checks for attendance corrections made on the server 
+        and applies them to local records.
+      </p>
+      <div id="serverEditSyncInfo" class="sync-info">
+        <div class="loading">Loading sync information...</div>
+      </div>
+      <div class="button-group">
+        <button id="checkServerEditsNowBtn" class="primary-button">
+          🔄 Check Server Edits Now
+        </button>
+        <button id="viewServerEditHistoryBtn" class="secondary-button">
+          📊 View Sync History
+        </button>
+      </div>
+    `;
+
+    // Insert before the last section in sync panel
+    const lastSection = syncPanel.querySelector('.settings-section:last-child');
+    if (lastSection) {
+      syncPanel.insertBefore(serverEditSection, lastSection);
+    } else {
+      syncPanel.appendChild(serverEditSection);
+    }
+
+    // Add event listeners
+    const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+    const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
+
+    if (checkNowBtn) {
+      checkNowBtn.addEventListener('click', async () => {
+        checkNowBtn.disabled = true;
+        checkNowBtn.textContent = '🔄 Checking...';
+        
+        await this.checkServerEdits(false);
+        
+        checkNowBtn.disabled = false;
+        checkNowBtn.textContent = '🔄 Check Server Edits Now';
+        
+        // Reload sync info
+        await this.loadServerEditSyncInfo();
+      });
+    }
+
+    if (viewHistoryBtn) {
+      viewHistoryBtn.addEventListener('click', () => {
+        this.showServerEditSyncHistory();
+      });
+    }
+
+    // Load initial info
+    this.loadServerEditSyncInfo();
+  }
+
+  /**
+   * Show server edit sync history modal
+   */
+  async showServerEditSyncHistory() {
+    if (!this.electronAPI || !this.electronAPI.invoke('get-server-edit-sync-history', limit)) {
+      this.showStatus('Server edit sync history not available', 'error');
+      return;
+    }
+
+    try {
+      const result = await this.electronAPI.invoke('get-server-edit-sync-history', 20);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      const history = result.data;
+
+      // Create modal
+      const modal = document.createElement('div');
+      modal.className = 'modal show';
+      modal.id = 'serverEditHistoryModal';
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 800px;">
+          <div class="modal-header">
+            <h2>📊 Server Edit Sync History</h2>
+            <button class="close-button" onclick="this.closest('.modal').remove()">×</button>
+          </div>
+          <div class="modal-body">
+            ${history.length === 0 ? `
+              <p>No sync history available yet.</p>
+            ` : `
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date & Time</th>
+                    <th>Checked</th>
+                    <th>Updated</th>
+                    <th>Deleted</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${history.map(log => `
+                    <tr>
+                      <td>${new Date(log.created_at).toLocaleString()}</td>
+                      <td>${log.records_checked}</td>
+                      <td class="${log.records_updated > 0 ? 'highlight-success' : ''}">
+                        ${log.records_updated}
+                      </td>
+                      <td class="${log.records_deleted > 0 ? 'highlight-warning' : ''}">
+                        ${log.records_deleted}
+                      </td>
+                      <td>
+                        ${log.errors ? 
+                          '<span class="status-badge error">Errors</span>' : 
+                          '<span class="status-badge success">Success</span>'}
+                      </td>
+                    </tr>
+                    ${log.errors ? `
+                      <tr class="error-detail">
+                        <td colspan="5">
+                          <strong>Errors:</strong> 
+                          <pre>${log.errors}</pre>
+                        </td>
+                      </tr>
+                    ` : ''}
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-button" onclick="this.closest('.modal').remove()">
+              Close
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      // Close on background click
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.remove();
+        }
+      });
+    } catch (error) {
+      console.error('Error showing sync history:', error);
+      this.showStatus('Failed to load sync history', 'error');
+    }
+  }
+
 
   async setupImageWithFallback(imgElement, employee_uid, altText) {
     if (!imgElement || !employee_uid) {
@@ -1343,6 +2015,15 @@ async preloadEmployeeImage(employee_uid, altText) {
     const syncNowBtn = document.getElementById("syncNowBtn");
     const originalText = syncNowBtn.textContent;
 
+      // Generate descriptors for all profiles in background
+  setTimeout(() => {
+    this.generateDescriptorsForAllProfiles().then(result => {
+      if (result && result.success) {
+        console.log(`Generated ${result.generated} face descriptors`);
+      }
+    });
+  }, 2000); // Wait 2 seconds after sync to avoid blocking
+
     // Show loading state
     syncNowBtn.textContent = "💾 Saving & Syncing...";
     syncNowBtn.disabled = true;
@@ -1446,6 +2127,7 @@ async preloadEmployeeImage(employee_uid, altText) {
         updateSyncStatus: true,
         validateStatistics: true,
         rebuildSummary: true,
+        apply8HourRule: true
       });
 
       if (validationResult.success && validationResult.data) {
@@ -1737,6 +2419,15 @@ async preloadEmployeeImage(employee_uid, altText) {
         }
       });
     }
+
+    const faceRecognitionBtn = document.getElementById('openFaceRecognition');
+if (faceRecognitionBtn) {
+  faceRecognitionBtn.addEventListener('click', () => {
+    if (this.faceRecognitionManager) {
+      this.faceRecognitionManager.show();
+    }
+  });
+}
   }
 
   showStatus(message, type = "info") {
@@ -1937,17 +2628,40 @@ async preloadEmployeeImage(employee_uid, altText) {
     }
   }
 
-  // Settings functionality
+  /**
+   * Update openSettings() to load server edit sync info
+   */
   openSettings() {
-    const modal = document.getElementById("settingsModal");
-    modal.classList.add("show");
+    const modal = document.getElementById('settingsModal');
+    modal.classList.add('show');
     this.loadSettings();
     this.loadSyncInfo();
-    this.loadSummaryInfo(); // NEW: Load summary sync info
+    this.loadSummaryInfo();
     this.loadAttendanceSyncInfo();
+    this.loadServerEditSyncInfo(); // ADD THIS LINE
     this.loadDailySummary();
     this.initializeSettingsTabs();
+    
+    // Setup server edit sync UI if not already done
+    if (!document.getElementById('serverEditSyncInfo')?.hasChildNodes()) {
+      this.setupServerEditSyncUI();
+    }
   }
+
+    /**
+   * Clean up on destroy
+   */
+  destroy() {
+    super.destroy();
+    
+    // Remove server edit sync listener
+    if (this.electronAPI && this.electronAPI.removeServerEditsListener) {
+      this.electronAPI.removeServerEditsListener();
+    }
+    
+    console.log('Server edit sync listener removed');
+  }
+
 
   closeSettings() {
     const modal = document.getElementById("settingsModal");
@@ -2681,6 +3395,7 @@ async preloadEmployeeImage(employee_uid, altText) {
         updateSyncStatus: true,
         validateStatistics: true,
         rebuildSummary: false,
+        apply8HourRule: true
       });
 
       if (validationResult.success && validationResult.data) {
@@ -4150,17 +4865,30 @@ class OptimizedAttendanceApp extends AttendanceApp {
 }
 
 // Initialize app when DOM is loaded
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('DOM loaded, initializing attendance system...');
+  
   // Store reference globally for cleanup if needed
   window.attendanceApp = new AttendanceApp();
+  
+  // Log face-api.js status for debugging
+  setTimeout(() => {
+    if (typeof faceapi !== 'undefined') {
+      console.log('✓ face-api.js is available');
+    } else {
+      console.warn('✗ face-api.js is NOT available - check if script is loaded');
+    }
+  }, 1000);
 });
-
 // Clean up on page unload
-window.addEventListener("beforeunload", () => {
-  if (
-    window.attendanceApp &&
-    typeof window.attendanceApp.destroy === "function"
-  ) {
+window.addEventListener('beforeunload', () => {
+  if (window.attendanceApp && typeof window.attendanceApp.destroy === 'function') {
     window.attendanceApp.destroy();
+  }
+  
+  // Clean up face recognition
+  if (window.attendanceApp?.faceRecognitionManager && 
+      typeof window.attendanceApp.faceRecognitionManager.destroy === 'function') {
+    window.attendanceApp.faceRecognitionManager.destroy();
   }
 });
