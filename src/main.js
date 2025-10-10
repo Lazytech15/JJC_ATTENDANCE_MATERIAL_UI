@@ -5,6 +5,7 @@ const fs = require("fs")
 const { autoUpdater } = require("electron-updater")
 const LRU = require('lru-cache')
 const { getDatabase  } = require("./database/setup");
+const { startWebSocketServer } = require('./services/websocket');
 
 // Configure auto-updater
 autoUpdater.autoDownload = false
@@ -1536,6 +1537,8 @@ function registerUpdaterIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+startWebSocketServer();
+
   try {
     console.log("App ready event fired, initializing...");
 
