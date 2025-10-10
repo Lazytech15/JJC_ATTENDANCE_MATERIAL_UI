@@ -88,7 +88,8 @@ class SyncService {
           email: emp.email,
           department: emp.department,
           status: emp.status || "Active",
-          profile_picture: emp.profilePicture,  // ← camelCase in API
+          profile_picture: emp.profilePicture, // ← camelCase in API
+          face_descriptor: emp.faceDescriptor, // ← camelCase in API
         }))
         .filter((emp) => emp.uid && emp.first_name && emp.last_name)
 

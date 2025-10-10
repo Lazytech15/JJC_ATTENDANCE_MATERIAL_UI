@@ -135,6 +135,7 @@ function createTables() {
         department TEXT,
         status TEXT DEFAULT 'Active',
         profile_picture TEXT,
+        face_descriptor TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )

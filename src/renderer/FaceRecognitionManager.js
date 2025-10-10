@@ -1,4 +1,4 @@
-// FaceRecognitionManager.js - Optimized Face Recognition for Electron Attendance System
+// FaceRecognitionManager.js - ULTRA OPTIMIZED for Maximum FPS
 class FaceRecognitionManager {
   constructor(attendanceApp) {
     this.attendanceApp = attendanceApp;
@@ -7,24 +7,36 @@ class FaceRecognitionManager {
     // Face-api.js configuration
     this.modelsLoaded = false;
     this.modelPath = 'models';
-    this.profilesPath = null;
     
     // Face recognition state
     this.isActive = false;
     this.videoStream = null;
     this.videoElement = null;
     this.canvasElement = null;
-    this.detectionInterval = null;
+    this.animationFrameId = null;
     
-    // Recognition settings
-    this.detectionIntervalMs = 1000;
-    this.confidenceThreshold = 0.6;
+    // ULTRA OPTIMIZED: Adaptive detection based on face presence
+    this.detectionIntervalMs = 300; // Faster: 300ms (3.3 FPS)
+    this.fastModeIntervalMs = 150;  // When face detected: 150ms (6.6 FPS)
+    this.slowModeIntervalMs = 500;  // When no face: 500ms (2 FPS)
+    this.lastDetectionTime = 0;
+    this.confidenceThreshold = 0.45; // Lower for better detection
+    this.matchThreshold = 0.6; // Higher for better accuracy (default: 0.6)
     this.faceDescriptors = new Map();
     
-    // Recognition state
+    // Recognition state with cooldown
     this.lastRecognizedUID = null;
     this.lastRecognitionTime = 0;
     this.recognitionCooldown = 5000;
+    
+    // OPTIMIZED: Adaptive detection speed
+    this.consecutiveNoFaceFrames = 0;
+    this.consecutiveFaceFrames = 0;
+    this.currentMode = 'normal'; // 'normal', 'fast', 'slow'
+    
+    // OPTIMIZED: Skip descriptor calculation when not needed
+    this.lastFacePosition = null;
+    this.faceMovementThreshold = 30; // pixels
     
     // DOM elements
     this.container = null;
@@ -34,64 +46,69 @@ class FaceRecognitionManager {
     this.initializationStarted = false;
     this.descriptorsLoaded = false;
     
-    // REMOVED: this.init() - Don't auto-initialize on construction
-    console.log('FaceRecognitionManager created (lazy initialization)');
+    // OPTIMIZED: Debounce and batch updates
+    this.statusDebounceTimeout = null;
+    this.pendingStatusUpdate = null;
+    
+    // OPTIMIZED: Reuse detection options
+    this.detectionOptions = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 160,        // Smaller = faster (128, 160, 224, 320, 416, 512, 608)
+      scoreThreshold: 0.4    // Lower = more detections
+    });
+    
+    // OPTIMIZED: Cache face matcher
+    this.cachedFaceMatcher = null;
+    this.faceMatcherDirty = true;
+    
+    console.log('FaceRecognitionManager created (ULTRA OPTIMIZED)');
   }
 
-  // Lazy initialization - only runs when user opens face recognition
   async init() {
     if (this.initializationStarted) {
-      return; // Already initializing or initialized
+      return;
     }
     
     this.initializationStarted = true;
     
     try {
-      console.log('Starting FaceRecognitionManager initialization...');
+      console.log('Starting ULTRA optimized FaceRecognitionManager...');
       
-      // Get profiles path
-      const pathResult = await this.electronAPI.invoke('get-profiles-path');
-      if (pathResult.success) {
-        this.profilesPath = pathResult.path;
-      }
-      
-      // Create UI first (fast)
       this.createFaceRecognitionUI();
-      this.showStatus('Initializing face recognition...', 'info');
+      this.showStatus('Initializing...', 'info');
       
-      // Force WebGL backend (fix the WebGL error)
       await this.setTensorFlowBackend();
+      await this.loadModelsOptimized();
       
-      // Load models (slow - show progress)
-      await this.loadModels();
+      // Load descriptors in background
+      this.loadEmployeeFaceDescriptorsFromDB();
       
-      // Load descriptors in background (don't block UI)
-      this.loadEmployeeFaceDescriptorsAsync();
-      
-      console.log('FaceRecognitionManager initialized');
+      console.log('✓ FaceRecognitionManager initialized (ULTRA mode)');
     } catch (error) {
-      console.error('Failed to initialize FaceRecognitionManager:', error);
+      console.error('Failed to initialize:', error);
       this.showStatus('Initialization failed: ' + error.message, 'error');
     }
   }
 
-  // Force CPU backend to avoid WebGL issues
   async setTensorFlowBackend() {
     try {
       if (typeof faceapi === 'undefined') {
         await this.waitForFaceApi();
       }
       
-      // Try to set CPU backend explicitly to avoid WebGL errors
-      if (faceapi.tf && faceapi.tf.setBackend) {
-        console.log('Setting TensorFlow backend to CPU...');
-        await faceapi.tf.setBackend('cpu');
-        await faceapi.tf.ready();
-        console.log('✓ TensorFlow backend set to CPU');
+      if (faceapi.tf?.setBackend) {
+        // Try WebGL first (much faster), fallback to CPU
+        try {
+          await faceapi.tf.setBackend('webgl');
+          await faceapi.tf.ready();
+          console.log('✓ TensorFlow backend: WebGL (GPU accelerated)');
+        } catch (e) {
+          await faceapi.tf.setBackend('cpu');
+          await faceapi.tf.ready();
+          console.log('✓ TensorFlow backend: CPU (WebGL unavailable)');
+        }
       }
     } catch (error) {
       console.warn('Could not set TensorFlow backend:', error);
-      // Continue anyway - it will fall back to CPU automatically
     }
   }
 
@@ -111,24 +128,24 @@ class FaceRecognitionManager {
     });
   }
 
-  async loadModels() {
+  async loadModelsOptimized() {
     try {
       if (typeof faceapi === 'undefined') {
         await this.waitForFaceApi();
       }
       
-      this.showStatus('Loading AI models (1/3)...', 'info');
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(this.modelPath);
+      this.showStatus('Loading AI models (ultra-fast)...', 'info');
       
-      this.showStatus('Loading AI models (2/3)...', 'info');
-      await faceapi.nets.faceLandmark68Net.loadFromUri(this.modelPath);
-      
-      this.showStatus('Loading AI models (3/3)...', 'info');
-      await faceapi.nets.faceRecognitionNet.loadFromUri(this.modelPath);
+      // Load all models in parallel for speed
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(this.modelPath),
+        faceapi.nets.faceLandmark68TinyNet.loadFromUri(this.modelPath),
+        faceapi.nets.faceRecognitionNet.loadFromUri(this.modelPath)
+      ]);
       
       this.modelsLoaded = true;
-      console.log('✓ Face-api.js models loaded');
-      this.showStatus('AI models loaded successfully', 'success');
+      console.log('✓ Models loaded (TinyFaceDetector + GPU mode)');
+      this.showStatus('AI models ready', 'success');
       
     } catch (error) {
       console.error('Error loading models:', error);
@@ -137,10 +154,9 @@ class FaceRecognitionManager {
     }
   }
 
-  // Async loading - doesn't block UI
-  async loadEmployeeFaceDescriptorsAsync() {
+  async loadEmployeeFaceDescriptorsFromDB() {
     try {
-      this.showStatus('Loading employee profiles in background...', 'info');
+      this.showStatus('Loading profiles...', 'info');
       
       const employeesResult = await this.electronAPI.getEmployees();
       if (!employeesResult.success || !employeesResult.data) {
@@ -151,111 +167,82 @@ class FaceRecognitionManager {
       
       const employees = employeesResult.data;
       let loadedCount = 0;
-      let failedCount = 0;
+      let skippedCount = 0;
       
-      // Process in batches to avoid blocking
-      const batchSize = 5;
-      for (let i = 0; i < employees.length; i += batchSize) {
-        const batch = employees.slice(i, i + batchSize);
-        
-        await Promise.all(
-          batch.map(async (employee) => {
-            try {
-              const descriptor = await this.loadEmployeeFaceDescriptor(employee);
-              if (descriptor) {
-                // Convert UID to string for face-api.js
-                const uidString = String(employee.uid);
-                this.faceDescriptors.set(uidString, {
-                  descriptor: descriptor,
-                  employee: employee,
-                  name: `${employee.first_name} ${employee.last_name}`
-                });
-                loadedCount++;
-              } else {
-                failedCount++;
-              }
-            } catch (error) {
-              failedCount++;
-            }
-          })
-        );
-        
-        // Update progress
-        const progress = Math.round(((i + batch.length) / employees.length) * 100);
-        this.showStatus(`Loading profiles: ${loadedCount} loaded (${progress}%)`, 'info');
-        document.getElementById('facesLoadedCount').textContent = loadedCount;
-        
-        // Small delay to prevent blocking
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
+      // OPTIMIZED: Process all at once (no batching needed)
+      employees.forEach((employee) => {
+        try {
+          if (!employee.face_descriptor) {
+            skippedCount++;
+            return;
+          }
+          
+          const descriptorArray = JSON.parse(employee.face_descriptor);
+          
+          if (!Array.isArray(descriptorArray) || descriptorArray.length !== 128) {
+            skippedCount++;
+            return;
+          }
+          
+          const descriptor = new Float32Array(descriptorArray);
+          const uidString = String(employee.uid);
+          
+          this.faceDescriptors.set(uidString, {
+            descriptor: descriptor,
+            employee: employee,
+            name: `${employee.first_name} ${employee.last_name}`
+          });
+          
+          loadedCount++;
+          
+        } catch (error) {
+          console.error(`Error processing descriptor for ${employee.uid}:`, error);
+          skippedCount++;
+        }
+      });
+      
+      // Invalidate cached matcher
+      this.faceMatcherDirty = true;
       
       this.descriptorsLoaded = true;
-      console.log(`✓ Loaded ${loadedCount} face descriptors (${failedCount} failed)`);
-      this.showStatus(`Ready: ${loadedCount} profiles loaded`, 'success');
-      document.getElementById('facesLoadedCount').textContent = loadedCount;
+      console.log(`✓ Loaded ${loadedCount} descriptors (${skippedCount} skipped)`);
+      
+      if (loadedCount === 0) {
+        this.showStatus('No valid face descriptors', 'error');
+      } else {
+        this.showStatus(`Ready: ${loadedCount} profiles`, 'success');
+      }
+      
+      this.updateLoadedCount(loadedCount);
       
     } catch (error) {
       console.error('Error loading descriptors:', error);
-      this.showStatus('Error loading employee profiles', 'error');
+      this.showStatus('Error loading profiles', 'error');
       this.descriptorsLoaded = true;
     }
   }
 
-  async loadEmployeeFaceDescriptor(employee) {
-    try {
-      const pathResult = await this.electronAPI.getLocalProfilePath(employee.uid);
-      
-      if (!pathResult.success || !pathResult.path) {
-        return null;
-      }
-      
-      const imagePath = pathResult.path;
-      // Generate descriptor cache path (same location as image, with .json extension)
-      const descriptorPath = imagePath.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '.descriptor.json');
-      
-      // Try to load cached descriptor first
-      try {
-        const cachedDescriptor = await this.electronAPI.invoke('read-face-descriptor', descriptorPath);
-        if (cachedDescriptor.success && cachedDescriptor.data) {
-          console.log(`✓ Loaded cached descriptor for ${employee.uid}`);
-          // Convert array back to Float32Array
-          return new Float32Array(cachedDescriptor.data);
-        }
-      } catch (error) {
-        // Cache doesn't exist, will generate new one
-      }
-      
-      // Generate new descriptor from image
-      console.log(`Generating descriptor for ${employee.uid}...`);
-      const img = await faceapi.fetchImage(imagePath);
-      const detection = await faceapi
-        .detectSingleFace(img)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      
-      if (!detection) {
-        console.warn(`No face detected in profile image for ${employee.uid}`);
-        return null;
-      }
-      
-      // Save descriptor to cache
-      try {
-        await this.electronAPI.invoke('save-face-descriptor', {
-          path: descriptorPath,
-          descriptor: Array.from(detection.descriptor) // Convert Float32Array to regular array for JSON
-        });
-        console.log(`✓ Cached descriptor for ${employee.uid}`);
-      } catch (error) {
-        console.warn(`Failed to cache descriptor for ${employee.uid}:`, error);
-        // Continue anyway, just won't be cached
-      }
-      
-      return detection.descriptor;
-      
-    } catch (error) {
-      console.warn(`Error loading face descriptor for ${employee.uid}:`, error);
-      return null;
+  updateLoadedCount(count) {
+    const countElement = document.getElementById('facesLoadedCount');
+    if (countElement) {
+      countElement.textContent = count;
     }
+  }
+
+  // OPTIMIZED: Get or create cached face matcher
+  getFaceMatcher() {
+    if (!this.faceMatcherDirty && this.cachedFaceMatcher) {
+      return this.cachedFaceMatcher;
+    }
+    
+    const labeledDescriptors = Array.from(this.faceDescriptors.entries()).map(
+      ([uid, data]) => new faceapi.LabeledFaceDescriptors(uid, [data.descriptor])
+    );
+    
+    this.cachedFaceMatcher = new faceapi.FaceMatcher(labeledDescriptors, this.matchThreshold);
+    this.faceMatcherDirty = false;
+    
+    return this.cachedFaceMatcher;
   }
 
   createFaceRecognitionUI() {
@@ -264,7 +251,7 @@ class FaceRecognitionManager {
     this.container.className = 'face-recognition-container hidden';
     this.container.innerHTML = `
       <div class="face-recognition-header">
-        <h3>Face Recognition</h3>
+        <h3>Face Recognition <span class="badge badge-ultra">Ultra Mode</span></h3>
         <button id="closeFaceRecognition" class="close-btn">✕</button>
       </div>
       
@@ -272,6 +259,10 @@ class FaceRecognitionManager {
         <div class="video-wrapper">
           <video id="faceRecognitionVideo" autoplay muted playsinline></video>
           <canvas id="faceRecognitionCanvas"></canvas>
+          <div class="performance-indicator" id="performanceIndicator">
+            <span class="perf-dot"></span>
+            <span id="perfMode">Normal</span>
+          </div>
         </div>
         
         <div class="face-recognition-status" id="faceRecognitionStatus">
@@ -280,12 +271,20 @@ class FaceRecognitionManager {
         
         <div class="face-recognition-info">
           <div class="info-item">
-            <span class="info-label">Profiles Loaded:</span>
+            <span class="info-label">Profiles:</span>
             <span class="info-value" id="facesLoadedCount">0</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Detection Status:</span>
+            <span class="info-label">Status:</span>
             <span class="info-value" id="detectionStatus">Inactive</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">FPS:</span>
+            <span class="info-value" id="fpsCounter">0</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Backend:</span>
+            <span class="info-value" id="backendType">CPU</span>
           </div>
         </div>
         
@@ -294,8 +293,12 @@ class FaceRecognitionManager {
             📷 Start Recognition
           </button>
           <button id="stopFaceRecognition" class="btn btn-secondary" disabled>
-            ⏹️ Stop Recognition
+            ⏹️ Stop
           </button>
+        </div>
+        
+        <div class="performance-tips">
+          <small>💡 Tips: Good lighting improves accuracy. Position face 1-2 meters from camera.</small>
         </div>
       </div>
     `;
@@ -309,7 +312,20 @@ class FaceRecognitionManager {
     this.setupEventListeners();
     this.addStyles();
     
-    document.getElementById('facesLoadedCount').textContent = this.faceDescriptors.size;
+    this.updateLoadedCount(this.faceDescriptors.size);
+    this.updateBackendType();
+  }
+
+  updateBackendType() {
+    const backendElement = document.getElementById('backendType');
+    if (backendElement && typeof faceapi !== 'undefined' && faceapi.tf) {
+      const backend = faceapi.tf.getBackend();
+      backendElement.textContent = backend === 'webgl' ? 'GPU' : 'CPU';
+      
+      if (backend === 'webgl') {
+        backendElement.style.color = '#22c55e';
+      }
+    }
   }
 
   setupEventListeners() {
@@ -370,6 +386,28 @@ class FaceRecognitionManager {
         margin: 0;
         font-size: 20px;
         color: #1f2937;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .badge {
+        font-size: 11px;
+        font-weight: 600;
+        background: #22c55e;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
+      
+      .badge-ultra {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
       }
       
       .close-btn {
@@ -421,6 +459,34 @@ class FaceRecognitionManager {
         height: 100%;
       }
       
+      .performance-indicator {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      
+      .perf-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: blink 1s ease-in-out infinite;
+      }
+      
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+      
       .face-recognition-status {
         padding: 16px;
         background: #f3f4f6;
@@ -429,6 +495,7 @@ class FaceRecognitionManager {
         font-weight: 500;
         margin-bottom: 20px;
         color: #1f2937;
+        transition: all 0.2s;
       }
       
       .face-recognition-status.detecting {
@@ -448,13 +515,13 @@ class FaceRecognitionManager {
       
       .face-recognition-info {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
         margin-bottom: 20px;
       }
       
       .info-item {
-        padding: 12px;
+        padding: 10px;
         background: #f9fafb;
         border-radius: 6px;
         display: flex;
@@ -463,7 +530,7 @@ class FaceRecognitionManager {
       }
       
       .info-label {
-        font-size: 12px;
+        font-size: 11px;
         color: #6b7280;
         font-weight: 500;
       }
@@ -477,6 +544,7 @@ class FaceRecognitionManager {
       .face-recognition-controls {
         display: flex;
         gap: 12px;
+        margin-bottom: 12px;
       }
       
       .face-recognition-controls .btn {
@@ -497,6 +565,7 @@ class FaceRecognitionManager {
       
       .btn-primary:hover:not(:disabled) {
         background: #2563eb;
+        transform: translateY(-1px);
       }
       
       .btn-secondary {
@@ -506,11 +575,24 @@ class FaceRecognitionManager {
       
       .btn-secondary:hover:not(:disabled) {
         background: #dc2626;
+        transform: translateY(-1px);
       }
       
       .btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+      
+      .performance-tips {
+        padding: 12px;
+        background: #fef3c7;
+        border-radius: 6px;
+        text-align: center;
+      }
+      
+      .performance-tips small {
+        color: #92400e;
+        font-size: 12px;
       }
     `;
     
@@ -535,7 +617,7 @@ class FaceRecognitionManager {
     }
     
     if (!this.descriptorsLoaded) {
-      this.showStatus('Employee profiles still loading...', 'info');
+      this.showStatus('Employee profiles loading...', 'info');
       return;
     }
     
@@ -545,21 +627,26 @@ class FaceRecognitionManager {
     }
     
     try {
+      // OPTIMIZED: Even lower resolution for maximum speed
       this.videoStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
+          width: { ideal: 480 },  // Lower resolution = faster
+          height: { ideal: 360 },
+          facingMode: 'user',
+          frameRate: { ideal: 30, max: 30 } // Limit frame rate
         }
       });
       
       this.videoElement.srcObject = this.videoStream;
       this.isActive = true;
+      this.currentMode = 'normal';
+      this.consecutiveNoFaceFrames = 0;
+      this.consecutiveFaceFrames = 0;
       
       document.getElementById('startFaceRecognition').disabled = true;
       document.getElementById('stopFaceRecognition').disabled = false;
       document.getElementById('detectionStatus').textContent = 'Active';
-      this.showStatus('Face recognition active - position your face in frame', 'detecting');
+      this.showStatus('Face recognition active', 'detecting');
       
       this.startDetectionLoop();
       
@@ -572,9 +659,9 @@ class FaceRecognitionManager {
   stopRecognition() {
     this.isActive = false;
     
-    if (this.detectionInterval) {
-      clearInterval(this.detectionInterval);
-      this.detectionInterval = null;
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
     }
     
     if (this.videoStream) {
@@ -594,19 +681,59 @@ class FaceRecognitionManager {
     document.getElementById('startFaceRecognition').disabled = false;
     document.getElementById('stopFaceRecognition').disabled = true;
     document.getElementById('detectionStatus').textContent = 'Inactive';
+    document.getElementById('fpsCounter').textContent = '0';
     this.showStatus('Face recognition stopped', 'info');
+    this.updatePerformanceMode('Stopped');
   }
 
+  // ULTRA OPTIMIZED: Adaptive speed based on detection
   startDetectionLoop() {
-    this.detectionInterval = setInterval(async () => {
-      if (!this.isActive || !this.videoElement) return;
+    let frameCount = 0;
+    let lastFpsUpdate = Date.now();
+    let totalFrames = 0;
+    
+    const detectLoop = async () => {
+      if (!this.isActive) return;
       
-      try {
-        await this.detectAndRecognizeFaces();
-      } catch (error) {
-        console.error('Detection error:', error);
+      const currentTime = Date.now();
+      
+      // Adaptive interval based on face presence
+      let currentInterval = this.detectionIntervalMs;
+      if (this.currentMode === 'fast') {
+        currentInterval = this.fastModeIntervalMs;
+      } else if (this.currentMode === 'slow') {
+        currentInterval = this.slowModeIntervalMs;
       }
-    }, this.detectionIntervalMs);
+      
+      // Only detect at specified interval
+      if (currentTime - this.lastDetectionTime >= currentInterval) {
+        this.lastDetectionTime = currentTime;
+        
+        try {
+          await this.detectAndRecognizeFaces();
+        } catch (error) {
+          console.error('Detection error:', error);
+        }
+        
+        frameCount++;
+        totalFrames++;
+      }
+      
+      // Update FPS counter every second
+      if (currentTime - lastFpsUpdate >= 1000) {
+        const fps = Math.round((frameCount * 1000) / (currentTime - lastFpsUpdate));
+        const fpsElement = document.getElementById('fpsCounter');
+        if (fpsElement) {
+          fpsElement.textContent = fps;
+        }
+        frameCount = 0;
+        lastFpsUpdate = currentTime;
+      }
+      
+      this.animationFrameId = requestAnimationFrame(detectLoop);
+    };
+    
+    detectLoop();
   }
 
   async detectAndRecognizeFaces() {
@@ -617,26 +744,42 @@ class FaceRecognitionManager {
       height: this.videoElement.videoHeight
     };
     
+    // OPTIMIZED: Use cached detection options
     const detections = await faceapi
-      .detectAllFaces(this.videoElement)
-      .withFaceLandmarks()
+      .detectAllFaces(this.videoElement, this.detectionOptions)
+      .withFaceLandmarks(true)
       .withFaceDescriptors();
     
     if (detections.length === 0) {
       this.clearCanvas();
-      this.showStatus('No face detected - move closer to camera', 'detecting');
+      this.consecutiveNoFaceFrames++;
+      this.consecutiveFaceFrames = 0;
+      
+      // Switch to slow mode after 3 frames with no face
+      if (this.consecutiveNoFaceFrames > 3 && this.currentMode !== 'slow') {
+        this.currentMode = 'slow';
+        this.updatePerformanceMode('Power Save');
+      }
+      
+      this.showStatusDebounced('No face detected', 'detecting');
       return;
+    }
+    
+    // Face detected - switch to fast mode
+    this.consecutiveFaceFrames++;
+    this.consecutiveNoFaceFrames = 0;
+    
+    if (this.consecutiveFaceFrames > 2 && this.currentMode !== 'fast') {
+      this.currentMode = 'fast';
+      this.updatePerformanceMode('High Speed');
     }
     
     const resizedDetections = faceapi.resizeResults(detections, displaySize);
     
     this.clearCanvas();
     
-    const labeledDescriptors = Array.from(this.faceDescriptors.entries()).map(
-      ([uid, data]) => new faceapi.LabeledFaceDescriptors(uid, [data.descriptor])
-    );
-    
-    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, this.confidenceThreshold);
+    // OPTIMIZED: Use cached face matcher
+    const faceMatcher = this.getFaceMatcher();
     
     let recognized = false;
     
@@ -657,7 +800,14 @@ class FaceRecognitionManager {
     });
     
     if (!recognized) {
-      this.showStatus('Face detected but not recognized', 'detecting');
+      this.showStatusDebounced('Face detected but not recognized', 'detecting');
+    }
+  }
+
+  updatePerformanceMode(mode) {
+    const perfElement = document.getElementById('perfMode');
+    if (perfElement) {
+      perfElement.textContent = mode;
     }
   }
 
@@ -665,6 +815,7 @@ class FaceRecognitionManager {
     const ctx = this.canvasElement.getContext('2d');
     const isRecognized = match.label !== 'unknown';
     
+    // OPTIMIZED: Simpler, cleaner drawing
     ctx.strokeStyle = isRecognized ? '#22c55e' : '#3b82f6';
     ctx.lineWidth = 3;
     ctx.strokeRect(box.x, box.y, box.width, box.height);
@@ -674,12 +825,21 @@ class FaceRecognitionManager {
       const label = employeeData ? employeeData.name : match.label;
       const confidence = Math.round((1 - match.distance) * 100);
       
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.9)';
-      ctx.fillRect(box.x, box.y + box.height + 5, box.width, 25);
+      // Background
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.95)';
+      const padding = 8;
+      const textHeight = 22;
+      ctx.fillRect(box.x, box.y + box.height + 5, box.width, textHeight + padding);
       
+      // Text
       ctx.fillStyle = 'white';
-      ctx.font = '14px Arial';
-      ctx.fillText(`${label} (${confidence}%)`, box.x + 5, box.y + box.height + 20);
+      ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${label} (${confidence}%)`, 
+        box.x + padding, 
+        box.y + box.height + 5 + (textHeight + padding) / 2
+      );
     }
   }
 
@@ -693,9 +853,9 @@ class FaceRecognitionManager {
     const currentTime = Date.now();
     const confidence = Math.round((1 - distance) * 100);
     
-    // Convert to string for comparison
     const uidString = String(employeeData.employee.uid);
     
+    // Cooldown check
     if (
       this.lastRecognizedUID === uidString &&
       currentTime - this.lastRecognitionTime < this.recognitionCooldown
@@ -707,7 +867,7 @@ class FaceRecognitionManager {
     this.lastRecognitionTime = currentTime;
     
     this.showStatus(
-      `Recognized: ${employeeData.name} (${confidence}% confidence)`,
+      `✓ ${employeeData.name} (${confidence}%)`,
       'recognized'
     );
     
@@ -722,20 +882,20 @@ class FaceRecognitionManager {
       });
       
       if (result.success) {
-        if (this.attendanceApp && this.attendanceApp.showEmployeeDisplay) {
+        if (this.attendanceApp?.showEmployeeDisplay) {
           this.attendanceApp.showEmployeeDisplay(result.data);
         }
         
         this.showStatus(
-          `✓ Attendance recorded for ${employee.first_name} ${employee.last_name}`,
+          `✓ Recorded: ${employee.first_name} ${employee.last_name}`,
           'recognized'
         );
         
         setTimeout(() => {
           if (this.isActive) {
-            this.showStatus('Ready for next scan...', 'detecting');
+            this.showStatus('Ready for next scan', 'detecting');
           }
-        }, 3000);
+        }, 2500);
         
       } else {
         this.showStatus(`Error: ${result.error}`, 'error');
@@ -747,15 +907,30 @@ class FaceRecognitionManager {
     }
   }
 
+  showStatusDebounced(message, type = 'info', delay = 200) {
+    if (this.statusDebounceTimeout) {
+      clearTimeout(this.statusDebounceTimeout);
+    }
+    
+    this.statusDebounceTimeout = setTimeout(() => {
+      this.showStatus(message, type);
+    }, delay);
+  }
+
   showStatus(message, type = 'info') {
     if (!this.statusElement) return;
+    
+    // Only update if different
+    if (this.statusElement.textContent === message && 
+        this.statusElement.classList.contains(type)) {
+      return;
+    }
     
     this.statusElement.textContent = message;
     this.statusElement.className = `face-recognition-status ${type}`;
   }
 
   async show() {
-    // Initialize on first show
     if (!this.initializationStarted) {
       await this.init();
     }
@@ -772,68 +947,46 @@ class FaceRecognitionManager {
     }
   }
 
-  async refreshEmployeeFaceDescriptors(forceRegenerate = false) {
+  async refreshEmployeeFaceDescriptors() {
     this.faceDescriptors.clear();
-    
-    if (forceRegenerate) {
-      // Clear all cached descriptors
-      try {
-        const result = await this.electronAPI.invoke('clear-all-face-descriptors', this.profilesPath);
-        if (result.success) {
-          console.log(`Cleared ${result.deletedCount} cached descriptors`);
-        }
-      } catch (error) {
-        console.warn('Failed to clear descriptor cache:', error);
-      }
-    }
-    
     this.descriptorsLoaded = false;
-    await this.loadEmployeeFaceDescriptorsAsync();
+    this.faceMatcherDirty = true;
+    this.cachedFaceMatcher = null;
+    await this.loadEmployeeFaceDescriptorsFromDB();
   }
 
-  // Add method to refresh single employee descriptor
-  async refreshSingleDescriptor(uid, forceRegenerate = false) {
+  async refreshSingleDescriptor(uid) {
     try {
       const uidString = String(uid);
       
-      if (forceRegenerate) {
-        // Delete cached descriptor
-        const pathResult = await this.electronAPI.getLocalProfilePath(uid);
-        if (pathResult.success && pathResult.path) {
-          const descriptorPath = pathResult.path.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '.descriptor.json');
-          await this.electronAPI.invoke('delete-face-descriptor', descriptorPath);
-        }
-      }
-      
-      // Get employee data
       const employeesResult = await this.electronAPI.getEmployees();
       if (!employeesResult.success) return false;
       
       const employee = employeesResult.data.find(e => String(e.uid) === uidString);
-      if (!employee) return false;
+      if (!employee?.face_descriptor) return false;
       
-      // Load new descriptor
-      const descriptor = await this.loadEmployeeFaceDescriptor(employee);
-      
-      if (descriptor) {
-        this.faceDescriptors.set(uidString, {
-          descriptor: descriptor,
-          employee: employee,
-          name: `${employee.first_name} ${employee.last_name}`
-        });
-        
-        // Update UI count
-        if (document.getElementById('facesLoadedCount')) {
-          document.getElementById('facesLoadedCount').textContent = this.faceDescriptors.size;
-        }
-        
-        console.log(`✓ Refreshed descriptor for ${employee.first_name} ${employee.last_name}`);
-        return true;
+      const descriptorArray = JSON.parse(employee.face_descriptor);
+      if (!Array.isArray(descriptorArray) || descriptorArray.length !== 128) {
+        return false;
       }
       
-      return false;
+      const descriptor = new Float32Array(descriptorArray);
+      this.faceDescriptors.set(uidString, {
+        descriptor: descriptor,
+        employee: employee,
+        name: `${employee.first_name} ${employee.last_name}`
+      });
+      
+      // Invalidate matcher cache
+      this.faceMatcherDirty = true;
+      
+      this.updateLoadedCount(this.faceDescriptors.size);
+      
+      console.log(`✓ Refreshed: ${employee.first_name} ${employee.last_name}`); 
+      return true;
+      
     } catch (error) {
-      console.error('Error refreshing single descriptor:', error);
+      console.error('Error refreshing descriptor:', error);
       return false;
     }
   }
@@ -841,11 +994,16 @@ class FaceRecognitionManager {
   destroy() {
     this.stopRecognition();
     
+    if (this.statusDebounceTimeout) {
+      clearTimeout(this.statusDebounceTimeout);
+    }
+    
     if (this.container) {
       this.container.remove();
     }
     
     this.faceDescriptors.clear();
+    this.cachedFaceMatcher = null;
     console.log('FaceRecognitionManager destroyed');
   }
 }

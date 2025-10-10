@@ -29,8 +29,8 @@ class Employee {
     const db = getDatabase()
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO employees 
-      (uid, id_number, id_barcode, first_name, middle_name, last_name, email, department, status, profile_picture, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      (uid, id_number, id_barcode, first_name, middle_name, last_name, email, department, status, profile_picture, face_descriptor, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `)
 
     const transaction = db.transaction((employees) => {
@@ -46,6 +46,7 @@ class Employee {
           emp.department,
           emp.status || "Active",
           emp.profile_picture,
+          emp.face_descriptor,
         )
       }
     })
