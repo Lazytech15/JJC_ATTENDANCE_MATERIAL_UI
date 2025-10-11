@@ -21,7 +21,7 @@ class FaceRecognitionManager {
     this.slowModeIntervalMs = 500;  // When no face: 500ms (2 FPS)
     this.lastDetectionTime = 0;
     this.confidenceThreshold = 0.45; // Lower for better detection
-    this.matchThreshold = 0.6; // Higher for better accuracy (default: 0.6)
+    this.matchThreshold = 0.55; // Higher for better accuracy (default: 0.6)
     this.faceDescriptors = new Map();
     
     // Recognition state with cooldown
@@ -96,15 +96,36 @@ class FaceRecognitionManager {
       }
       
       if (faceapi.tf?.setBackend) {
+        // Suppress WebGL initialization errors
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+          const msg = args.join(' ');
+          if (!msg.includes('WebGL') && !msg.includes('backend webgl')) {
+            originalConsoleError.apply(console, args);
+          }
+        };
+        
         // Try WebGL first (much faster), fallback to CPU
         try {
-          await faceapi.tf.setBackend('webgl');
-          await faceapi.tf.ready();
-          console.log('✓ TensorFlow backend: WebGL (GPU accelerated)');
+          // Check if WebGL is actually available
+          const canvas = document.createElement('canvas');
+          const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+          
+          if (gl && gl instanceof WebGLRenderingContext) {
+            await faceapi.tf.setBackend('webgl');
+            await faceapi.tf.ready();
+            console.log('✓ TensorFlow backend: WebGL (GPU accelerated)');
+          } else {
+            throw new Error('WebGL not available');
+          }
         } catch (e) {
+          // Fallback to CPU
           await faceapi.tf.setBackend('cpu');
           await faceapi.tf.ready();
           console.log('✓ TensorFlow backend: CPU (WebGL unavailable)');
+        } finally {
+          // Restore console.error
+          console.error = originalConsoleError;
         }
       }
     } catch (error) {
