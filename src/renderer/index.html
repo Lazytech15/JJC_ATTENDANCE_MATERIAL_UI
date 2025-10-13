@@ -327,9 +327,15 @@
 
     .header-right {
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       align-items: flex-end;
       gap: 16px;
+    }
+
+    .header-button-container{
+      display: flex;
+      flex-direction: row;
+      gap: 10px;
     }
 
     .datetime {
@@ -371,7 +377,7 @@
       transform: translateY(0);
     }
 
-    .refresh-btn {
+    .refresh-btn, .facerecog-btn {
       background: rgba(33, 33, 33, 0.1);
       /* subtle blue tint */
       color: black;
@@ -390,14 +396,14 @@
       backdrop-filter: blur(10px);
     }
 
-    .refresh-btn:hover {
+    .refresh-btn:hover, .facerecog-btn:hover {
       background: rgba(0, 123, 255, 0.15);
       border-color: rgba(0, 123, 255, 0.3);
       box-shadow: var(--shadow-2);
       transform: translateY(-1px);
     }
 
-    .refresh-btn:active {
+    .refresh-btn:active, .facerecog-btn:active {
       transform: translateY(0);
     }
 
@@ -2074,12 +2080,17 @@
       </div>
       <div class="header-right">
         <div class="datetime" id="datetime"></div>
+        <div class="header-button-container">
         <button class="settings-btn elevation-1" id="settingsBtn">
           ⚙️ Settings
         </button>
         <button class="refresh-btn elevation-1" onclick="location.reload();">
           🔄 Refresh
         </button>
+        <button id="openFaceRecognition" class="facerecog-btn elevation-1">
+                📷 Face Recog
+        </button>
+        </div>
       </div>
     </header>
 
@@ -2462,9 +2473,6 @@
               </button>
               <button type="button" class="btn btn-primary" id="preloadProfilesBtn">
                 ⚡ Preload Profiles
-              </button>
-              <button id="openFaceRecognition" class="btn btn-primary">
-                📷 Face Recognition
               </button>
               <button type="button" class="btn btn-secondary" id="refreshStatsBtn">
                 🔄 Refresh Stats

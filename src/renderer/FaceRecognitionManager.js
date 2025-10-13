@@ -21,13 +21,17 @@ class FaceRecognitionManager {
     this.slowModeIntervalMs = 500;  // When no face: 500ms (2 FPS)
     this.lastDetectionTime = 0;
     this.confidenceThreshold = 0.45; // Lower for better detection
-    this.matchThreshold = 0.55; // Higher for better accuracy (default: 0.6)
+    this.matchThreshold = 0.65; // Higher for better accuracy (default: 0.6)
     this.faceDescriptors = new Map();
     
     // Recognition state with cooldown
     this.lastRecognizedUID = null;
     this.lastRecognitionTime = 0;
     this.recognitionCooldown = 5000;
+
+    // NEW: Employee-specific cooldown tracking (1 hour per employee)
+    this.employeeCooldowns = new Map(); // Store { uid: timestamp }
+    this.employeeCooldownDuration = 60 * 60 * 1000; // 1 hour in milliseconds
     
     // OPTIMIZED: Adaptive detection speed
     this.consecutiveNoFaceFrames = 0;
@@ -176,72 +180,83 @@ class FaceRecognitionManager {
   }
 
   async loadEmployeeFaceDescriptorsFromDB() {
-    try {
-      this.showStatus('Loading profiles...', 'info');
-      
-      const employeesResult = await this.electronAPI.getEmployees();
-      if (!employeesResult.success || !employeesResult.data) {
-        this.showStatus('No employee profiles found', 'info');
-        this.descriptorsLoaded = true;
-        return;
-      }
-      
-      const employees = employeesResult.data;
-      let loadedCount = 0;
-      let skippedCount = 0;
-      
-      // OPTIMIZED: Process all at once (no batching needed)
-      employees.forEach((employee) => {
-        try {
-          if (!employee.face_descriptor) {
-            skippedCount++;
-            return;
-          }
-          
-          const descriptorArray = JSON.parse(employee.face_descriptor);
-          
-          if (!Array.isArray(descriptorArray) || descriptorArray.length !== 128) {
-            skippedCount++;
-            return;
-          }
-          
-          const descriptor = new Float32Array(descriptorArray);
-          const uidString = String(employee.uid);
-          
-          this.faceDescriptors.set(uidString, {
-            descriptor: descriptor,
-            employee: employee,
-            name: `${employee.first_name} ${employee.last_name}`
-          });
-          
-          loadedCount++;
-          
-        } catch (error) {
-          console.error(`Error processing descriptor for ${employee.uid}:`, error);
-          skippedCount++;
-        }
-      });
-      
-      // Invalidate cached matcher
-      this.faceMatcherDirty = true;
-      
+  try {
+    this.showStatus('Loading profiles...', 'info');
+    
+    const employeesResult = await this.electronAPI.getEmployees();
+    if (!employeesResult.success || !employeesResult.data) {
+      this.showStatus('No employee profiles found', 'info');
       this.descriptorsLoaded = true;
-      console.log(`✓ Loaded ${loadedCount} descriptors (${skippedCount} skipped)`);
-      
-      if (loadedCount === 0) {
-        this.showStatus('No valid face descriptors', 'error');
-      } else {
-        this.showStatus(`Ready: ${loadedCount} profiles`, 'success');
-      }
-      
-      this.updateLoadedCount(loadedCount);
-      
-    } catch (error) {
-      console.error('Error loading descriptors:', error);
-      this.showStatus('Error loading profiles', 'error');
-      this.descriptorsLoaded = true;
+      return;
     }
+    
+    const employees = employeesResult.data;
+    let loadedCount = 0;
+    let skippedCount = 0;
+    
+    // OPTIMIZED: Process all at once (no batching needed)
+    employees.forEach((employee) => {
+      try {
+        if (!employee.face_descriptor) {
+          skippedCount++;
+          return;
+        }
+        
+        const descriptorArray = JSON.parse(employee.face_descriptor);
+        
+        if (!Array.isArray(descriptorArray) || descriptorArray.length !== 128) {
+          skippedCount++;
+          return;
+        }
+        
+        const descriptor = new Float32Array(descriptorArray);
+        
+        // IMPORTANT: Use uid as the key for matching with attendance system
+        const uidString = String(employee.uid);
+        
+        this.faceDescriptors.set(uidString, {
+          descriptor: descriptor,
+          employee: {
+            uid: employee.uid, // Store the UID for attendance clocking
+            id: employee.id,
+            first_name: employee.first_name,
+            middle_name: employee.middle_name,
+            last_name: employee.last_name,
+            id_number: employee.id_number,
+            department: employee.department,
+            position: employee.position
+          },
+          name: `${employee.first_name} ${employee.last_name}`
+        });
+        
+        loadedCount++;
+        
+      } catch (error) {
+        console.error(`Error processing descriptor for ${employee.uid}:`, error);
+        skippedCount++;
+      }
+    });
+    
+    // Invalidate cached matcher
+    this.faceMatcherDirty = true;
+    
+    this.descriptorsLoaded = true;
+    console.log(`✓ Loaded ${loadedCount} descriptors (${skippedCount} skipped)`);
+    
+    if (loadedCount === 0) {
+      this.showStatus('No valid face descriptors', 'error');
+    } else {
+      this.showStatus(`Ready: ${loadedCount} profiles`, 'success');
+    }
+    
+    this.updateLoadedCount(loadedCount);
+    
+  } catch (error) {
+    console.error('Error loading descriptors:', error);
+    this.showStatus('Error loading profiles', 'error');
+    this.descriptorsLoaded = true;
   }
+}
 
   updateLoadedCount(count) {
     const countElement = document.getElementById('facesLoadedCount');
@@ -632,80 +647,91 @@ class FaceRecognitionManager {
   }
 
   async startRecognition() {
-    if (!this.modelsLoaded) {
-      this.showStatus('AI models not loaded yet', 'error');
-      return;
-    }
-    
-    if (!this.descriptorsLoaded) {
-      this.showStatus('Employee profiles loading...', 'info');
-      return;
-    }
-    
-    if (this.faceDescriptors.size === 0) {
-      this.showStatus('No employee profiles available', 'error');
-      return;
-    }
-    
-    try {
-      // OPTIMIZED: Even lower resolution for maximum speed
-      this.videoStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 480 },  // Lower resolution = faster
-          height: { ideal: 360 },
-          facingMode: 'user',
-          frameRate: { ideal: 30, max: 30 } // Limit frame rate
-        }
-      });
-      
-      this.videoElement.srcObject = this.videoStream;
-      this.isActive = true;
-      this.currentMode = 'normal';
-      this.consecutiveNoFaceFrames = 0;
-      this.consecutiveFaceFrames = 0;
-      
-      document.getElementById('startFaceRecognition').disabled = true;
-      document.getElementById('stopFaceRecognition').disabled = false;
-      document.getElementById('detectionStatus').textContent = 'Active';
-      this.showStatus('Face recognition active', 'detecting');
-      
-      this.startDetectionLoop();
-      
-    } catch (error) {
-      console.error('Error starting recognition:', error);
-      this.showStatus('Failed to access camera: ' + error.message, 'error');
-    }
+  if (!this.modelsLoaded) {
+    this.showStatus('AI models not loaded yet', 'error');
+    return;
   }
+  
+  if (!this.descriptorsLoaded) {
+    this.showStatus('Employee profiles loading...', 'info');
+    return;
+  }
+  
+  if (this.faceDescriptors.size === 0) {
+    this.showStatus('No employee profiles available', 'error');
+    return;
+  }
+  
+  try {
+    this.videoStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 480 },
+        height: { ideal: 360 },
+        facingMode: 'user',
+        frameRate: { ideal: 30, max: 30 }
+      }
+    });
+    
+    this.videoElement.srcObject = this.videoStream;
+    this.isActive = true;
+    this.currentMode = 'normal';
+    this.consecutiveNoFaceFrames = 0;
+    this.consecutiveFaceFrames = 0;
+    
+    document.getElementById('startFaceRecognition').disabled = true;
+    document.getElementById('stopFaceRecognition').disabled = false;
+    document.getElementById('detectionStatus').textContent = 'Active';
+    this.showStatus('Face recognition active', 'detecting');
+    
+    this.startDetectionLoop();
+    
+    // NEW: Start periodic cleanup of expired cooldowns (every 5 minutes)
+    this.cooldownCleanupInterval = setInterval(() => {
+      this.cleanupExpiredCooldowns();
+    }, 5 * 60 * 1000);
+    
+  } catch (error) {
+    console.error('Error starting recognition:', error);
+    this.showStatus('Failed to access camera: ' + error.message, 'error');
+  }
+}
 
   stopRecognition() {
-    this.isActive = false;
-    
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
-    
-    if (this.videoStream) {
-      this.videoStream.getTracks().forEach(track => track.stop());
-      this.videoStream = null;
-    }
-    
-    if (this.videoElement) {
-      this.videoElement.srcObject = null;
-    }
-    
-    if (this.canvasElement) {
-      const ctx = this.canvasElement.getContext('2d');
-      ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
-    }
-    
-    document.getElementById('startFaceRecognition').disabled = false;
-    document.getElementById('stopFaceRecognition').disabled = true;
-    document.getElementById('detectionStatus').textContent = 'Inactive';
-    document.getElementById('fpsCounter').textContent = '0';
-    this.showStatus('Face recognition stopped', 'info');
-    this.updatePerformanceMode('Stopped');
+  this.isActive = false;
+  
+  if (this.animationFrameId) {
+    cancelAnimationFrame(this.animationFrameId);
+    this.animationFrameId = null;
   }
+  
+  if (this.videoStream) {
+    this.videoStream.getTracks().forEach(track => track.stop());
+    this.videoStream = null;
+  }
+  
+  if (this.videoElement) {
+    this.videoElement.srcObject = null;
+  }
+  
+  if (this.canvasElement) {
+    const ctx = this.canvasElement.getContext('2d');
+    ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+  }
+  
+  // NEW: Clear cooldown cleanup interval
+  if (this.cooldownCleanupInterval) {
+    clearInterval(this.cooldownCleanupInterval);
+    this.cooldownCleanupInterval = null;
+  }
+  
+  document.getElementById('startFaceRecognition').disabled = false;
+  document.getElementById('stopFaceRecognition').disabled = true;
+  document.getElementById('detectionStatus').textContent = 'Inactive';
+  document.getElementById('fpsCounter').textContent = '0';
+  this.showStatus('Face recognition stopped', 'info');
+  this.updatePerformanceMode('Stopped');
+}
+
 
   // ULTRA OPTIMIZED: Adaptive speed based on detection
   startDetectionLoop() {
@@ -871,60 +897,225 @@ class FaceRecognitionManager {
   }
 
   async handleRecognition(employeeData, distance) {
-    const currentTime = Date.now();
-    const confidence = Math.round((1 - distance) * 100);
-    
-    const uidString = String(employeeData.employee.uid);
-    
-    // Cooldown check
-    if (
-      this.lastRecognizedUID === uidString &&
-      currentTime - this.lastRecognitionTime < this.recognitionCooldown
-    ) {
-      return;
-    }
-    
-    this.lastRecognizedUID = uidString;
-    this.lastRecognitionTime = currentTime;
-    
-    this.showStatus(
-      `✓ ${employeeData.name} (${confidence}%)`,
-      'recognized'
+  const currentTime = Date.now();
+  const confidence = Math.round((1 - distance) * 100);
+  
+  const uidString = String(employeeData.employee.uid);
+  
+  // Only process if confidence is 70% or above
+  if (confidence < 70) {
+    this.showStatusDebounced(
+      `Low confidence: ${employeeData.name} (${confidence}%)`,
+      'detecting'
     );
-    
-    await this.processAttendance(employeeData.employee);
+    return;
   }
+  
+  // NEW: Check employee-specific cooldown (1 hour)
+  if (this.employeeCooldowns.has(uidString)) {
+    const lastScanTime = this.employeeCooldowns.get(uidString);
+    const timeSinceLastScan = currentTime - lastScanTime;
+    
+    if (timeSinceLastScan < this.employeeCooldownDuration) {
+      const remainingMinutes = Math.ceil((this.employeeCooldownDuration - timeSinceLastScan) / (60 * 1000));
+      console.log(`Employee ${employeeData.name} in cooldown period. ${remainingMinutes} minutes remaining.`);
+      
+      this.showStatus(
+        `⏱️ ${employeeData.name} recently clocked. Wait ${remainingMinutes} min`,
+        'info'
+      );
+      
+      // Still update display cooldown to prevent repeated messages
+      this.lastRecognizedUID = uidString;
+      this.lastRecognitionTime = currentTime;
+      
+      return; // Skip processing
+    } else {
+      // Cooldown expired, remove from map
+      this.employeeCooldowns.delete(uidString);
+    }
+  }
+  
+  // Display cooldown check (5 seconds to prevent UI spam)
+  if (
+    this.lastRecognizedUID === uidString &&
+    currentTime - this.lastRecognitionTime < this.recognitionCooldown
+  ) {
+    return;
+  }
+  
+  this.lastRecognizedUID = uidString;
+  this.lastRecognitionTime = currentTime;
+  
+  this.showStatus(
+    `✓ ${employeeData.name} (${confidence}%)`,
+    'recognized'
+  );
+  
+  // Add employee to cooldown map BEFORE processing
+  this.employeeCooldowns.set(uidString, currentTime);
+  
+  // Automatically clock in/out
+  await this.processAttendance(employeeData.employee);
+}
+
+// Add a method to manually clear an employee's cooldown (useful for testing or admin override)
+clearEmployeeCooldown(uid) {
+  const uidString = String(uid);
+  if (this.employeeCooldowns.has(uidString)) {
+    this.employeeCooldowns.delete(uidString);
+    console.log(`Cleared cooldown for employee ${uid}`);
+    return true;
+  }
+  return false;
+}
+
+// Add a method to check remaining cooldown time
+getRemainingCooldown(uid) {
+  const uidString = String(uid);
+  if (!this.employeeCooldowns.has(uidString)) {
+    return 0;
+  }
+  
+  const lastScanTime = this.employeeCooldowns.get(uidString);
+  const elapsed = Date.now() - lastScanTime;
+  const remaining = Math.max(0, this.employeeCooldownDuration - elapsed);
+  
+  return Math.ceil(remaining / (60 * 1000)); // Return minutes remaining
+}
+
+// Add a method to clean up expired cooldowns periodically
+cleanupExpiredCooldowns() {
+  const currentTime = Date.now();
+  const expiredUIDs = [];
+  
+  for (const [uid, timestamp] of this.employeeCooldowns.entries()) {
+    if (currentTime - timestamp >= this.employeeCooldownDuration) {
+      expiredUIDs.push(uid);
+    }
+  }
+  
+  expiredUIDs.forEach(uid => this.employeeCooldowns.delete(uid));
+  
+  if (expiredUIDs.length > 0) {
+    console.log(`Cleaned up ${expiredUIDs.length} expired cooldowns`);
+  }
+}
 
   async processAttendance(employee) {
-    try {
-      const result = await this.electronAPI.clockAttendance({
-        input: employee.uid,
-        inputType: 'barcode'
-      });
+  try {
+    // Show processing indicator
+    this.showStatus(
+      `⏳ Processing ${employee.first_name} ${employee.last_name}...`,
+      'info'
+    );
+    
+    console.log('Face Recognition - Looking up employee by UID:', employee.uid);
+    
+    // First, get the full employee data to retrieve the barcode
+    const employeeResult = await this.electronAPI.getEmployees();
+    
+    if (!employeeResult.success || !employeeResult.data) {
+      throw new Error('Failed to retrieve employee list');
+    }
+    
+    // Find the employee by UID to get their barcode
+    const fullEmployee = employeeResult.data.find(emp => 
+      String(emp.uid) === String(employee.uid)
+    );
+    
+    if (!fullEmployee) {
+      throw new Error('Employee not found in database');
+    }
+    
+    console.log('Found employee:', fullEmployee.first_name, fullEmployee.last_name);
+    console.log('Using barcode:', fullEmployee.id_barcode);
+    
+    // Use the employee's barcode (id_barcode) for clocking
+    const result = await this.electronAPI.clockAttendance({
+      input: String(fullEmployee.id_barcode), // Use id_barcode field
+      inputType: 'barcode'
+    });
+    
+    console.log('Clock result:', result.success ? 'SUCCESS' : 'FAILED');
+    if (!result.success) {
+      console.error('Clock error:', result.error);
+    }
+    
+    if (result.success) {
+      // Determine clock action
+      const clockAction = this.getClockActionText(result.data.clockType);
       
-      if (result.success) {
-        if (this.attendanceApp?.showEmployeeDisplay) {
-          this.attendanceApp.showEmployeeDisplay(result.data);
-        }
-        
-        this.showStatus(
-          `✓ Recorded: ${employee.first_name} ${employee.last_name}`,
-          'recognized'
-        );
-        
-        setTimeout(() => {
-          if (this.isActive) {
-            this.showStatus('Ready for next scan', 'detecting');
-          }
-        }, 2500);
-        
-      } else {
-        this.showStatus(`Error: ${result.error}`, 'error');
+      // Show success with clock action
+      this.showStatus(
+        `✅ ${clockAction}: ${employee.first_name} ${employee.last_name}`,
+        'recognized'
+      );
+      
+      // Display employee info in main app
+      if (this.attendanceApp?.showEmployeeDisplay) {
+        this.attendanceApp.showEmployeeDisplay(result.data);
       }
       
+      // Play success sound
+      this.playSuccessSound();
+      
+      // Show ready message after delay
+      setTimeout(() => {
+        if (this.isActive) {
+          this.showStatus('✓ Ready for next person', 'detecting');
+        }
+      }, 3000);
+      
+    } else {
+      this.showStatus(`❌ Error: ${result.error}`, 'error');
+      this.playErrorSound();
+    }
+    
+  } catch (error) {
+    console.error('Error processing attendance:', error);
+    this.showStatus(`❌ Failed: ${error.message}`, 'error');
+    this.playErrorSound();
+  }
+}
+  
+  // Get human-readable clock action text
+  getClockActionText(clockType) {
+    if (!clockType) return 'Clocked';
+    
+    const actions = {
+      'morning_in': 'Morning Clock In',
+      'morning_out': 'Morning Clock Out',
+      'afternoon_in': 'Afternoon Clock In',
+      'afternoon_out': 'Afternoon Clock Out',
+      'evening_in': 'Evening Clock In',
+      'evening_out': 'Evening Clock Out',
+      'overtime_in': 'Overtime Clock In',
+      'overtime_out': 'Overtime Clock Out'
+    };
+    
+    return actions[clockType] || 'Clocked';
+  }
+  
+  // Play success sound
+  playSuccessSound() {
+    try {
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzvLZizcIHGm98OScTQwOUKrm8K1gGgU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU=');
+      audio.volume = 0.5;
+      audio.play().catch(err => console.log('Could not play success sound:', err));
     } catch (error) {
-      console.error('Error processing attendance:', error);
-      this.showStatus('Failed to record attendance', 'error');
+      // Sound playback failed, ignore
+    }
+  }
+  
+  // Play error sound
+  playErrorSound() {
+    try {
+      const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQoGAAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA//8AAP//AAD//wAA');
+      audio.volume = 0.3;
+      audio.play().catch(err => console.log('Could not play error sound:', err));
+    } catch (error) {
+      // Sound playback failed, ignore
     }
   }
 
@@ -1012,21 +1203,27 @@ class FaceRecognitionManager {
     }
   }
 
-  destroy() {
-    this.stopRecognition();
-    
-    if (this.statusDebounceTimeout) {
-      clearTimeout(this.statusDebounceTimeout);
-    }
-    
-    if (this.container) {
-      this.container.remove();
-    }
-    
-    this.faceDescriptors.clear();
-    this.cachedFaceMatcher = null;
-    console.log('FaceRecognitionManager destroyed');
+  // Update destroy method to clear cooldown data
+destroy() {
+  this.stopRecognition();
+  
+  if (this.statusDebounceTimeout) {
+    clearTimeout(this.statusDebounceTimeout);
   }
+  
+  if (this.cooldownCleanupInterval) {
+    clearInterval(this.cooldownCleanupInterval);
+  }
+  
+  if (this.container) {
+    this.container.remove();
+  }
+  
+  this.faceDescriptors.clear();
+  this.employeeCooldowns.clear(); // NEW: Clear cooldown map
+  this.cachedFaceMatcher = null;
+  console.log('FaceRecognitionManager destroyed');
+}
 }
 
 window.FaceRecognitionManager = FaceRecognitionManager;
