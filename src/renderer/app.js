@@ -69,13 +69,12 @@ class AttendanceApp {
   this.autoSyncInterval = null; // Auto-sync interval
   this.summaryAutoSyncInterval = null; // Summary auto-sync interval
 
-  // ADD THESE NEW LINES:
-  this.faceRecognitionSchedule = [
-    { hour: 7, minute: 58 },   // 08:00
-    { hour: 11, minute: 58 },  // 12:00
-    { hour: 12, minute: 58 },  // 13:00
-    { hour: 16, minute: 58 }   // 17:00
-  ];
+this.faceRecognitionSchedule = [
+  { hour: 8, minute: 0, second: 0 },   // 07:59:20
+  { hour: 12, minute: 0, second: 0 },   // 11:59:00 (12:00)
+  { hour: 13, minute: 0, second: 0 },   // 12:59:00 (13:00)
+  { hour: 17, minute: 0, second: 0 }    // 16:59:00 (17:00)
+];
   this.faceRecognitionDuration = 15; // Minutes to keep open
   this.faceRecognitionCheckInterval = null;
   this.faceRecognitionAutoCloseTimeout = null;
@@ -156,9 +155,10 @@ async onProfileImageUpdated(employeeUID) {
 
 startFaceRecognitionScheduler() {
   console.log('Starting face recognition scheduler...');
+  // Check every second instead of every minute
   this.faceRecognitionCheckInterval = setInterval(() => {
     this.checkFaceRecognitionSchedule();
-  }, 60000);
+  }, 1000);  // Changed from 60000 to 1000 (1 second)
   setTimeout(() => this.checkFaceRecognitionSchedule(), 2000);
 }
 
@@ -168,13 +168,16 @@ checkFaceRecognitionSchedule() {
   const now = new Date();
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
+  const currentSecond = now.getSeconds();  // ADD THIS LINE
   
   const matchedSchedule = this.faceRecognitionSchedule.find(
-    schedule => schedule.hour === currentHour && schedule.minute === currentMinute
+    schedule => schedule.hour === currentHour && 
+                schedule.minute === currentMinute &&
+                schedule.second === currentSecond  // ADD THIS CONDITION
   );
   
   if (matchedSchedule) {
-    console.log(`Face recognition auto-start at ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+    console.log(`Face recognition auto-start at ${currentHour}:${String(currentMinute).padStart(2, '0')}:${String(currentSecond).padStart(2, '0')}`);
     this.autoOpenFaceRecognition();
   }
 }
