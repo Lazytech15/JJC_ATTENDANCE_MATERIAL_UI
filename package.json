@@ -1,6 +1,6 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Offline and dynamic tracking of employee attendance via barcode scanner",
   "main": "src/main.js",
   "type": "commonjs",
@@ -62,25 +62,11 @@
       "assets/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "src",
-        "to": "app/src",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "assets",
-        "to": "app/assets",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
+    "asar": true,
     "asarUnpack": [
-      "src/**/*",
-      "assets/**/*"
+      "**/node_modules/better-sqlite3/**/*",
+      "**/node_modules/canvas/**/*",
+      "**/*.node"
     ],
     "win": {
       "target": [
@@ -113,7 +99,6 @@
       "icon": "assets/icon.png",
       "category": "Office"
     },
-    "asar": false,
     "compression": "normal",
     "npmRebuild": true
   }

@@ -32,7 +32,7 @@ class FaceRecognitionManager {
     // Employee-specific cooldown tracking
     this.employeeCooldowns = new Map();
     this.employeeCooldownDuration = 60 * 60 * 1000; // 1 hour for camera
-    
+
     this.barcodeCooldowns = new Map();
     this.barcodeCooldownDuration = 2000; // 2 seconds for barcode
 
@@ -82,6 +82,12 @@ class FaceRecognitionManager {
     this.autoCloseCountdownInterval = null;
     this.autoCloseDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
     this.autoCloseStartTime = null;
+
+    // Current time display
+    this.currentTimeInterval = null;
+
+    // Barcode input tracking
+    this.barcodeInputInitialized = false;
 
     console.log('FaceRecognitionManager created with integrated employee display');
   }
@@ -291,17 +297,20 @@ class FaceRecognitionManager {
     this.container = document.createElement('div');
     this.container.id = 'faceRecognitionContainer';
     this.container.className = 'face-recognition-container hidden';
-        this.container.innerHTML = `
+    this.container.innerHTML = `
   <div class="face-recognition-header">
-    <div class="header-left">
-      <h3>👤 Face Recognition System</h3>
-      <span class="badge badge-ultra">Ultra Mode</span>
-    </div>
-    <div class="header-right">
-      <span id="autoCloseCountdown" class="countdown-badge">⏱️ 15:00</span>
-      <button id="closeFaceRecognition" class="close-btn">✕</button>
-    </div>
+  <div class="header-left">
+    <h3>👤 Face Recognition System</h3>
+    <span class="badge badge-ultra">Ultra Mode</span>
   </div>
+  <div class="header-center">
+    <span id="currentTimeDisplay" class="current-time-badge">⏰ --:--:--</span>
+  </div>
+  <div class="header-right">
+    <span id="autoCloseCountdown" class="countdown-badge">⏱️ 15:00</span>
+    <button id="closeFaceRecognition" class="close-btn">✕</button>
+  </div>
+</div>
   
   <div class="face-recognition-body">
     <!-- Left Panel: Video + Stats + Barcode -->
@@ -468,66 +477,112 @@ class FaceRecognitionManager {
       this.clearScanLog();
     });
 
-    // Barcode scanner input handler
-    const barcodeInput = document.getElementById('barcodeInput');
-    if (barcodeInput) {
-      let barcodeBuffer = '';
-      let barcodeTimeout = null;
+    // Initialize barcode scanner
+    this.initializeBarcodeScanner();
+  }
 
-      barcodeInput.addEventListener('input', (e) => {
+  initializeBarcodeScanner() {
+    const barcodeInput = document.getElementById('barcodeInput');
+    if (!barcodeInput) return;
+
+    // Remove existing listeners if any
+    const newBarcodeInput = barcodeInput.cloneNode(true);
+    barcodeInput.parentNode.replaceChild(newBarcodeInput, barcodeInput);
+
+    let barcodeBuffer = '';
+    let barcodeTimeout = null;
+
+    newBarcodeInput.addEventListener('input', (e) => {
+      if (barcodeTimeout) {
+        clearTimeout(barcodeTimeout);
+      }
+
+      barcodeTimeout = setTimeout(async () => {
+        const barcode = newBarcodeInput.value.trim();
+
+        if (barcode.length > 0) {
+          console.log(`📷 Barcode input received: "${barcode}"`);
+          await this.processBarcodeInput(barcode);
+          newBarcodeInput.value = '';
+          barcodeBuffer = '';
+        }
+      }, 150);
+    });
+
+    newBarcodeInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+
         if (barcodeTimeout) {
           clearTimeout(barcodeTimeout);
+          barcodeTimeout = null;
         }
 
-        barcodeTimeout = setTimeout(async () => {
-          const barcode = barcodeInput.value.trim();
-          
-          if (barcode.length > 0) {
-            console.log(`📷 Barcode input received: "${barcode}"`);
-            await this.processBarcodeInput(barcode);
-            barcodeInput.value = '';
-            barcodeBuffer = '';
-          }
-        }, 150);
-      });
+        const barcode = newBarcodeInput.value.trim();
 
-      barcodeInput.addEventListener('keydown', async (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          
-          if (barcodeTimeout) {
-            clearTimeout(barcodeTimeout);
-            barcodeTimeout = null;
-          }
-          
-          const barcode = barcodeInput.value.trim();
-          
-          if (barcode.length > 0) {
-            console.log(`⌨️ Manual barcode entry: "${barcode}"`);
-            await this.processBarcodeInput(barcode);
-            barcodeInput.value = '';
-          }
+        if (barcode.length > 0) {
+          console.log(`⌨️ Manual barcode entry: "${barcode}"`);
+          await this.processBarcodeInput(barcode);
+          newBarcodeInput.value = '';
         }
-      });
+      }
+    });
 
-      barcodeInput.addEventListener('focus', () => {
-        barcodeInput.style.borderColor = '#3b82f6';
-        barcodeInput.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-      });
+    newBarcodeInput.addEventListener('focus', () => {
+      newBarcodeInput.style.borderColor = '#3b82f6';
+      newBarcodeInput.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+    });
 
-      barcodeInput.addEventListener('blur', () => {
-        barcodeInput.style.borderColor = '#e5e7eb';
-        barcodeInput.style.boxShadow = 'none';
-      });
+    newBarcodeInput.addEventListener('blur', () => {
+      newBarcodeInput.style.borderColor = '#e5e7eb';
+      newBarcodeInput.style.boxShadow = 'none';
+    });
+
+    this.barcodeInputInitialized = true;
+    console.log('✓ Barcode scanner initialized');
+  }
+
+  updateCurrentTimeDisplay() {
+    const timeElement = document.getElementById('currentTimeDisplay');
+    if (!timeElement) return;
+
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const seconds = now.getSeconds();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+
+    // const timeString = `${displayHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')} ${ampm}`;
+
+    // timeElement.textContent = `⏰ ${timeString}`;
+  }
+
+  startCurrentTimeDisplay() {
+    this.updateCurrentTimeDisplay();
+
+    if (this.currentTimeInterval) {
+      clearInterval(this.currentTimeInterval);
+    }
+
+    this.currentTimeInterval = setInterval(() => {
+      this.updateCurrentTimeDisplay();
+    }, 1000);
+  }
+
+  stopCurrentTimeDisplay() {
+    if (this.currentTimeInterval) {
+      clearInterval(this.currentTimeInterval);
+      this.currentTimeInterval = null;
     }
   }
 
   addStyles() {
-  if (document.getElementById('faceRecognitionStyles')) return;
+    if (document.getElementById('faceRecognitionStyles')) return;
 
-  const style = document.createElement('style');
-  style.id = 'faceRecognitionStyles';
-  style.textContent = `
+    const style = document.createElement('style');
+    style.id = 'faceRecognitionStyles';
+    style.textContent = `
     .face-recognition-container {
       position: fixed;
       top: 50%;
@@ -564,6 +619,27 @@ class FaceRecognitionManager {
       align-items: center;
       gap: 12px;
     }
+    
+    .header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.current-time-badge {
+  font-size: 16px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  padding: 8px 20px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  min-width: 160px;
+  text-align: center;
+}
       .header-right {
       display: flex;
       align-items: center;
@@ -1330,10 +1406,58 @@ class FaceRecognitionManager {
         gap: 12px;
       }
     }
+      /* Toast Notifications */
+.face-recognition-toast {
+  position: fixed;
+  top: 100px;
+  right: -400px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  padding: 16px 20px;
+  z-index: 10001;
+  transition: right 0.3s ease-out;
+  max-width: 400px;
+  min-width: 300px;
+}
+
+.face-recognition-toast.show {
+  right: 24px;
+}
+
+.toast-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toast-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.toast-message {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.5;
+}
+
+.face-recognition-toast.toast-error {
+  border-left: 4px solid #ef4444;
+}
+
+.face-recognition-toast.toast-success {
+  border-left: 4px solid #22c55e;
+}
+
+.face-recognition-toast.toast-info {
+  border-left: 4px solid #3b82f6;
+}
   `;
 
-  document.head.appendChild(style);
-}
+    document.head.appendChild(style);
+  }
 
   showIntegratedEmployeeDisplay(data) {
     const displayContent = document.getElementById('employeeDisplayContent');
@@ -1902,7 +2026,7 @@ class FaceRecognitionManager {
 
     if (this.isProcessingAttendance) {
       const timeSinceLastProcess = currentTime - this.lastProcessedTime;
-      
+
       if (timeSinceLastProcess < this.processingLockDuration) {
         console.log(`⏸️ Camera recognition blocked - processing lock active`);
         return;
@@ -1921,7 +2045,7 @@ class FaceRecognitionManager {
       const lastScanTime = this.employeeCooldowns.get(uidString);
       const timeSinceLastScan = currentTime - lastScanTime;
       const remainingMinutes = Math.ceil((this.employeeCooldownDuration - timeSinceLastScan) / (60 * 1000));
-      
+
       this.showStatus(
         `⏱️ ${employeeData.name} recently clocked. Wait ${remainingMinutes} min`,
         'info'
@@ -1954,17 +2078,17 @@ class FaceRecognitionManager {
   clearEmployeeCooldown(uid) {
     const uidString = String(uid);
     let cleared = false;
-    
+
     if (this.employeeCooldowns.has(uidString)) {
       this.employeeCooldowns.delete(uidString);
       cleared = true;
     }
-    
+
     if (this.barcodeCooldowns.has(uidString)) {
       this.barcodeCooldowns.delete(uidString);
       cleared = true;
     }
-    
+
     if (cleared) {
       console.log(`Cleared cooldown for employee ${uid}`);
       return true;
@@ -1974,21 +2098,21 @@ class FaceRecognitionManager {
 
   getRemainingCooldown(uid) {
     const uidString = String(uid);
-    
+
     if (this.employeeCooldowns.has(uidString)) {
       const lastScanTime = this.employeeCooldowns.get(uidString);
       const elapsed = Date.now() - lastScanTime;
       const remaining = Math.max(0, this.employeeCooldownDuration - elapsed);
       return Math.ceil(remaining / (60 * 1000));
     }
-    
+
     if (this.barcodeCooldowns.has(uidString)) {
       const lastScanTime = this.barcodeCooldowns.get(uidString);
       const elapsed = Date.now() - lastScanTime;
       const remaining = Math.max(0, this.barcodeCooldownDuration - elapsed);
       return Math.ceil(remaining / 1000);
     }
-    
+
     return 0;
   }
 
@@ -2081,7 +2205,25 @@ class FaceRecognitionManager {
   async processAttendance(employee, method = 'camera') {
     try {
       const uidString = String(employee.uid);
-      
+
+      // Check if already scanned in current session (recent scans)
+      const alreadyScanned = this.scanLog.find(entry =>
+        String(entry.uid) === uidString && entry.success === true
+      );
+
+      if (alreadyScanned) {
+        const employeeName = `${employee.first_name} ${employee.last_name}`;
+        const timeAgo = this.getTimeAgo(alreadyScanned.timestamp);
+
+        console.log(`🚫 ${employeeName} already scanned ${timeAgo} ago`);
+        this.showToast(
+          `${employeeName} already recorded ${timeAgo} ago`,
+          'error'
+        );
+        this.playErrorSound();
+        return;
+      }
+
       if (this.isProcessingAttendance) {
         console.log(`⏸️ Attendance processing already in progress, skipping...`);
         return;
@@ -2092,18 +2234,18 @@ class FaceRecognitionManager {
       this.lastProcessedTime = Date.now();
 
       console.log(`🔒 Processing lock activated (method: ${method})`);
-      
+
       if (method === 'camera') {
         if (this.isInCameraCooldown(uidString)) {
           const lastScanTime = this.employeeCooldowns.get(uidString);
           const timeSinceLastScan = Date.now() - lastScanTime;
           const remainingMinutes = Math.ceil((this.employeeCooldownDuration - timeSinceLastScan) / (60 * 1000));
-          
+
           this.showStatus(
             `⏱️ Please wait ${remainingMinutes} minutes...`,
             'info'
           );
-          
+
           return;
         }
       } else if (method === 'barcode') {
@@ -2112,7 +2254,7 @@ class FaceRecognitionManager {
             `⏱️ Please wait 2 seconds...`,
             'info'
           );
-          
+
           return;
         }
       }
@@ -2202,12 +2344,57 @@ class FaceRecognitionManager {
     try {
       const currentTime = Date.now();
       const trimmedBarcode = String(barcode).trim();
-      
-      // ENHANCED: Check if exact same barcode was just processed
+
+      // ENHANCED: Pre-lookup employee to check cooldown BEFORE setting lock
+      let employeeUID = null;
+      const employeesResult = await this.electronAPI.getEmployees();
+
+      if (employeesResult.success && employeesResult.data) {
+        const employee = employeesResult.data.find(emp =>
+          String(emp.id_barcode) === trimmedBarcode
+        );
+
+        if (employee) {
+          const employeeUID = String(employee.uid);
+
+          // Check if already scanned in current session (recent scans)
+          const alreadyScanned = this.scanLog.find(entry =>
+            String(entry.uid) === employeeUID && entry.success === true
+          );
+
+          if (alreadyScanned) {
+            const employeeName = `${employee.first_name} ${employee.last_name}`;
+            const timeAgo = this.getTimeAgo(alreadyScanned.timestamp);
+
+            console.log(`🚫 ${employeeName} already scanned ${timeAgo} ago`);
+            this.showToast(
+              `${employeeName} already recorded ${timeAgo} ago`,
+              'error'
+            );
+            this.playErrorSound();
+            return;
+          }
+
+          // Check if in barcode cooldown
+          if (this.isInBarcodeCooldown(employeeUID)) {
+            const lastScanTime = this.barcodeCooldowns.get(employeeUID);
+            const timeSinceLastScan = currentTime - lastScanTime;
+            const remainingSeconds = Math.ceil((this.barcodeCooldownDuration - timeSinceLastScan) / 1000);
+
+            console.log(`🚫 Employee ${employee.first_name} ${employee.last_name} in barcode cooldown`);
+            this.showStatus(
+              `⏱️ ${employee.first_name} ${employee.last_name} - Wait ${remainingSeconds}s`,
+              'info'
+            );
+            return;
+          }
+        }
+      }
+
+      // Check if exact same barcode was just processed
       if (this.lastProcessedInput === trimmedBarcode) {
         const timeSinceLastProcess = currentTime - this.lastProcessedTime;
-        
-        // Reject if same barcode within 5 seconds
+
         if (timeSinceLastProcess < 5000) {
           console.log(`🚫 Duplicate barcode detected within 5 seconds - REJECTED`);
           this.showStatus(
@@ -2221,7 +2408,7 @@ class FaceRecognitionManager {
       // ENHANCED: Global processing lock - stricter check
       if (this.isProcessingAttendance) {
         const timeSinceLastProcess = currentTime - this.lastProcessedTime;
-        
+
         if (timeSinceLastProcess < this.processingLockDuration) {
           console.log(`⏸️ Barcode input blocked - processing lock active (${Math.ceil((this.processingLockDuration - timeSinceLastProcess) / 1000)}s remaining)`);
           this.showStatus(
@@ -2232,24 +2419,22 @@ class FaceRecognitionManager {
         }
       }
 
-      // ENHANCED: Pre-lookup employee to check cooldown BEFORE setting lock
-      let employeeUID = null;
-      const employeesResult = await this.electronAPI.getEmployees();
-      
+
+
       if (employeesResult.success && employeesResult.data) {
-        const employee = employeesResult.data.find(emp => 
+        const employee = employeesResult.data.find(emp =>
           String(emp.id_barcode) === trimmedBarcode
         );
-        
+
         if (employee) {
           employeeUID = String(employee.uid);
-          
+
           // Check if employee is in barcode cooldown
           if (this.isInBarcodeCooldown(employeeUID)) {
             const lastScanTime = this.barcodeCooldowns.get(employeeUID);
             const timeSinceLastScan = currentTime - lastScanTime;
             const remainingSeconds = Math.ceil((this.barcodeCooldownDuration - timeSinceLastScan) / 1000);
-            
+
             console.log(`🚫 Employee ${employee.first_name} ${employee.last_name} in barcode cooldown`);
             this.showStatus(
               `⏱️ ${employee.first_name} ${employee.last_name} - Wait ${remainingSeconds}s`,
@@ -2257,11 +2442,11 @@ class FaceRecognitionManager {
             );
             return;
           }
-          
+
           // Check if employee already clocked via camera in this session
-          const employeeCameraScan = this.scanLog.find(entry => 
-            String(entry.uid) === employeeUID && 
-            entry.method === 'camera' && 
+          const employeeCameraScan = this.scanLog.find(entry =>
+            String(entry.uid) === employeeUID &&
+            entry.method === 'camera' &&
             entry.success === true
           );
 
@@ -2366,6 +2551,18 @@ class FaceRecognitionManager {
     return actions[clockType] || 'Clocked';
   }
 
+  getTimeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+    if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+
+    const hours = Math.floor(minutes / 60);
+    return `${hours} hour${hours !== 1 ? 's' : ''}`;
+  }
+
   playSuccessSound() {
     try {
       const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzvLZizcIHGm98OScTQwOUKrm8K1gGgU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU7k9byz3osBSh+zPLaizsIGGS57OihUhEJTKXh8bJeGAU=');
@@ -2406,6 +2603,35 @@ class FaceRecognitionManager {
     }
   }
 
+  showToast(message, type = 'info') {
+    // Remove existing toast if any
+    const existingToast = document.querySelector('.face-recognition-toast');
+    if (existingToast) {
+      existingToast.remove();
+    }
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `face-recognition-toast toast-${type}`;
+    toast.innerHTML = `
+    <div class="toast-content">
+      <span class="toast-icon">${type === 'error' ? '⚠️' : type === 'success' ? '✅' : 'ℹ️'}</span>
+      <span class="toast-message">${message}</span>
+    </div>
+  `;
+
+    document.body.appendChild(toast);
+
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
+
+    // Auto remove after 4 seconds
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
   async show() {
     if (!this.initializationStarted) {
       await this.init();
@@ -2415,20 +2641,33 @@ class FaceRecognitionManager {
       this.container.classList.remove('hidden');
     }
 
-    // Start auto-close countdown
+    this.startCurrentTimeDisplay();
     this.startAutoCloseCountdown();
+    this.initializeBarcodeScanner();
+
+    // Focus barcode input after a short delay
+    setTimeout(() => {
+      const barcodeInput = document.getElementById('barcodeInput');
+      if (barcodeInput) {
+        barcodeInput.focus();
+        console.log('✓ Barcode input focused');
+      }
+    }, 300);
   }
 
   hide() {
     this.stopRecognition();
-    
+
+    // Stop current time display
+    this.stopCurrentTimeDisplay();
+
     // Clear auto-close countdown
     this.stopAutoCloseCountdown();
-    
+
     if (this.container) {
       this.container.classList.add('hidden');
     }
-    
+
     this.clearScanLog();
     this.clearIntegratedEmployeeDisplay();
     console.log('Face recognition closed - scan log cleared');
