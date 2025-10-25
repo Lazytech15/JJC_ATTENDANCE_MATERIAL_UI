@@ -59,13 +59,30 @@ class AttendanceApp {
     this.initializeDateRangeControls();
     this.faceRecognitionManager = null;
 
-        // Server edit sync tracking
-    this.serverEditSyncEnabled = true;
-    this.serverEditSyncInterval = null;
-    this.lastServerEditCheck = null;
-    
-    // Initialize server edit sync listener
-    this.setupServerEditSyncListener();
+      // Server edit sync tracking - MANUAL ONLY
+  this.lastServerEditCheck = null;
+  
+  // Initialize server edit sync listener
+  this.setupServerEditSyncListener();
+  
+  this.barcodeTimeout = null; // Add timeout for barcode handling
+  this.autoSyncInterval = null; // Auto-sync interval
+  this.summaryAutoSyncInterval = null; // Summary auto-sync interval
+
+  // ADD THESE NEW LINES:
+  this.faceRecognitionSchedule = [
+    { hour: 7, minute: 58 },   // 08:00
+    { hour: 11, minute: 58 },  // 12:00
+    { hour: 12, minute: 58 },  // 13:00
+    { hour: 16, minute: 58 }   // 17:00
+  ];
+  this.faceRecognitionDuration = 15; // Minutes to keep open
+  this.faceRecognitionCheckInterval = null;
+  this.faceRecognitionAutoCloseTimeout = null;
+  // END NEW LINES
+
+  // PERFORMANCE: Add cache-related properties
+  this.profileCache = new Map();
   }
   
   // Helper method to wait for face-api.js
@@ -115,9 +132,6 @@ class AttendanceApp {
     this.startAutoSync();
     this.startSummaryAutoSync();
     
-    // Initialize server edit sync
-    await this.initializeServerEditSync(); // ADD THIS LINE
-    
     this.focusInput();
     this.startCacheMonitoring();
 
@@ -125,6 +139,7 @@ class AttendanceApp {
     if (typeof FaceRecognitionManager !== 'undefined') {
       this.faceRecognitionManager = new FaceRecognitionManager(this);
       console.log('Face recognition manager created (lazy init)');
+      this.startFaceRecognitionScheduler();
     } else {
       console.warn('FaceRecognitionManager not available');
     }
@@ -136,6 +151,152 @@ async onProfileImageUpdated(employeeUID) {
     // Force regenerate descriptor for this employee
     await this.faceRecognitionManager.refreshSingleDescriptor(employeeUID, true);
     console.log(`Face descriptor refreshed for employee ${employeeUID}`);
+  }
+}
+
+startFaceRecognitionScheduler() {
+  console.log('Starting face recognition scheduler...');
+  this.faceRecognitionCheckInterval = setInterval(() => {
+    this.checkFaceRecognitionSchedule();
+  }, 60000);
+  setTimeout(() => this.checkFaceRecognitionSchedule(), 2000);
+}
+
+checkFaceRecognitionSchedule() {
+  if (!this.faceRecognitionManager) return;
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  
+  const matchedSchedule = this.faceRecognitionSchedule.find(
+    schedule => schedule.hour === currentHour && schedule.minute === currentMinute
+  );
+  
+  if (matchedSchedule) {
+    console.log(`Face recognition auto-start at ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+    this.autoOpenFaceRecognition();
+  }
+}
+
+async autoOpenFaceRecognition() {
+  if (!this.faceRecognitionManager) return;
+  
+  try {
+    console.log('Auto-opening face recognition...');
+    
+    // Clear any existing auto-close mechanisms first
+    if (this.faceRecognitionAutoCloseTimeout) {
+      clearTimeout(this.faceRecognitionAutoCloseTimeout);
+      this.faceRecognitionAutoCloseTimeout = null;
+      console.log('Cleared existing auto-close timeout');
+    }
+    if (this.faceRecognitionAutoCloseInterval) {
+      clearInterval(this.faceRecognitionAutoCloseInterval);
+      this.faceRecognitionAutoCloseInterval = null;
+      console.log('Cleared existing auto-close interval');
+    }
+    
+    // Show the modal first
+    await this.faceRecognitionManager.show();
+    
+    // Wait a moment for UI to render
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Ensure models are loaded and initialized
+    if (!this.faceRecognitionManager.modelsLoaded) {
+      console.log('Waiting for models to load...');
+      await this.faceRecognitionManager.init();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    // Ensure descriptors are loaded
+    if (!this.faceRecognitionManager.descriptorsLoaded) {
+      console.log('Waiting for descriptors to load...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    // Now start recognition
+    if (!this.faceRecognitionManager.isActive) {
+      console.log('Starting recognition automatically...');
+      await this.faceRecognitionManager.startRecognition();
+    }
+    
+    // Calculate the target close time based on actual system clock
+    const durationMs = this.faceRecognitionDuration * 60 * 1000;
+    this.faceRecognitionAutoCloseTime = Date.now() + durationMs;
+    
+    console.log(`Setting auto-close for ${this.faceRecognitionDuration} minutes (${durationMs}ms)`);
+    console.log(`Target close time: ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
+    
+    // Show countdown timer
+    this.faceRecognitionManager.showCountdownTimer(this.faceRecognitionAutoCloseTime);
+    
+    // Use interval-based checking that respects system clock
+    // Check every 1 second for countdown updates
+    this.faceRecognitionAutoCloseInterval = setInterval(() => {
+      const now = Date.now();
+      
+      // Check if modal is still visible
+      const container = document.getElementById('faceRecognitionContainer');
+      if (!container || container.classList.contains('hidden')) {
+        console.log('Face recognition closed manually, clearing auto-close');
+        clearInterval(this.faceRecognitionAutoCloseInterval);
+        this.faceRecognitionAutoCloseInterval = null;
+        if (this.faceRecognitionManager) {
+          this.faceRecognitionManager.hideCountdownTimer();
+        }
+        return;
+      }
+      
+      const remaining = Math.floor((this.faceRecognitionAutoCloseTime - now) / 1000);
+      
+      // Update countdown display
+      if (this.faceRecognitionManager) {
+        this.faceRecognitionManager.updateCountdown(remaining);
+      }
+      
+      if (remaining <= 0) {
+        console.log('Auto-close time reached! Closing face recognition...');
+        clearInterval(this.faceRecognitionAutoCloseInterval);
+        this.faceRecognitionAutoCloseInterval = null;
+        this.autoCloseFaceRecognition();
+      }
+    }, 1000); // Check every 1 second for smooth countdown
+    
+    this.showDownloadToast(
+      `🎥 Face Recognition Auto-Started (closes in ${this.faceRecognitionDuration} min)`,
+      'info'
+    );
+    
+    console.log(`✓ Auto-close scheduled at ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
+  } catch (error) {
+    console.error('Error auto-opening face recognition:', error);
+  }
+}
+
+autoCloseFaceRecognition() {
+  if (!this.faceRecognitionManager) return;
+  
+  try {
+    if (this.faceRecognitionManager.isActive) {
+      this.faceRecognitionManager.stopRecognition();
+    }
+    this.faceRecognitionManager.hide();
+    this.showDownloadToast('🎥 Face Recognition Auto-Closed', 'info');
+  } catch (error) {
+    console.error('Error auto-closing face recognition:', error);
+  }
+}
+
+stopFaceRecognitionScheduler() {
+  if (this.faceRecognitionCheckInterval) {
+    clearInterval(this.faceRecognitionCheckInterval);
+    this.faceRecognitionCheckInterval = null;
+  }
+  if (this.faceRecognitionAutoCloseTimeout) {
+    clearTimeout(this.faceRecognitionAutoCloseTimeout);
+    this.faceRecognitionAutoCloseTimeout = null;
   }
 }
 
@@ -329,37 +490,8 @@ async generateDescriptorsForAllProfiles() {
     console.log('✓ Server edit sync listener initialized');
   }
 
-  /**
-   * Initialize server edit sync on app start
-   */
-  async initializeServerEditSync() {
-    if (!this.electronAPI || !this.electronAPI.invoke) {
-  console.warn('Server edit sync not available');
-  return;
-}
-
-    try {
-      const result = await this.electronAPI.invoke('initialize-server-edit-sync');
-      
-      if (result.success) {
-        console.log('✓ Server edit sync initialized');
-        this.serverEditSyncEnabled = true;
-        
-        // Perform initial check after 1 minute
-        setTimeout(() => {
-          this.checkServerEdits(true);
-        }, 60000);
-      } else {
-        console.error('Failed to initialize server edit sync:', result.error);
-      }
-    } catch (error) {
-      console.error('Error initializing server edit sync:', error);
-    }
-  }
-
-  /**
- * Enhanced checkServerEdits with validation callback
- * Replace the existing checkServerEdits method with this
+ /**
+ * UPDATED: checkServerEdits method - Keep as manual trigger only
  */
 async checkServerEdits(silent = false) {
   if (!this.electronAPI || !this.electronAPI.invoke) {
@@ -368,7 +500,7 @@ async checkServerEdits(silent = false) {
 
   try {
     if (!silent) {
-      this.showDownloadToast('🔄 Syncing with server...', 'info');
+      this.showDownloadToast('🔄 Checking for server updates...', 'info');
     }
 
     const result = await this.electronAPI.invoke('check-server-edits', silent);
@@ -376,27 +508,31 @@ async checkServerEdits(silent = false) {
     if (result.success) {
       this.lastServerEditCheck = new Date();
       
-      const hasChanges = result.uploaded > 0 || result.updated > 0 || result.deleted > 0;
+      const hasChanges = result.applied > 0 || result.deleted > 0;
       
       if (hasChanges) {
         let message = '';
-        if (result.uploaded > 0) message += `Uploaded: ${result.uploaded} `;
-        if (result.updated > 0) message += `Updated: ${result.updated} `;
-        if (result.deleted > 0) message += `Deleted: ${result.deleted}`;
+        if (result.applied > 0) message += `Applied: ${result.applied} edits `;
+        if (result.deleted > 0) message += `Deleted: ${result.deleted} records `;
+        if (result.corrected > 0) message += `Corrected: ${result.corrected} `;
+        if (result.summariesRegenerated > 0) message += `Summaries: ${result.summariesRegenerated} regenerated `;
+        if (result.summariesUploaded > 0) message += `Uploaded: ${result.summariesUploaded} summaries`;
         
         if (!silent) {
           this.showDownloadToast(`✅ ${message.trim()}`, 'success');
         }
         
-        // Refresh UI and validate
+        // Refresh UI to show updated data
         await this.handleServerEditsApplied({
-          uploaded: result.uploaded,
-          updated: result.updated,
-          deleted: result.deleted
+          applied: result.applied,
+          deleted: result.deleted,
+          corrected: result.corrected || 0,
+          summariesRegenerated: result.summariesRegenerated || 0,
+          summariesUploaded: result.summariesUploaded || 0
         });
       } else {
         if (!silent) {
-          this.showDownloadToast('✓ All records in sync', 'success');
+          this.showDownloadToast('✓ All records in sync with server', 'success');
         }
       }
 
@@ -408,7 +544,7 @@ async checkServerEdits(silent = false) {
     console.error('Error checking server edits:', error);
     
     if (!silent) {
-      this.showDownloadToast('❌ Sync failed', 'error');
+      this.showDownloadToast('❌ Server sync failed', 'error');
     }
     
     return { success: false, error: error.message };
@@ -416,80 +552,184 @@ async checkServerEdits(silent = false) {
 }
 
   /**
-   * Show notification when server edits are applied
-   */
-  showServerEditNotification(data) {
-    const { updated, deleted, message } = data;
-    
-    let notificationMessage = '📝 Server Edits Applied\n';
-    
-    if (updated > 0) {
-      notificationMessage += `Updated: ${updated} record${updated > 1 ? 's' : ''}\n`;
-    }
-    
-    if (deleted > 0) {
-      notificationMessage += `Deleted: ${deleted} record${deleted > 1 ? 's' : ''}`;
-    }
-
-    // Show prominent notification
-    this.showDownloadToast(notificationMessage, 'info');
-    
-    // Also show in status bar
-    this.showStatus(message || 'Attendance records updated from server', 'success');
-
-    // Play notification sound if available
-    this.playNotificationSound();
+ * UPDATED: showServerEditNotification method
+ * Shows more detailed notification about what was synced
+ */
+showServerEditNotification(data) {
+  const { 
+    updated, 
+    deleted, 
+    corrected, 
+    summariesRegenerated, 
+    summariesUploaded,
+    validated,
+    message 
+  } = data;
+  
+  let notificationMessage = '📝 Server Changes Applied\n\n';
+  
+  if (updated > 0) {
+    notificationMessage += `✏️ Updated: ${updated} record${updated > 1 ? 's' : ''}\n`;
+  }
+  
+  if (deleted > 0) {
+    notificationMessage += `🗑️ Deleted: ${deleted} record${deleted > 1 ? 's' : ''}\n`;
+  }
+  
+  if (corrected > 0) {
+    notificationMessage += `✅ Corrected: ${corrected} record${corrected > 1 ? 's' : ''}\n`;
+  }
+  
+  if (validated > 0) {
+    notificationMessage += `🔍 Validated: ${validated} employee-date${validated > 1 ? 's' : ''}\n`;
+  }
+  
+  if (summariesRegenerated > 0) {
+    notificationMessage += `🔄 Summaries Regenerated: ${summariesRegenerated}\n`;
+  }
+  
+  if (summariesUploaded > 0) {
+    notificationMessage += `📤 Summaries Uploaded: ${summariesUploaded}`;
   }
 
-  /**
- * Handle server edits being applied - refresh UI and validate
- * Add this updated method to your AttendanceApp class
+  // Show prominent notification
+  this.showDownloadToast(notificationMessage, 'info');
+  
+  // Also show in status bar
+  const statusMessage = message || 
+    `Synced ${updated} updates, ${deleted} deletions, ${summariesRegenerated} summaries regenerated`;
+  this.showStatus(statusMessage, 'success');
+
+  // Play notification sound if available
+  this.playNotificationSound();
+}
+
+/**
+ * Helper method to explain the sync flow to users
+ */
+getServerEditSyncFlowExplanation() {
+  return `
+    <div class="sync-flow-explanation">
+      <h4>📋 How Server Edit Sync Works:</h4>
+      <ol>
+        <li><strong>Server Edit:</strong> When you edit attendance on the server, it:
+          <ul>
+            <li>✏️ Updates the attendance record</li>
+            <li>🗑️ Deletes the affected daily summary immediately</li>
+            <li>⏳ Waits for client to regenerate the summary</li>
+          </ul>
+        </li>
+        <li><strong>Client Download:</strong> This app checks the server every 2 minutes and:
+          <ul>
+            <li>📥 Downloads edited/deleted attendance records</li>
+            <li>🔄 Applies them to local database</li>
+            <li>🗑️ Deletes affected local summaries (matching server)</li>
+          </ul>
+        </li>
+        <li><strong>Client Validation:</strong> After applying edits:
+          <ul>
+            <li>🔍 Validates all affected attendance data</li>
+            <li>✅ Corrects any time calculation errors</li>
+            <li>⚖️ Ensures 8-hour rule compliance</li>
+          </ul>
+        </li>
+        <li><strong>Client Regeneration:</strong> Creates fresh summaries from validated data:
+          <ul>
+            <li>📊 Generates new daily summaries</li>
+            <li>✨ Uses corrected hours from validation</li>
+            <li>💾 Saves summaries locally</li>
+          </ul>
+        </li>
+        <li><strong>Client Upload:</strong> Sends regenerated summaries back to server:
+          <ul>
+            <li>📤 Uploads validated summaries</li>
+            <li>✅ Server receives correct, validated data</li>
+            <li>🎯 Both server and client are now in sync</li>
+          </ul>
+        </li>
+      </ol>
+      <p class="sync-flow-note">
+        <strong>⚠️ Important:</strong> There's a brief moment where summaries don't exist on the server 
+        (after deletion, before client upload). This is correct behavior - it prevents serving 
+        incorrect data. The client regenerates and uploads quickly (usually under 5 seconds).
+      </p>
+    </div>
+  `;
+}
+
+ /**
+ * UPDATED: handleServerEditsApplied method
+ * This now expects that the server has ALREADY deleted the summaries
+ * The client just needs to validate, regenerate, and upload them back
  */
 async handleServerEditsApplied(data) {
   try {
-    console.log('Handling server edits - refreshing UI data');
+    console.log('Handling server edits - server already deleted summaries');
+    console.log('Edit data:', data);
 
-    // Step 1: Refresh attendance data
+    // Step 1: Refresh UI to show updated attendance data
+    // Note: Summary display will be empty since server deleted them
     await Promise.all([
       this.loadTodayAttendance(),
-      this.loadDailySummary()
+      this.loadDailySummary() // This will show empty/missing summaries
     ]);
 
-    // Step 2: Validate and fix time calculations for affected records
-    if (data.updated > 0) {
-      console.log('Validating attendance data after server edits...');
-      await this.validateAttendanceData();
-    }
+    console.log('✓ UI refreshed - summaries are now empty (server deleted them)');
 
-    // Step 3: After validation, sync back to server
-    // The validation will fix regular_hours, overtime_hours, and is_late
-    // Then we need to upload those fixes back to the server
-    if (data.updated > 0) {
-      console.log('Syncing validated data back to server...');
+    // Step 2: Validate and regenerate summaries locally
+    // This is the KEY STEP - it will create fresh summaries from validated data
+    if (data.updated > 0 || data.deleted > 0) {
+      console.log('Validating and regenerating summaries after server edits...');
       
-      // Trigger a sync to upload any changes made during validation
-      setTimeout(async () => {
-        const syncResult = await this.electronAPI.invoke('check-server-edits', true);
-        if (syncResult.success && syncResult.uploaded > 0) {
-          console.log(`✓ Uploaded ${syncResult.uploaded} validated records to server`);
-        }
-      }, 2000); // Wait 2 seconds before syncing back
+      // The validation will:
+      // 1. Validate all affected attendance records
+      // 2. Correct any calculation errors
+      // 3. Regenerate daily summaries
+      await this.validateAttendanceData();
+      
+      console.log('✓ Summaries regenerated locally');
     }
 
-    // Step 4: Update sync info if settings panel is open
+    // Step 3: Refresh UI again to show the NEW summaries
+    await this.loadDailySummary();
+    console.log('✓ UI refreshed with new summaries');
+
+    // Step 4: Sync the regenerated summaries back to server
+    // The summaries we just regenerated need to go back to the server
+    if (data.updated > 0 || data.deleted > 0) {
+      console.log('Syncing regenerated summaries back to server...');
+      
+      // Wait a moment to ensure summaries are saved locally
+      setTimeout(async () => {
+        // This will upload the regenerated summaries
+        const summarySync = await this.performSummarySync(true, 0, false);
+        
+        if (summarySync.success) {
+          console.log(`✓ Uploaded ${summarySync.syncedCount || 0} regenerated summaries to server`);
+          this.showDownloadToast(
+            `✅ Summaries regenerated and uploaded to server`,
+            'success'
+          );
+        } else {
+          console.warn('⚠️ Failed to upload regenerated summaries:', summarySync.error);
+        }
+      }, 2000); // Wait 2 seconds for local saves to complete
+    }
+
+    // Step 5: Update sync info if settings panel is open
     if (document.getElementById('settingsModal')?.classList.contains('show')) {
       await this.loadServerEditSyncInfo();
     }
 
-    console.log('✓ UI refreshed and validated after server edits');
+    console.log('✓ Server edit handling complete');
   } catch (error) {
     console.error('Error handling server edits:', error);
+    this.showStatus('Error processing server updates', 'error');
   }
 }
 
-  /**
- * Update the sync info display to show uploads too
- * Replace the existing loadServerEditSyncInfo method
+ /**
+ * UPDATED: loadServerEditSyncInfo - Update UI text for manual sync
  */
 async loadServerEditSyncInfo() {
   if (!this.electronAPI || !this.electronAPI.invoke) {
@@ -497,8 +737,7 @@ async loadServerEditSyncInfo() {
   }
 
   try {
-    const lastSyncResult = await this.electronAPI.invoke('get-server-edit-last-sync');
-    const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 5);
+    const syncInfoResult = await this.electronAPI.invoke('get-server-edit-last-sync');
 
     const syncInfoElement = document.getElementById('serverEditSyncInfo');
     
@@ -508,67 +747,119 @@ async loadServerEditSyncInfo() {
     }
 
     let lastSyncText = 'Never';
-    let syncStats = '0 uploaded, 0 updated, 0 deleted';
+    let syncStats = 'No sync data';
 
-    if (lastSyncResult.success && lastSyncResult.lastSync) {
-      const lastSync = lastSyncResult.lastSync;
-      const syncDate = new Date(lastSync.created_at);
-      const now = new Date();
-      const minutesAgo = Math.floor((now - syncDate) / (1000 * 60));
+    if (syncInfoResult && syncInfoResult.success !== false) {
+      if (syncInfoResult.lastSyncTimestamp) {
+        const syncDate = new Date(syncInfoResult.lastSyncTimestamp);
+        const now = new Date();
+        const minutesAgo = Math.floor((now - syncDate) / (1000 * 60));
+        
+        lastSyncText = minutesAgo < 1 ? 'Just now' : 
+                      minutesAgo < 60 ? `${minutesAgo} minutes ago` :
+                      syncDate.toLocaleString();
+      }
+
+      // Get history for last sync stats
+      const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 1);
       
-      lastSyncText = minutesAgo < 1 ? 'Just now' : 
-                    minutesAgo < 60 ? `${minutesAgo} minutes ago` :
-                    syncDate.toLocaleString();
-
-      syncStats = `${lastSync.records_uploaded || 0} uploaded, ${lastSync.records_updated} updated, ${lastSync.records_deleted} deleted`;
+      if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
+        const lastSync = historyResult.data[0];
+        const parts = [];
+        
+        if (lastSync.applied > 0) parts.push(`${lastSync.applied} applied`);
+        if (lastSync.deleted > 0) parts.push(`${lastSync.deleted} deleted`);
+        if (lastSync.corrected > 0) parts.push(`${lastSync.corrected} corrected`);
+        if (lastSync.summariesRegenerated > 0) parts.push(`${lastSync.summariesRegenerated} summaries`);
+        if (lastSync.summariesUploaded > 0) parts.push(`${lastSync.summariesUploaded} uploaded`);
+        
+        syncStats = parts.length > 0 ? parts.join(', ') : 'No changes';
+      }
     }
 
     syncInfoElement.innerHTML = `
       <div class="sync-info-item">
-        <strong>Last Sync:</strong> ${lastSyncText}
+        <strong>Last Manual Check:</strong> ${lastSyncText}
       </div>
       <div class="sync-info-item">
         <strong>Last Sync Results:</strong> ${syncStats}
       </div>
       <div class="sync-info-item">
-        <strong>Status:</strong> ${this.serverEditSyncEnabled ? 
-          '<span class="status-badge success">Active (every 2 min)</span>' : 
-          '<span class="status-badge inactive">Inactive</span>'}
+        <strong>Sync Mode:</strong> <span class="status-badge info">Manual Only</span>
       </div>
-      ${historyResult.success && historyResult.data.length > 0 ? `
+      <div class="sync-info-item">
+        <strong>Summary Handling:</strong>
+        <span class="info-text">Server deletes → Client regenerates → Client uploads</span>
+      </div>
+      <div class="sync-info-item">
+        <em>💡 Tip: Click "Check Server Edits Now" button below to manually sync changes from the server.</em>
+      </div>
+    `;
+
+    // Also show recent history if available
+    const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 5);
+    
+    if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
+      const historyHtml = `
         <div class="sync-history">
           <strong>Recent Sync History:</strong>
           <table class="sync-history-table">
             <thead>
               <tr>
                 <th>Time</th>
-                <th>Uploaded</th>
-                <th>Updated</th>
+                <th>Applied</th>
                 <th>Deleted</th>
+                <th>Corrected</th>
+                <th>Summaries</th>
+                <th>Uploaded</th>
               </tr>
             </thead>
             <tbody>
               ${historyResult.data.map(log => `
-                <tr>
-                  <td>${new Date(log.created_at).toLocaleString()}</td>
-                  <td class="${(log.records_uploaded || 0) > 0 ? 'highlight-info' : ''}">
-                    ${log.records_uploaded || 0}
+                <tr class="${log.success ? '' : 'error-row'}">
+                  <td>${new Date(log.timestamp).toLocaleString()}</td>
+                  <td class="${log.applied > 0 ? 'highlight-info' : ''}">
+                    ${log.applied || 0}
                   </td>
-                  <td class="${log.records_updated > 0 ? 'highlight-success' : ''}">
-                    ${log.records_updated}
+                  <td class="${log.deleted > 0 ? 'highlight-warning' : ''}">
+                    ${log.deleted || 0}
                   </td>
-                  <td class="${log.records_deleted > 0 ? 'highlight-warning' : ''}">
-                    ${log.records_deleted}
+                  <td class="${log.corrected > 0 ? 'highlight-success' : ''}">
+                    ${log.corrected || 0}
+                  </td>
+                  <td class="${log.summariesRegenerated > 0 ? 'highlight-info' : ''}">
+                    ${log.summariesRegenerated || 0}
+                  </td>
+                  <td class="${log.summariesUploaded > 0 ? 'highlight-success' : ''}">
+                    ${log.summariesUploaded || 0}
                   </td>
                 </tr>
+                ${log.error ? `
+                  <tr class="error-detail">
+                    <td colspan="6">
+                      <strong>Error:</strong> ${log.error}
+                    </td>
+                  </tr>
+                ` : ''}
               `).join('')}
             </tbody>
           </table>
         </div>
-      ` : ''}
-    `;
+      `;
+      
+      syncInfoElement.innerHTML += historyHtml;
+    }
   } catch (error) {
     console.error('Error loading server edit sync info:', error);
+    const syncInfoElement = document.getElementById('serverEditSyncInfo');
+    if (syncInfoElement) {
+      syncInfoElement.innerHTML = `
+        <div class="sync-info-item error">
+          <strong>Error:</strong> Failed to load sync information
+          <br><small>${error.message}</small>
+        </div>
+      `;
+    }
   }
 }
 
@@ -585,166 +876,228 @@ async loadServerEditSyncInfo() {
     }
   }
 
-  /**
-   * Add server edit sync button to settings
-   */
-  setupServerEditSyncUI() {
-    // Add check button to sync tab
-    const syncPanel = document.getElementById('syncPanel');
-    
-    if (!syncPanel) return;
+ /**
+ * UPDATED: setupServerEditSyncUI - Update button text and description
+ */
+setupServerEditSyncUI() {
+  const syncPanel = document.getElementById('syncPanel');
+  
+  if (!syncPanel) {
+    console.warn('Sync panel not found, cannot setup server edit sync UI');
+    return;
+  }
 
-    const serverEditSection = document.createElement('div');
-    serverEditSection.className = 'settings-section';
-    serverEditSection.innerHTML = `
-      <h3>📝 Server Edit Sync</h3>
-      <p class="section-description">
-        Automatically checks for attendance corrections made on the server 
-        and applies them to local records.
-      </p>
-      <div id="serverEditSyncInfo" class="sync-info">
-        <div class="loading">Loading sync information...</div>
-      </div>
-      <div class="button-group">
-        <button id="checkServerEditsNowBtn" class="primary-button">
-          🔄 Check Server Edits Now
-        </button>
-        <button id="viewServerEditHistoryBtn" class="secondary-button">
-          📊 View Sync History
-        </button>
-      </div>
-    `;
+  if (document.getElementById('serverEditSyncInfo')) {
+    console.log('Server edit sync UI already setup');
+    return;
+  }
 
-    // Insert before the last section in sync panel
-    const lastSection = syncPanel.querySelector('.settings-section:last-child');
-    if (lastSection) {
-      syncPanel.insertBefore(serverEditSection, lastSection);
-    } else {
-      syncPanel.appendChild(serverEditSection);
-    }
+  const serverEditSection = document.createElement('div');
+  serverEditSection.className = 'settings-section server-edit-sync-section';
+  serverEditSection.innerHTML = `
+    <h3>📝 Server Edit Sync (Manual)</h3>
+    <p class="section-description">
+      Manually check for attendance corrections made on the server and apply them to local records.
+      <br><strong>Note:</strong> This is a manual process - click the button below when you want to sync.
+    </p>
+    <div id="serverEditSyncInfo" class="sync-info">
+      <div class="loading">Loading sync information...</div>
+    </div>
+    <div class="button-group" style="margin-top: 15px;">
+      <button id="checkServerEditsNowBtn" class="primary-button">
+        🔄 Check Server Edits Now
+      </button>
+      <button id="viewServerEditHistoryBtn" class="secondary-button">
+        📊 View Sync History
+      </button>
+    </div>
+    <div class="sync-info-item" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 4px solid #3b82f6;">
+      <strong>💡 How to use:</strong>
+      <ul style="margin: 5px 0 0 20px; padding: 0;">
+        <li>Click "Check Server Edits Now" whenever you want to download changes from the server</li>
+        <li>The system will download edits, validate data, regenerate summaries, and upload them back</li>
+        <li>Check the history to see previous sync operations</li>
+      </ul>
+    </div>
+  `;
 
-    // Add event listeners
-    const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
-    const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
+  const lastSection = syncPanel.querySelector('.settings-section:last-child');
+  if (lastSection) {
+    syncPanel.insertBefore(serverEditSection, lastSection);
+  } else {
+    syncPanel.appendChild(serverEditSection);
+  }
 
-    if (checkNowBtn) {
-      checkNowBtn.addEventListener('click', async () => {
-        checkNowBtn.disabled = true;
-        checkNowBtn.textContent = '🔄 Checking...';
-        
+  // Add event listeners
+  const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+  const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
+
+  if (checkNowBtn) {
+    checkNowBtn.addEventListener('click', async () => {
+      checkNowBtn.disabled = true;
+      checkNowBtn.textContent = '🔄 Checking...';
+      
+      try {
         await this.checkServerEdits(false);
-        
+      } catch (error) {
+        console.error('Error checking server edits:', error);
+        this.showStatus(`Error: ${error.message}`, 'error');
+      } finally {
         checkNowBtn.disabled = false;
         checkNowBtn.textContent = '🔄 Check Server Edits Now';
         
-        // Reload sync info
         await this.loadServerEditSyncInfo();
-      });
-    }
-
-    if (viewHistoryBtn) {
-      viewHistoryBtn.addEventListener('click', () => {
-        this.showServerEditSyncHistory();
-      });
-    }
-
-    // Load initial info
-    this.loadServerEditSyncInfo();
+      }
+    });
   }
 
-  /**
-   * Show server edit sync history modal
-   */
-  async showServerEditSyncHistory() {
-    if (!this.electronAPI || !this.electronAPI.invoke('get-server-edit-sync-history', limit)) {
-      this.showStatus('Server edit sync history not available', 'error');
-      return;
+  if (viewHistoryBtn) {
+    viewHistoryBtn.addEventListener('click', () => {
+      this.showServerEditSyncHistory();
+    });
+  }
+
+  this.loadServerEditSyncInfo();
+  
+  console.log('✓ Server edit sync UI setup complete (Manual mode)');
+}
+
+ /**
+ * FIXED: showServerEditSyncHistory method
+ * Now properly checks for API availability
+ */
+async showServerEditSyncHistory() {
+  if (!this.electronAPI || !this.electronAPI.invoke) {
+    this.showStatus('Server edit sync history not available', 'error');
+    return;
+  }
+
+  try {
+    const result = await this.electronAPI.invoke('get-server-edit-sync-history', 20);
+
+    if (!result || !result.success) {
+      throw new Error(result?.error || 'Failed to load sync history');
     }
 
-    try {
-      const result = await this.electronAPI.invoke('get-server-edit-sync-history', 20);
+    const history = result.data || [];
 
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      const history = result.data;
-
-      // Create modal
-      const modal = document.createElement('div');
-      modal.className = 'modal show';
-      modal.id = 'serverEditHistoryModal';
-      modal.innerHTML = `
-        <div class="modal-content" style="max-width: 800px;">
-          <div class="modal-header">
-            <h2>📊 Server Edit Sync History</h2>
-            <button class="close-button" onclick="this.closest('.modal').remove()">×</button>
-          </div>
-          <div class="modal-body">
-            ${history.length === 0 ? `
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.id = 'serverEditHistoryModal';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-header">
+          <h2>📊 Server Edit Sync History</h2>
+          <button class="close-button" onclick="this.closest('.modal').remove()">×</button>
+        </div>
+        <div class="modal-body">
+          ${history.length === 0 ? `
+            <div class="empty-state">
               <p>No sync history available yet.</p>
-            ` : `
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Date & Time</th>
-                    <th>Checked</th>
-                    <th>Updated</th>
-                    <th>Deleted</th>
-                    <th>Status</th>
+              <p>Server edit sync will appear here once the system starts checking for updates.</p>
+            </div>
+          ` : `
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Downloaded</th>
+                  <th>Applied</th>
+                  <th>Deleted</th>
+                  <th>Corrected</th>
+                  <th>Summaries</th>
+                  <th>Uploaded</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${history.map(log => `
+                  <tr class="${log.success ? '' : 'error-row'}">
+                    <td>${new Date(log.timestamp).toLocaleString()}</td>
+                    <td>${log.downloaded || 0}</td>
+                    <td class="${log.applied > 0 ? 'highlight-success' : ''}">
+                      ${log.applied || 0}
+                    </td>
+                    <td class="${log.deleted > 0 ? 'highlight-warning' : ''}">
+                      ${log.deleted || 0}
+                    </td>
+                    <td class="${log.corrected > 0 ? 'highlight-info' : ''}">
+                      ${log.corrected || 0}
+                    </td>
+                    <td class="${log.summariesRegenerated > 0 ? 'highlight-info' : ''}">
+                      ${log.summariesRegenerated || 0}
+                    </td>
+                    <td class="${log.summariesUploaded > 0 ? 'highlight-success' : ''}">
+                      ${log.summariesUploaded || 0}
+                    </td>
+                    <td>
+                      ${log.error ? 
+                        '<span class="status-badge error">Error</span>' : 
+                        log.success ? 
+                        '<span class="status-badge success">Success</span>' :
+                        '<span class="status-badge warning">Partial</span>'}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  ${history.map(log => `
-                    <tr>
-                      <td>${new Date(log.created_at).toLocaleString()}</td>
-                      <td>${log.records_checked}</td>
-                      <td class="${log.records_updated > 0 ? 'highlight-success' : ''}">
-                        ${log.records_updated}
-                      </td>
-                      <td class="${log.records_deleted > 0 ? 'highlight-warning' : ''}">
-                        ${log.records_deleted}
-                      </td>
-                      <td>
-                        ${log.errors ? 
-                          '<span class="status-badge error">Errors</span>' : 
-                          '<span class="status-badge success">Success</span>'}
+                  ${log.error ? `
+                    <tr class="error-detail">
+                      <td colspan="8">
+                        <strong>Error:</strong> 
+                        <pre style="margin: 5px 0; padding: 10px; background: #fee; border-radius: 4px; overflow-x: auto;">${log.error}</pre>
                       </td>
                     </tr>
-                    ${log.errors ? `
-                      <tr class="error-detail">
-                        <td colspan="5">
-                          <strong>Errors:</strong> 
-                          <pre>${log.errors}</pre>
-                        </td>
-                      </tr>
-                    ` : ''}
-                  `).join('')}
-                </tbody>
-              </table>
-            `}
-          </div>
-          <div class="modal-footer">
-            <button class="secondary-button" onclick="this.closest('.modal').remove()">
-              Close
-            </button>
-          </div>
+                  ` : ''}
+                `).join('')}
+              </tbody>
+            </table>
+            
+            <div class="history-stats" style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
+              <h3>Summary Statistics</h3>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 10px;">
+                <div>
+                  <strong>Total Syncs:</strong> ${history.length}
+                </div>
+                <div>
+                  <strong>Successful:</strong> ${history.filter(h => h.success).length}
+                </div>
+                <div>
+                  <strong>Failed:</strong> ${history.filter(h => !h.success).length}
+                </div>
+                <div>
+                  <strong>Total Applied:</strong> ${history.reduce((sum, h) => sum + (h.applied || 0), 0)}
+                </div>
+                <div>
+                  <strong>Total Deleted:</strong> ${history.reduce((sum, h) => sum + (h.deleted || 0), 0)}
+                </div>
+                <div>
+                  <strong>Total Corrected:</strong> ${history.reduce((sum, h) => sum + (h.corrected || 0), 0)}
+                </div>
+              </div>
+            </div>
+          `}
         </div>
-      `;
+        <div class="modal-footer">
+          <button class="secondary-button" onclick="this.closest('.modal').remove()">
+            Close
+          </button>
+        </div>
+      </div>
+    `;
 
-      document.body.appendChild(modal);
+    document.body.appendChild(modal);
 
-      // Close on background click
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          modal.remove();
-        }
-      });
-    } catch (error) {
-      console.error('Error showing sync history:', error);
-      this.showStatus('Failed to load sync history', 'error');
-    }
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+  } catch (error) {
+    console.error('Error showing sync history:', error);
+    this.showStatus(`Failed to load sync history: ${error.message}`, 'error');
   }
+}
+
 
 
   async setupImageWithFallback(imgElement, employee_uid, altText) {
@@ -2648,19 +3001,20 @@ if (faceRecognitionBtn) {
     }
   }
 
-    /**
-   * Clean up on destroy
-   */
-  destroy() {
-    super.destroy();
-    
-    // Remove server edit sync listener
-    if (this.electronAPI && this.electronAPI.removeServerEditsListener) {
-      this.electronAPI.removeServerEditsListener();
-    }
-    
-    console.log('Server edit sync listener removed');
+/**
+ * KEEP: destroy method but remove auto-sync cleanup
+ */
+destroy() {
+  super.destroy();
+  
+  // Remove server edit sync listener
+  if (this.electronAPI && this.electronAPI.removeServerEditsListener) {
+    this.electronAPI.removeServerEditsListener();
   }
+  
+  // No need to stop auto-sync timer since we don't have one
+  console.log('Server edit sync listener removed');
+}
 
 
   closeSettings() {
@@ -4305,6 +4659,7 @@ if (faceRecognitionBtn) {
   // Clean up performance monitoring
   destroy() {
     this.stopAutoSync();
+    this.stopFaceRecognitionScheduler();
 
     // PERFORMANCE: Clear cache monitoring
     if (this.cacheStatsInterval) {
@@ -4340,6 +4695,634 @@ if (faceRecognitionBtn) {
       "AttendanceApp destroyed and cleaned up with performance optimizations"
     );
   }
+
+  // Add these methods to your AttendanceApp class
+
+/**
+ * ENHANCED: Setup server edit sync UI with comparison feature
+ */
+setupServerEditSyncUI() {
+  const syncPanel = document.getElementById('syncPanel');
+  
+  if (!syncPanel) {
+    console.warn('Sync panel not found, cannot setup server edit sync UI');
+    return;
+  }
+
+  if (document.getElementById('serverEditSyncInfo')) {
+    console.log('Server edit sync UI already setup');
+    return;
+  }
+
+  const serverEditSection = document.createElement('div');
+  serverEditSection.className = 'settings-section server-edit-sync-section';
+  serverEditSection.innerHTML = `
+    <h3>📝 Server Edit Sync with Comparison</h3>
+    <p class="section-description">
+      Compare server and local attendance records to identify differences, then apply selected actions.
+      <br><strong>New:</strong> Review changes before applying them to your local database.
+    </p>
+    
+    <!-- Comparison Tool -->
+    <div class="comparison-tool" style="margin-top: 20px; padding: 15px; background: #f0f9ff; border: 1px solid #3b82f6; border-radius: 8px;">
+      <h4 style="margin: 0 0 10px 0; color: #1e40af;">🔍 Compare Server vs Local Records</h4>
+      <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; margin-bottom: 10px;">
+        <div>
+          <label style="display: block; font-size: 12px; margin-bottom: 5px;">Start Date</label>
+          <input type="date" id="compareStartDate" class="form-control" />
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; margin-bottom: 5px;">End Date</label>
+          <input type="date" id="compareEndDate" class="form-control" />
+        </div>
+        <div style="display: flex; align-items: flex-end;">
+          <button id="compareServerLocalBtn" class="primary-button" style="width: 100%;">
+            🔍 Compare
+          </button>
+        </div>
+      </div>
+      <div id="comparisonResults" style="display: none; margin-top: 15px;">
+        <!-- Results will be inserted here -->
+      </div>
+    </div>
+
+    <!-- Sync Info -->
+    <div id="serverEditSyncInfo" class="sync-info" style="margin-top: 15px;">
+      <div class="loading">Loading sync information...</div>
+    </div>
+    
+    <!-- Action Buttons -->
+    <div class="button-group" style="margin-top: 15px;">
+      <button id="checkServerEditsNowBtn" class="primary-button">
+        🔄 Check Server Edits Now
+      </button>
+      <button id="viewServerEditHistoryBtn" class="secondary-button">
+        📊 View Sync History
+      </button>
+    </div>
+    
+    <div class="sync-info-item" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 4px solid #3b82f6;">
+      <strong>💡 How to use:</strong>
+      <ul style="margin: 5px 0 0 20px; padding: 0;">
+        <li><strong>Compare:</strong> Select date range and click "Compare" to see differences between server and local</li>
+        <li><strong>Review:</strong> Examine server-only, local-only, different, and duplicate records</li>
+        <li><strong>Select Actions:</strong> Choose which changes to apply (add, update, delete, or keep)</li>
+        <li><strong>Apply:</strong> Click "Apply Selected Actions" to execute changes and rebuild summaries</li>
+        <li><strong>Quick Sync:</strong> Use "Check Server Edits Now" for automatic sync without comparison</li>
+      </ul>
+    </div>
+  `;
+
+  const lastSection = syncPanel.querySelector('.settings-section:last-child');
+  if (lastSection) {
+    syncPanel.insertBefore(serverEditSection, lastSection);
+  } else {
+    syncPanel.appendChild(serverEditSection);
+  }
+
+  // Set default dates (last 7 days)
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 7);
+  
+  document.getElementById('compareStartDate').value = startDate.toISOString().split('T')[0];
+  document.getElementById('compareEndDate').value = endDate.toISOString().split('T')[0];
+
+  // Add event listeners
+  const compareBtn = document.getElementById('compareServerLocalBtn');
+  const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+  const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
+
+  if (compareBtn) {
+    compareBtn.addEventListener('click', async () => {
+      await this.compareServerAndLocal();
+    });
+  }
+
+  if (checkNowBtn) {
+    checkNowBtn.addEventListener('click', async () => {
+      checkNowBtn.disabled = true;
+      checkNowBtn.textContent = '🔄 Checking...';
+      
+      try {
+        await this.checkServerEdits(false);
+      } catch (error) {
+        console.error('Error checking server edits:', error);
+        this.showStatus(`Error: ${error.message}`, 'error');
+      } finally {
+        checkNowBtn.disabled = false;
+        checkNowBtn.textContent = '🔄 Check Server Edits Now';
+        
+        await this.loadServerEditSyncInfo();
+      }
+    });
+  }
+
+  if (viewHistoryBtn) {
+    viewHistoryBtn.addEventListener('click', () => {
+      this.showServerEditSyncHistory();
+    });
+  }
+
+  this.loadServerEditSyncInfo();
+  
+  console.log('✓ Server edit sync UI setup complete with comparison feature');
+}
+
+/**
+ * NEW: Compare server and local attendance records
+ */
+async compareServerAndLocal() {
+  const startDate = document.getElementById('compareStartDate').value;
+  const endDate = document.getElementById('compareEndDate').value;
+  const compareBtn = document.getElementById('compareServerLocalBtn');
+  const resultsDiv = document.getElementById('comparisonResults');
+
+  if (!startDate || !endDate) {
+    this.showStatus('Please select both start and end dates', 'error');
+    return;
+  }
+
+  if (startDate > endDate) {
+    this.showStatus('Start date cannot be after end date', 'error');
+    return;
+  }
+
+  compareBtn.disabled = true;
+  compareBtn.textContent = '🔄 Comparing...';
+  resultsDiv.style.display = 'none';
+
+  try {
+    this.showDownloadToast('🔍 Comparing server and local records...', 'info');
+
+    const result = await this.electronAPI.invoke('compare-server-and-local', startDate, endDate);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Comparison failed');
+    }
+
+    const comparison = result.comparison;
+
+    this.showDownloadToast('✅ Comparison completed', 'success');
+
+    // Display comparison results
+    this.displayComparisonResults(comparison);
+    resultsDiv.style.display = 'block';
+
+  } catch (error) {
+    console.error('Comparison error:', error);
+    this.showDownloadToast(`❌ Comparison failed: ${error.message}`, 'error');
+  } finally {
+    compareBtn.disabled = false;
+    compareBtn.textContent = '🔍 Compare';
+  }
+}
+
+/**
+ * NEW: Display comparison results in UI
+ */
+displayComparisonResults(comparison) {
+  const resultsDiv = document.getElementById('comparisonResults');
+  
+  const { serverOnly, localOnly, different, identical, duplicates } = comparison;
+
+  let html = `
+    <div class="comparison-summary" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px;">
+      <div class="stat-card" style="background: #dbeafe; padding: 10px; border-radius: 6px; text-align: center;">
+        <div style="font-size: 24px; font-weight: bold; color: #1e40af;">${serverOnly.length}</div>
+        <div style="font-size: 12px; color: #1e40af;">Server Only</div>
+      </div>
+      <div class="stat-card" style="background: #d1fae5; padding: 10px; border-radius: 6px; text-align: center;">
+        <div style="font-size: 24px; font-weight: bold; color: #065f46;">${localOnly.length}</div>
+        <div style="font-size: 12px; color: #065f46;">Local Only</div>
+      </div>
+      <div class="stat-card" style="background: #fef3c7; padding: 10px; border-radius: 6px; text-align: center;">
+        <div style="font-size: 24px; font-weight: bold; color: #92400e;">${different.length}</div>
+        <div style="font-size: 12px; color: #92400e;">Different</div>
+      </div>
+      <div class="stat-card" style="background: #e9d5ff; padding: 10px; border-radius: 6px; text-align: center;">
+        <div style="font-size: 24px; font-weight: bold; color: #6b21a8;">${duplicates.length}</div>
+        <div style="font-size: 12px; color: #6b21a8;">Duplicates</div>
+      </div>
+      <div class="stat-card" style="background: #f3f4f6; padding: 10px; border-radius: 6px; text-align: center;">
+        <div style="font-size: 24px; font-weight: bold; color: #374151;">${identical.length}</div>
+        <div style="font-size: 12px; color: #374151;">Identical</div>
+      </div>
+    </div>
+
+    <div class="comparison-tabs" style="border-bottom: 2px solid #e5e7eb; margin-bottom: 15px;">
+      <button class="comparison-tab active" data-tab="serverOnly" style="padding: 10px 20px; border: none; background: none; cursor: pointer; border-bottom: 3px solid #3b82f6; font-weight: bold;">
+        Server Only (${serverOnly.length})
+      </button>
+      <button class="comparison-tab" data-tab="localOnly" style="padding: 10px 20px; border: none; background: none; cursor: pointer;">
+        Local Only (${localOnly.length})
+      </button>
+      <button class="comparison-tab" data-tab="different" style="padding: 10px 20px; border: none; background: none; cursor: pointer;">
+        Different (${different.length})
+      </button>
+      <button class="comparison-tab" data-tab="duplicates" style="padding: 10px 20px; border: none; background: none; cursor: pointer;">
+        Duplicates (${duplicates.length})
+      </button>
+    </div>
+
+    <div id="selectedActionsBar" style="display: none; padding: 15px; background: #eef2ff; border: 2px solid #6366f1; border-radius: 8px; margin-bottom: 15px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <strong id="selectedActionsCount">0</strong> action(s) selected
+        </div>
+        <div>
+          <button id="clearSelectionsBtn" class="secondary-button" style="margin-right: 10px;">
+            Clear Selection
+          </button>
+          <button id="applyActionsBtn" class="primary-button">
+            ✅ Apply Selected Actions
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="comparisonTabContent">
+      <!-- Tab content will be inserted here -->
+    </div>
+  `;
+
+  resultsDiv.innerHTML = html;
+
+  // Store comparison data
+  this.currentComparison = comparison;
+  this.selectedActions = [];
+
+  // Setup tab switching
+  this.setupComparisonTabs();
+
+  // Show initial tab content
+  this.showComparisonTab('serverOnly');
+
+  // Setup action buttons
+  document.getElementById('clearSelectionsBtn')?.addEventListener('click', () => {
+    this.selectedActions = [];
+    this.updateSelectedActionsBar();
+    this.showComparisonTab(this.currentComparisonTab || 'serverOnly');
+  });
+
+  document.getElementById('applyActionsBtn')?.addEventListener('click', () => {
+    this.applySelectedActions();
+  });
+}
+
+/**
+ * NEW: Setup comparison tab switching
+ */
+setupComparisonTabs() {
+  const tabs = document.querySelectorAll('.comparison-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      tabs.forEach(t => {
+        t.classList.remove('active');
+        t.style.borderBottom = 'none';
+        t.style.fontWeight = 'normal';
+      });
+      
+      e.target.classList.add('active');
+      e.target.style.borderBottom = '3px solid #3b82f6';
+      e.target.style.fontWeight = 'bold';
+      
+      const tabName = e.target.dataset.tab;
+      this.showComparisonTab(tabName);
+    });
+  });
+}
+
+/**
+ * NEW: Show specific comparison tab content
+ */
+showComparisonTab(tabName) {
+  this.currentComparisonTab = tabName;
+  const content = document.getElementById('comparisonTabContent');
+  const data = this.currentComparison[tabName];
+
+  if (!data || data.length === 0) {
+    content.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: #6b7280;">
+        <p style="font-size: 18px; margin: 0;">No ${tabName} records found</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '<div class="comparison-records" style="max-height: 400px; overflow-y: auto;">';
+
+  if (tabName === 'serverOnly') {
+    html += this.renderServerOnlyRecords(data);
+  } else if (tabName === 'localOnly') {
+    html += this.renderLocalOnlyRecords(data);
+  } else if (tabName === 'different') {
+    html += this.renderDifferentRecords(data);
+  } else if (tabName === 'duplicates') {
+    html += this.renderDuplicateRecords(data);
+  }
+
+  html += '</div>';
+  content.innerHTML = html;
+
+  // Setup record action buttons
+  this.setupRecordActionButtons();
+}
+
+/**
+ * NEW: Render server-only records
+ */
+renderServerOnlyRecords(records) {
+  return records.map(record => `
+    <div class="record-card" style="background: #eff6ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div style="flex: 1;">
+          <div style="font-weight: bold; margin-bottom: 5px;">
+            ID #${record.id} - ${record.first_name} ${record.last_name}
+          </div>
+          <div style="font-size: 12px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <div><strong>Date:</strong> ${record.date}</div>
+            <div><strong>Type:</strong> ${record.clock_type}</div>
+            <div><strong>Time:</strong> ${new Date(record.clock_time).toLocaleString()}</div>
+            <div><strong>Hours:</strong> ${record.regular_hours || 0}h reg, ${record.overtime_hours || 0}h OT</div>
+          </div>
+          <div style="margin-top: 5px; font-size: 11px; color: #6b7280;">
+            ☁️ This record exists on server but not locally
+          </div>
+        </div>
+        <div>
+          <button class="action-btn add-from-server" 
+                  data-record-id="${record.id}"
+                  data-action="add_from_server"
+                  style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
+            ⬇️ Add to Local
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
+ * NEW: Render local-only records
+ */
+renderLocalOnlyRecords(records) {
+  return records.map(record => `
+    <div class="record-card" style="background: #f0fdf4; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div style="flex: 1;">
+          <div style="font-weight: bold; margin-bottom: 5px;">
+            ID #${record.id} - ${record.first_name} ${record.last_name}
+          </div>
+          <div style="font-size: 12px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <div><strong>Date:</strong> ${record.date}</div>
+            <div><strong>Type:</strong> ${record.clock_type}</div>
+            <div><strong>Time:</strong> ${new Date(record.clock_time).toLocaleString()}</div>
+            <div><strong>Hours:</strong> ${record.regular_hours || 0}h reg, ${record.overtime_hours || 0}h OT</div>
+          </div>
+          <div style="margin-top: 5px; font-size: 11px; color: #6b7280;">
+            💾 This record exists locally but not on server
+          </div>
+        </div>
+        <div style="display: flex; gap: 5px;">
+          <button class="action-btn delete-local" 
+                  data-record-id="${record.id}"
+                  data-action="delete_local"
+                  data-employee-uid="${record.employee_uid}"
+                  data-date="${record.date}"
+                  style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
+            🗑️ Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
+ * NEW: Render different records (same ID, different data)
+ */
+renderDifferentRecords(records) {
+  return records.map(diff => `
+    <div class="record-card" style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
+      <div style="font-weight: bold; margin-bottom: 10px;">
+        Record ID #${diff.id} - Differences Found
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+        <div style="background: #dbeafe; padding: 10px; border-radius: 6px;">
+          <div style="font-weight: bold; color: #1e40af; margin-bottom: 5px;">☁️ Server Version</div>
+          <div style="font-size: 12px;">
+            <div><strong>Type:</strong> ${diff.server.clock_type}</div>
+            <div><strong>Time:</strong> ${new Date(diff.server.clock_time).toLocaleString()}</div>
+            <div><strong>Hours:</strong> ${diff.server.regular_hours}h reg, ${diff.server.overtime_hours}h OT</div>
+          </div>
+        </div>
+        <div style="background: #d1fae5; padding: 10px; border-radius: 6px;">
+          <div style="font-weight: bold; color: #065f46; margin-bottom: 5px;">💾 Local Version</div>
+          <div style="font-size: 12px;">
+            <div><strong>Type:</strong> ${diff.local.clock_type}</div>
+            <div><strong>Time:</strong> ${new Date(diff.local.clock_time).toLocaleString()}</div>
+            <div><strong>Hours:</strong> ${diff.local.regular_hours}h reg, ${diff.local.overtime_hours}h OT</div>
+          </div>
+        </div>
+      </div>
+      <div style="background: #fee2e2; padding: 8px; border-radius: 6px; font-size: 11px; margin-bottom: 10px;">
+        <strong>Differences:</strong> ${diff.differences.map(d => `${d.field}: "${d.server}" vs "${d.local}"`).join(', ')}
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="action-btn update-from-server" 
+                data-record-id="${diff.id}"
+                data-action="update_from_server"
+                style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
+          ⬇️ Use Server Version
+        </button>
+        <button class="action-btn keep-local" 
+                data-record-id="${diff.id}"
+                data-action="keep_local"
+                data-employee-uid="${diff.local.employee_uid}"
+                data-date="${diff.local.date}"
+                style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
+          ✅ Keep Local Version
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
+ * NEW: Render duplicate records
+ */
+renderDuplicateRecords(duplicates) {
+  return duplicates.map((dup, idx) => `
+    <div class="record-card" style="background: #fae8ff; border: 1px solid #a855f7; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
+      <div style="font-weight: bold; color: #7e22ce; margin-bottom: 10px;">
+        🔄 Duplicate Set #${idx + 1} - ${dup.records.length} similar records
+      </div>
+      <div style="font-size: 12px; color: #6b7280; margin-bottom: 10px;">
+        Same employee, date, clock type with similar times (within 5 minutes)
+      </div>
+      ${dup.records.map(record => `
+        <div style="background: white; padding: 10px; border: 1px solid #d8b4fe; border-radius: 6px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div style="flex: 1;">
+              <div style="font-weight: bold;">
+                ID #${record.id} 
+                <span style="background: ${record._source === 'server' ? '#dbeafe' : '#d1fae5'}; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+                  ${record._source === 'server' ? '☁️ Server' : '💾 Local'}
+                </span>
+              </div>
+              <div style="font-size: 12px; margin-top: 5px;">
+                ${record.first_name} ${record.last_name} | ${record.date} | ${record.clock_type}
+                <br>Time: ${new Date(record.clock_time).toLocaleString()}
+                <br>Hours: ${record.regular_hours}h reg, ${record.overtime_hours}h OT
+              </div>
+            </div>
+            <button class="action-btn delete-local" 
+                    data-record-id="${record.id}"
+                    data-action="delete_local"
+                    data-employee-uid="${record.employee_uid}"
+                    data-date="${record.date}"
+                    style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+/**
+ * NEW: Setup action button listeners
+ */
+setupRecordActionButtons() {
+  const actionButtons = document.querySelectorAll('.action-btn');
+  
+  actionButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const button = e.target;
+      const recordId = parseInt(button.dataset.recordId);
+      const actionType = button.dataset.action;
+      const employeeUid = button.dataset.employeeUid;
+      const date = button.dataset.date;
+
+      // Find the full record data
+      let recordData = null;
+      const tabName = this.currentComparisonTab;
+      const tabData = this.currentComparison[tabName];
+
+      if (actionType === 'add_from_server') {
+        recordData = tabData.find(r => r.id === recordId);
+      } else if (actionType === 'update_from_server') {
+        const diff = tabData.find(d => d.id === recordId);
+        recordData = diff ? diff.server : null;
+      }
+
+      const action = {
+        type: actionType,
+        recordId: recordId,
+        record: recordData,
+        employeeUid: employeeUid,
+        date: date
+      };
+
+      // Toggle selection
+      const existingIndex = this.selectedActions.findIndex(a => 
+        a.recordId === recordId && a.type === actionType
+      );
+
+      if (existingIndex >= 0) {
+        this.selectedActions.splice(existingIndex, 1);
+        button.style.opacity = '1';
+        button.style.transform = 'scale(1)';
+      } else {
+        this.selectedActions.push(action);
+        button.style.opacity = '0.6';
+        button.style.transform = 'scale(0.95)';
+      }
+
+      this.updateSelectedActionsBar();
+    });
+  });
+}
+
+/**
+ * NEW: Update selected actions bar
+ */
+updateSelectedActionsBar() {
+  const bar = document.getElementById('selectedActionsBar');
+  const countElement = document.getElementById('selectedActionsCount');
+
+  if (this.selectedActions.length > 0) {
+    bar.style.display = 'block';
+    countElement.textContent = this.selectedActions.length;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+/**
+ * NEW: Apply selected actions
+ */
+async applySelectedActions() {
+  if (this.selectedActions.length === 0) {
+    this.showStatus('No actions selected', 'warning');
+    return;
+  }
+
+  const confirmMessage = `Apply ${this.selectedActions.length} action(s)?\n\nThis will:\n` +
+    `- Modify your local database\n` +
+    `- Validate affected records\n` +
+    `- Rebuild daily summaries\n` +
+    `- Upload summaries to server\n\n` +
+    `This operation cannot be undone.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const applyBtn = document.getElementById('applyActionsBtn');
+  applyBtn.disabled = true;
+  applyBtn.textContent = '⏳ Applying...';
+
+  try {
+    this.showDownloadToast(`🔄 Applying ${this.selectedActions.length} actions...`, 'info');
+
+    const result = await this.electronAPI.invoke('apply-comparison-actions', this.selectedActions);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to apply actions');
+    }
+
+    const { results } = result;
+
+    this.showDownloadToast(
+      `✅ Success!\n` +
+      `Added: ${results.added}\n` +
+      `Updated: ${results.updated}\n` +
+      `Deleted: ${results.deleted}\n` +
+      `Summaries: ${results.summariesRebuilt} rebuilt, ${results.summariesUploaded} uploaded`,
+      'success'
+    );
+
+    // Clear selections and refresh comparison
+    this.selectedActions = [];
+    this.updateSelectedActionsBar();
+
+    // Refresh comparison to show updated state
+    await this.compareServerAndLocal();
+
+    // Refresh attendance data
+    await this.loadTodayAttendance();
+
+  } catch (error) {
+    console.error('Error applying actions:', error);
+    this.showDownloadToast(`❌ Error: ${error.message}`, 'error');
+  } finally {
+    applyBtn.disabled = false;
+    applyBtn.textContent = '✅ Apply Selected Actions';
+  }
+}
 }
 
 // Optimized AttendanceApp for rapid barcode scanning

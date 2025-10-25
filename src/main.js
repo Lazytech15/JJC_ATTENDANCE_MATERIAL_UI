@@ -1343,106 +1343,221 @@ ipcMain.handle('generate-descriptor-for-employee', async (event, employeeUID) =>
 
 // Server Edit Sync IPC handlers
 
-  // Initialize server edit sync service
-  ipcMain.handle("initialize-server-edit-sync", async () => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-       const serverEditSync = require("./services/serverEditSync");
-      const result = await serverEditSync.initializeService();
-      
-      if (result.success) {
-        // Start auto-sync after initialization
-        serverEditSync.startAutoSync();
-        console.log("✓ Server edit sync initialized and started");
-      }
-      
-      return result;
-    } catch (error) {
-      console.error("Server edit sync initialization error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Check for server edits manually
-  ipcMain.handle("check-server-edits", async (event, silent = false) => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-      const serverEditSync = require("./services/serverEditSync");
-      const result = await serverEditSync.checkServerEdits(silent);
-      
-      // Notify renderer about updates if any changes
-      if (result.success && (result.updated > 0 || result.deleted > 0)) {
-        if (mainWindow) {
-          mainWindow.webContents.send("server-edits-applied", {
-            updated: result.updated,
-            deleted: result.deleted,
-            message: result.message
-          });
-        }
-      }
-      
-      return result;
-    } catch (error) {
-      console.error("Check server edits error:", error);
-      return { 
-        success: false, 
-        error: error.message,
-        updated: 0,
-        deleted: 0
-      };
-    }
-  });
-
-  // Get sync history
-  ipcMain.handle("get-server-edit-sync-history", async (event, limit = 10) => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-      const serverEditSync = require("./services/serverEditSync");
-      const history = serverEditSync.getSyncHistory(limit);
-      return { success: true, data: history };
-    } catch (error) {
-      console.error("Get sync history error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Get last sync info
-  ipcMain.handle("get-server-edit-last-sync", async () => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-      const serverEditSync = require("./services/serverEditSync");
-      return serverEditSync.getLastSyncInfo();
-    } catch (error) {
-      console.error("Get last sync info error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Start auto sync
-  ipcMain.handle("start-server-edit-auto-sync", async () => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-      const serverEditSync = require("./services/serverEditSync");
+// Initialize server edit sync service
+ipcMain.handle("initialize-server-edit-sync", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const result = await serverEditSync.initializeService();
+    
+    if (result.success) {
+      // Start auto-sync after initialization
       serverEditSync.startAutoSync();
-      return { success: true, message: "Auto-sync started" };
-    } catch (error) {
-      console.error("Start auto-sync error:", error);
-      return { success: false, error: error.message };
+      console.log("✓ Server edit sync initialized and started");
     }
-  });
+    
+    return result;
+  } catch (error) {
+    console.error("Server edit sync initialization error:", error);
+    return { success: false, error: error.message };
+  }
+});
 
-  // Stop auto sync
-  ipcMain.handle("stop-server-edit-auto-sync", async () => {
-    try {
-      // const serverEditSync = require(getResourcePath("./services/serverEditSync"));
-      const serverEditSync = require("./services/serverEditSync");
-      serverEditSync.stopAutoSync();
-      return { success: true, message: "Auto-sync stopped" };
-    } catch (error) {
-      console.error("Stop auto-sync error:", error);
-      return { success: false, error: error.message };
+// Check for server edits manually
+ipcMain.handle("check-server-edits", async (event, silent = false) => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const result = await serverEditSync.checkServerEdits(silent);
+    
+    // Notify renderer about updates if any changes
+    if (result.success && (result.applied > 0 || result.deleted > 0)) {
+      if (mainWindow) {
+        mainWindow.webContents.send("server-edits-applied", {
+          applied: result.applied,
+          deleted: result.deleted,
+          validated: result.validated,
+          corrected: result.corrected,
+          summariesRegenerated: result.summariesRegenerated,
+          summariesUploaded: result.summariesUploaded,
+          message: `${result.applied} records updated, ${result.deleted} deleted`
+        });
+      }
     }
-  });
+    
+    return result;
+  } catch (error) {
+    console.error("Check server edits error:", error);
+    return { 
+      success: false, 
+      error: error.message,
+      applied: 0,
+      deleted: 0
+    };
+  }
+});
+
+// Get sync history
+ipcMain.handle("get-server-edit-sync-history", async (event, limit = 10) => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const history = serverEditSync.getSyncHistory(limit);
+    return { success: true, data: history };
+  } catch (error) {
+    console.error("Get sync history error:", error);
+    return { success: false, error: error.message, data: [] };
+  }
+});
+
+// Get last sync info (FIXED)
+ipcMain.handle("get-server-edit-last-sync", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const info = serverEditSync.getLastSyncInfo();
+    return info;
+  } catch (error) {
+    console.error("Get last sync info error:", error);
+    return { 
+      success: false, 
+      error: error.message,
+      lastSyncTimestamp: null,
+      isInitialized: false,
+      syncInterval: 0,
+      autoSyncRunning: false,
+      syncHistory: []
+    };
+  }
+});
+
+// Force sync now
+ipcMain.handle("force-server-edit-sync", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const result = await serverEditSync.forceSyncNow();
+    return result;
+  } catch (error) {
+    console.error("Force sync error:", error);
+    return { 
+      success: false, 
+      error: error.message,
+      downloaded: 0,
+      applied: 0,
+      deleted: 0
+    };
+  }
+});
+
+// Start auto sync
+ipcMain.handle("start-server-edit-auto-sync", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    serverEditSync.startAutoSync();
+    return { success: true, message: "Auto-sync started" };
+  } catch (error) {
+    console.error("Start auto-sync error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Stop auto sync
+ipcMain.handle("stop-server-edit-auto-sync", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    serverEditSync.stopAutoSync();
+    return { success: true, message: "Auto-sync stopped" };
+  } catch (error) {
+    console.error("Stop auto-sync error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Compare server and local attendance records
+ipcMain.handle("compare-server-and-local", async (event, startDate, endDate) => {
+  try {
+    console.log(`IPC: Comparing server and local records from ${startDate} to ${endDate}`);
+    const serverEditSync = require("./services/serverEditSync");
+    const result = await serverEditSync.compareServerAndLocal(startDate, endDate);
+    return result;
+  } catch (error) {
+    console.error("IPC error comparing records:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Apply selected comparison actions
+ipcMain.handle("apply-comparison-actions", async (event, actions) => {
+  try {
+    console.log(`IPC: Applying ${actions.length} comparison actions`);
+    const serverEditSync = require("./services/serverEditSync");
+    const result = await serverEditSync.applyComparisonActions(actions);
+    
+    // Notify renderer about updates if successful
+    if (result.success && mainWindow) {
+      const { results } = result;
+      mainWindow.webContents.send("comparison-actions-applied", {
+        added: results.added,
+        updated: results.updated,
+        deleted: results.deleted,
+        summariesRebuilt: results.summariesRebuilt || 0,
+        summariesUploaded: results.summariesUploaded || 0,
+        timestamp: new Date().toISOString(),
+        message: `Applied ${actions.length} actions successfully`
+      });
+    }
+    
+    return result;
+  } catch (error) {
+    console.error("IPC error applying comparison actions:", error);
+    return {
+      success: false,
+      error: error.message,
+      results: {
+        added: 0,
+        updated: 0,
+        deleted: 0,
+        errors: [error.message]
+      }
+    };
+  }
+});
+
+// Get cached comparison results
+ipcMain.handle("get-cached-comparison", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    const cached = serverEditSync.getCachedComparison();
+    return {
+      success: true,
+      data: cached
+    };
+  } catch (error) {
+    console.error("IPC error getting cached comparison:", error);
+    return {
+      success: false,
+      error: error.message,
+      data: null
+    };
+  }
+});
+
+// Clear comparison cache
+ipcMain.handle("clear-comparison-cache", async () => {
+  try {
+    const serverEditSync = require("./services/serverEditSync");
+    serverEditSync.clearComparisonCache();
+    return {
+      success: true,
+      message: "Comparison cache cleared"
+    };
+  } catch (error) {
+    console.error("IPC error clearing comparison cache:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
 
 // Enhanced IPC handlers for updater
 function registerUpdaterIpcHandlers() {

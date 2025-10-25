@@ -85,16 +85,33 @@ invoke: (channel, ...args) => {
     'clear-all-face-descriptors',
     'generate-face-descriptor-from-image',
     'generate-descriptor-for-employee',
+    // Server Edit Sync channels
     'initialize-server-edit-sync',
     'check-server-edits',
     'get-server-edit-sync-history',
     'get-server-edit-last-sync',
+    'force-server-edit-sync',
     'start-server-edit-auto-sync',
-    'stop-server-edit-auto-sync'
+    'stop-server-edit-auto-sync',
+    // NEW: Comparison channels
+    'compare-server-and-local',
+    'apply-comparison-actions',
+    'get-cached-comparison',
+    'clear-comparison-cache'
   ];
   if (validChannels.includes(channel)) {
     return ipcRenderer.invoke(channel, ...args);
   }
+},
+
+// Also add this listener for comparison results
+onComparisonActionsApplied: (callback) => {
+  ipcRenderer.on('comparison-actions-applied', (event, data) => callback(data));
+},
+
+// Don't forget to expose removeListener for cleanup
+removeComparisonActionsListener: () => {
+  ipcRenderer.removeAllListeners('comparison-actions-applied');
 },
 
 

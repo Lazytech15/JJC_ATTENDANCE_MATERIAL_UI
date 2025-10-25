@@ -17,7 +17,7 @@ const { broadcastUpdate } = require("../../services/websocket")
 const profileService = require("../../services/profileService")
 const dateService = require("../../services/dateService")
 
-// Enhanced clockAttendance function with daily summary updates
+// Enhanced clockAttendance function with daily summary updates and duplicate prevention
 async function clockAttendance(event, { input, inputType = "barcode" }) {
   try {
     // Find employee by barcode or ID number
@@ -45,6 +45,41 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
     console.log(`Employee: ${employee.first_name} ${employee.last_name}`)
     console.log(`Current time: ${currentDateTime.toISOString()}`)
     console.log(`Current date: ${today}`)
+
+    // DUPLICATE PREVENTION: Check for recent scans within 5 seconds
+    const duplicateCheckQuery = db.prepare(`
+      SELECT id, clock_type, clock_time
+      FROM attendance 
+      WHERE employee_uid = ? 
+        AND date = ?
+        AND ABS((julianday(?) - julianday(clock_time)) * 86400) < 5
+      ORDER BY clock_time DESC 
+      LIMIT 1
+    `)
+    
+    const recentDuplicate = duplicateCheckQuery.get(
+      employee.uid, 
+      today,
+      currentDateTime.toISOString()
+    )
+    
+    if (recentDuplicate) {
+      console.log(`⚠️ DUPLICATE SCAN DETECTED - Ignoring duplicate entry`)
+      console.log(`Recent scan: ${recentDuplicate.clock_type} at ${recentDuplicate.clock_time}`)
+      
+      return {
+        success: false,
+        error: "Duplicate scan detected. Please wait a few seconds before scanning again.",
+        isDuplicate: true,
+        recentScan: {
+          clockType: recentDuplicate.clock_type,
+          clockTime: recentDuplicate.clock_time,
+          sessionType: getSessionType(recentDuplicate.clock_type)
+        },
+        input: input,
+        inputType: inputType,
+      }
+    }
 
     // FIXED: Check for any pending clock-out from the SAME DAY only
     const pendingClockOut = getPendingClockOut(employee.uid, today, db)
