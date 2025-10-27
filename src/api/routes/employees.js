@@ -1,9 +1,17 @@
+// controllers/employeeController.js
 const Employee = require("../../database/models/employee")
 const SyncService = require("../../services/syncService")
 const ProfileService = require("../../services/profileService")
 
+/**
+ * Get all employees
+ * Now uses cache for instant response
+ */
 async function getEmployees() {
   try {
+    // Ensure cache is loaded
+    await Employee.ensureCacheLoaded()
+    
     const employees = Employee.getAll()
     return { success: true, data: employees }
   } catch (error) {
@@ -12,12 +20,30 @@ async function getEmployees() {
   }
 }
 
+/**
+ * Sync employees from external source
+ * Automatically refreshes cache after sync
+ */
 async function syncEmployees() {
-  return await SyncService.syncEmployees()
+  const result = await SyncService.syncEmployees()
+  
+  // Refresh cache after sync
+  if (result.success) {
+    await Employee.refreshCache()
+  }
+  
+  return result
 }
 
+/**
+ * Check profile images
+ * Uses cached employee data
+ */
 async function checkProfileImages() {
   try {
+    // Ensure cache is loaded
+    await Employee.ensureCacheLoaded()
+    
     const employees = Employee.getAll()
     
     if (!employees || employees.length === 0) {
@@ -33,14 +59,11 @@ async function checkProfileImages() {
     }
 
     // Extract employee UIDs for bulk checking
-    // Use the appropriate field - could be uid, id_number, or id depending on your schema
     const employeeUids = employees.map(emp => {
-      // Adjust this based on your employee schema
-      // Common fields are: emp.uid, emp.id_number, emp.id
-      return emp.uid || emp.id_number || emp.id || emp.employee_uid || emp.id_number
-    }).filter(uid => uid != null) // Remove any null/undefined values
+      return emp.uid || emp.id_number || emp.id || emp.employee_uid
+    }).filter(uid => uid != null)
 
-    console.log(`Checking profiles for ${employeeUids.length} employees:`, employeeUids)
+    console.log(`Checking profiles for ${employeeUids.length} employees`)
 
     // Use the bulk profile checking method from ProfileService
     const result = await ProfileService.checkProfileImages(employeeUids)
@@ -61,8 +84,36 @@ async function checkProfileImages() {
   }
 }
 
+/**
+ * Get cache statistics
+ */
+async function getCacheStats() {
+  try {
+    const stats = Employee.getCacheStats()
+    return { success: true, data: stats }
+  } catch (error) {
+    console.error("Error getting cache stats:", error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
+ * Manually refresh cache
+ */
+async function refreshCache() {
+  try {
+    await Employee.refreshCache()
+    return { success: true, message: "Cache refreshed successfully" }
+  } catch (error) {
+    console.error("Error refreshing cache:", error)
+    return { success: false, error: error.message }
+  }
+}
+
 module.exports = {
   getEmployees,
   syncEmployees,
   checkProfileImages,
+  getCacheStats,
+  refreshCache,
 }

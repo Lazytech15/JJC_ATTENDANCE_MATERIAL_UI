@@ -6,6 +6,7 @@ const { autoUpdater } = require("electron-updater")
 const LRU = require('lru-cache')
 const { getDatabase  } = require("./database/setup");
 const { startWebSocketServer } = require('./services/websocket');
+const Employee = require('./database/models/employee');
 
 // Configure auto-updater
 autoUpdater.autoDownload = false
@@ -32,27 +33,27 @@ let settingsWindow
 let webExportServer
 let updateDownloadStarted = false
 
-let profileCache
-let imageCache
-let rendererCache
-let dbInstance = null
+let profileCache;
+let imageCache;
+let rendererCache;
+let dbInstance = null;
+let employeeCacheLoaded = false;
 
 function initializeCaches() {
   console.log("=== INITIALIZING PERFORMANCE CACHES ===");
   
   try {
-    
     profileCache = new LRU({
-      max: 500, // Maximum 500 cached profiles
-      maxSize: 5000000, // 5MB max memory usage
+      max: 500,
+      maxSize: 5000000,
       sizeCalculation: (value, key) => {
         try {
           return JSON.stringify(value).length;
         } catch (error) {
-          return 1000; // Fallback size estimate
+          return 1000;
         }
       },
-      ttl: 1000 * 60 * 30, // 30 minutes TTL
+      ttl: 1000 * 60 * 30,
       allowStale: false,
       updateAgeOnGet: true,
       dispose: (value, key, reason) => {
@@ -61,8 +62,8 @@ function initializeCaches() {
     });
     
     imageCache = new LRU({
-      max: 200, // Maximum 200 cached images  
-      maxSize: 20000000, // 20MB max for images
+      max: 200,
+      maxSize: 20000000,
       sizeCalculation: (value, key) => {
         try {
           if (typeof value === 'string') {
@@ -71,12 +72,12 @@ function initializeCaches() {
           if (Buffer.isBuffer(value)) {
             return value.length;
           }
-          return 1000; // Fallback size estimate
+          return 1000;
         } catch (error) {
           return 1000;
         }
       },
-      ttl: 1000 * 60 * 60, // 1 hour TTL for images
+      ttl: 1000 * 60 * 60,
       allowStale: false,
       updateAgeOnGet: true,
       dispose: (value, key, reason) => {
@@ -93,12 +94,72 @@ function initializeCaches() {
     return true;
   } catch (error) {
     console.error("❌ Cache initialization failed:", error);
-    // Fallback to regular Maps if LRU fails
     profileCache = new Map();
     imageCache = new Map(); 
     rendererCache = new Map();
     console.log("Fallback to Map-based caches");
     return false;
+  }
+}
+
+// NEW: Initialize employee cache
+async function initializeEmployeeCache() {
+  try {
+    console.log("=== INITIALIZING EMPLOYEE CACHE ===");
+    
+    // Ensure Employee model is available
+    if (!Employee) {
+      console.error("Employee model not available");
+      return false;
+    }
+    
+    // Load employee data into cache
+    await Employee.ensureCacheLoaded();
+    
+    const stats = Employee.getCacheStats();
+    console.log(`✓ EMPLOYEE CACHE LOADED: ${stats.totalEmployees} employees`);
+    console.log(`  Last updated: ${stats.lastUpdated}`);
+    console.log(`  Cache age: ${stats.cacheAge}s`);
+    
+    employeeCacheLoaded = true;
+    return true;
+    
+  } catch (error) {
+    console.error("❌ Employee cache initialization failed:", error);
+    employeeCacheLoaded = false;
+    return false;
+  }
+}
+
+// NEW: Get employee cache statistics
+function getEmployeeCacheStats() {
+  try {
+    if (!Employee || !Employee.getCacheStats) {
+      return {
+        isLoaded: false,
+        totalEmployees: 0,
+        lastUpdated: null,
+        cacheAge: null,
+        error: "Employee model not available"
+      };
+    }
+    
+    const stats = Employee.getCacheStats();
+    return {
+      isLoaded: stats.isLoaded,
+      totalEmployees: stats.totalEmployees,
+      lastUpdated: stats.lastUpdated,
+      cacheAge: stats.cacheAge
+    };
+  } catch (error) {
+    console.error("Error getting employee cache stats:", error);
+    return {
+      isLoaded: false,
+      totalEmployees: 0,
+      lastUpdated: null,
+      cacheAge: null,
+      error: error.message
+    };
   }
 }
 
@@ -473,7 +534,8 @@ function getCacheStatistics() {
       },
       rendererCache: {
         size: rendererCache ? rendererCache.size : 0
-      }
+      },
+      employeeCache: getEmployeeCacheStats() // NEW: Add employee cache stats
     };
     
     console.log("Cache statistics:", stats);
@@ -483,12 +545,12 @@ function getCacheStatistics() {
     return {
       profileCache: { size: 0, max: 0, hits: 0 },
       imageCache: { size: 0, max: 0, hits: 0 },
-      rendererCache: { size: 0 }
+      rendererCache: { size: 0 },
+      employeeCache: { isLoaded: false, totalEmployees: 0, lastUpdated: null, cacheAge: null }
     };
   }
 }
 
-// Enhanced IPC handlers with caching
 function registerCacheIpcHandlers() {
   console.log("Registering cache IPC handlers...")
   
@@ -528,7 +590,7 @@ function registerCacheIpcHandlers() {
     }
   })
   
-  // Get cache statistics
+  // Get cache statistics (now includes employee cache)
   ipcMain.handle("get-cache-stats", async () => {
     try {
       return {
@@ -540,6 +602,87 @@ function registerCacheIpcHandlers() {
         success: false,
         error: error.message
       }
+    }
+  })
+  
+  // NEW: Refresh employee cache
+  ipcMain.handle("refresh-employee-cache", async () => {
+    try {
+      console.log("Manually refreshing employee cache...");
+      await Employee.refreshCache();
+      const stats = Employee.getCacheStats();
+      
+      return {
+        success: true,
+        message: "Employee cache refreshed successfully",
+        stats: stats
+      };
+    } catch (error) {
+      console.error("Error refreshing employee cache:", error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  })
+  
+  // NEW: Get employee cache stats
+  ipcMain.handle("get-employee-cache-stats", async () => {
+    try {
+      const stats = getEmployeeCacheStats();
+      return {
+        success: true,
+        data: stats
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  })
+  
+  // NEW: Clear employee cache
+  ipcMain.handle("clear-employee-cache", async () => {
+    try {
+      Employee.clearCache();
+      employeeCacheLoaded = false;
+      
+      return {
+        success: true,
+        message: "Employee cache cleared"
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  })
+  
+  // NEW: Preload employee cache
+  ipcMain.handle("preload-employee-cache", async () => {
+    try {
+      const success = await initializeEmployeeCache();
+      
+      if (success) {
+        const stats = Employee.getCacheStats();
+        return {
+          success: true,
+          message: "Employee cache preloaded",
+          stats: stats
+        };
+      } else {
+        return {
+          success: false,
+          error: "Failed to preload employee cache"
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
     }
   })
   
@@ -1652,7 +1795,7 @@ function registerUpdaterIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
-startWebSocketServer();
+  startWebSocketServer();
 
   try {
     console.log("App ready event fired, initializing...");
@@ -1714,48 +1857,20 @@ startWebSocketServer();
       console.error("❌ Cache initialization failed");
     }
 
+    // === STEP 2.5: Initialize Employee Cache (NEW) ===
+    console.log("=== INITIALIZING EMPLOYEE CACHE ===");
+    try {
+      const employeeCacheSuccess = await initializeEmployeeCache();
+      if (employeeCacheSuccess) {
+        console.log("✓ EMPLOYEE CACHE INITIALIZED");
+      } else {
+        console.warn("⚠️ Employee cache initialization had issues");
+      }
+    } catch (empError) {
+      console.error("❌ Employee cache initialization error:", empError);
+    }
+
     // === STEP 3: Start Services ===
-    try {
-      modules.startWebSocketServer();
-      console.log("✓ WebSocket server started");
-    } catch (error) {
-      console.error("WebSocket server failed:", error.message);
-    }
-
-    try {
-      webExportServer = new modules.WebExportServer(3001);
-      await webExportServer.start();
-      console.log("✓ Web Export Server started");
-    } catch (error) {
-      console.error("Web Export Server failed:", error.message);
-    }
-
-
-    
-     // Register all IPC handlers
-  const routes = loadRoutes();
-  registerIpcHandlers(routes);
-  registerUpdaterIpcHandlers();
-  registerCacheIpcHandlers();
-  registerServerEditSyncHandlers(); // ADD THIS LINE
-  
-  // Initialize server edit sync service
-  try {
-    const serverEditSync = require(getResourcePath("/services/serverEditSync"));
-    await serverEditSync.initializeService();
-    serverEditSync.startAutoSync();
-    console.log("✓ Server edit sync service initialized");
-  } catch (error) {
-    console.error("Failed to initialize server edit sync:", error);
-  }
-
-        // === STEP 3: Register ALL IPC Handlers IMMEDIATELY ===
-    console.log("=== REGISTERING ALL IPC HANDLERS ===");
-    registerCacheIpcHandlers(); // Cache handlers first
-    
-    console.log("✓ ALL IPC HANDLERS REGISTERED");
-
-    // === STEP 4: Start Services ===
     try {
       const modules = await loadModules();
       modules.startWebSocketServer();
@@ -1768,13 +1883,32 @@ startWebSocketServer();
       console.error("Service startup failed:", error.message);
     }
 
-    // === STEP 5: Create Main Window (handlers are ready) ===
+    // === STEP 4: Register ALL IPC Handlers ===
+    console.log("=== REGISTERING ALL IPC HANDLERS ===");
+    const routes = loadRoutes();
+    registerIpcHandlers(routes);
+    registerUpdaterIpcHandlers();
+    registerCacheIpcHandlers(); // Now includes employee cache handlers
+    
+    // Initialize server edit sync service
+    try {
+      const serverEditSync = require(getResourcePath("/services/serverEditSync"));
+      await serverEditSync.initializeService();
+      serverEditSync.startAutoSync();
+      console.log("✓ Server edit sync service initialized");
+    } catch (error) {
+      console.error("Failed to initialize server edit sync:", error);
+    }
+
+    console.log("✓ ALL IPC HANDLERS REGISTERED");
+
+    // === STEP 5: Create Main Window ===
     createMainWindow();
     createApplicationMenu();
 
-    // === STEP 6: Preload Data (everything is ready) ===
+    // === STEP 6: Preload Profile Data ===
     if (dbInstance && profileCache && imageCache) {
-      console.log("=== STARTING DATA PRELOAD ===");
+      console.log("=== STARTING PROFILE PRELOAD ===");
       setTimeout(async () => {
         try {
           await preloadFrequentProfiles(dbInstance);
@@ -1783,12 +1917,29 @@ startWebSocketServer();
           console.log("Cache status after preloading:");
           console.log(`  Profile cache: ${profileCache.size || 0} items`);
           console.log(`  Image cache: ${imageCache.size || 0} items`);
+          console.log(`  Employee cache: ${employeeCacheLoaded ? 'Loaded' : 'Not loaded'}`);
+          
+          const empStats = getEmployeeCacheStats();
+          console.log(`  Employee cache stats:`, empStats);
           
         } catch (preloadError) {
           console.error("Profile preloading error:", preloadError);
         }
       }, 2000);
     }
+
+    // === STEP 7: Setup Auto-Refresh for Employee Cache (NEW) ===
+    // Refresh employee cache every hour
+    setInterval(async () => {
+      try {
+        console.log("Auto-refreshing employee cache...");
+        await Employee.refreshCache();
+        const stats = Employee.getCacheStats();
+        console.log(`Employee cache auto-refreshed: ${stats.totalEmployees} employees`);
+      } catch (error) {
+        console.error("Failed to auto-refresh employee cache:", error);
+      }
+    }, 60 * 60 * 1000); // 1 hour
 
     console.log("✓ App initialization sequence completed");
     
@@ -2053,8 +2204,58 @@ ipcMain.handle("get-profile-fast", async (event, barcode) => {
   // Employee route handlers
   const employeeRoutes = routes.employees || {}
   console.log("Employee routes available:", Object.keys(employeeRoutes))
-  safelyRegisterHandler("get-employees", employeeRoutes.getEmployees, employeeRoutes, "getEmployees")
-  safelyRegisterHandler("sync-employees", employeeRoutes.syncEmployees, employeeRoutes, "syncEmployees")
+  
+  // Override get-employees to ensure cache is loaded first
+  ipcMain.handle("get-employees", async () => {
+    try {
+      console.log("IPC: get-employees called (using cache)");
+      
+      // Ensure employee cache is loaded
+      await Employee.ensureCacheLoaded();
+      
+      // Get employees from cache
+      const employees = Employee.getAll();
+      
+      return {
+        success: true,
+        data: employees,
+        cached: true,
+        count: employees.length
+      };
+    } catch (error) {
+      console.error("Error in get-employees:", error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
+  
+  // Override sync-employees to refresh cache after sync
+  ipcMain.handle("sync-employees", async () => {
+    try {
+      console.log("IPC: sync-employees called");
+      
+      // Call original sync function
+      const result = await employeeRoutes.syncEmployees();
+      
+      // Refresh employee cache after successful sync
+      if (result.success) {
+        console.log("Refreshing employee cache after sync...");
+        await Employee.refreshCache();
+        const stats = Employee.getCacheStats();
+        console.log(`Employee cache refreshed: ${stats.totalEmployees} employees`);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error("Error in sync-employees:", error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  });
 
   // Attendance route handlers
   const attendanceRoutes = routes.attendance || {}

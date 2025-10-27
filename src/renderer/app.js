@@ -59,31 +59,192 @@ class AttendanceApp {
     this.initializeDateRangeControls();
     this.faceRecognitionManager = null;
 
-      // Server edit sync tracking - MANUAL ONLY
-  this.lastServerEditCheck = null;
-  
-  // Initialize server edit sync listener
-  this.setupServerEditSyncListener();
-  
-  this.barcodeTimeout = null; // Add timeout for barcode handling
-  this.autoSyncInterval = null; // Auto-sync interval
-  this.summaryAutoSyncInterval = null; // Summary auto-sync interval
+    // Server edit sync tracking - MANUAL ONLY
+    this.lastServerEditCheck = null;
 
-this.faceRecognitionSchedule = [
-  { hour: 8, minute: 0, second: 0 },   // 07:59:20
-  { hour: 12, minute: 0, second: 0 },   // 11:59:00 (12:00)
-  { hour: 13, minute: 0, second: 0 },   // 12:59:00 (13:00)
-  { hour: 17, minute: 0, second: 0 }    // 16:59:00 (17:00)
-];
-  this.faceRecognitionDuration = 15; // Minutes to keep open
-  this.faceRecognitionCheckInterval = null;
-  this.faceRecognitionAutoCloseTimeout = null;
-  // END NEW LINES
+    // Initialize server edit sync listener
+    this.setupServerEditSyncListener();
 
-  // PERFORMANCE: Add cache-related properties
-  this.profileCache = new Map();
+    this.barcodeTimeout = null; // Add timeout for barcode handling
+    this.autoSyncInterval = null; // Auto-sync interval
+    this.summaryAutoSyncInterval = null; // Summary auto-sync interval
+
+    this.faceRecognitionSchedule = [
+      { hour: 8, minute: 0, second: 0 },   // 07:59:20
+      { hour: 12, minute: 0, second: 0 },   // 11:59:00 (12:00)
+      { hour: 13, minute: 0, second: 0 },   // 12:59:00 (13:00)
+      { hour: 17, minute: 0, second: 0 }    // 16:59:00 (17:00)
+    ];
+    this.faceRecognitionDuration = 15; // Minutes to keep open
+    this.faceRecognitionCheckInterval = null;
+    this.faceRecognitionAutoCloseTimeout = null;
+    // END NEW LINES
+
+    // PERFORMANCE: Add cache-related properties
+    this.profileCache = new Map();
+
+    this.barcodeTimeout = null; // Add timeout for barcode handling
+    this.autoSyncInterval = null; // Auto-sync interval
+    this.summaryAutoSyncInterval = null; // Summary auto-sync interval
+
+    // SCHEDULED SYNC: Define sync schedule (military time)
+    this.attendanceSyncSchedule = [
+      { hour: 8, minute: 30, second: 0 },   // 08:30:00 AM
+      { hour: 12, minute: 30, second: 0 },  // 12:30:00 PM
+      { hour: 13, minute: 30, second: 0 },  // 01:30:00 PM
+      { hour: 17, minute: 30, second: 0 }   // 05:30:00 PM
+    ];
+    this.scheduledSyncCheckInterval = null;
+    this.lastScheduledSyncTime = null;
+    this.pendingAttendanceSync = false; // Track if sync is needed
+
+    // Face recognition schedule
+    this.faceRecognitionSchedule = [
+      { hour: 8, minute: 0, second: 0 },   // 08:00:00 AM
+      { hour: 12, minute: 0, second: 0 },  // 12:00:00 PM
+      { hour: 13, minute: 0, second: 0 },  // 01:00:00 PM
+      { hour: 17, minute: 0, second: 0 }   // 05:00:00 PM
+    ];
+    this.faceRecognitionDuration = 5; // Minutes to keep open
+    this.faceRecognitionCheckInterval = null;
+    this.faceRecognitionAutoCloseTimeout = null;
+    // END NEW LINES
+
+    // PERFORMANCE: Add cache-related properties
+    this.profileCache = new Map();
   }
-  
+
+  // SCHEDULED SYNC: Start scheduled attendance sync
+  startScheduledAttendanceSync() {
+    console.log('Starting scheduled attendance sync...');
+    console.log('Sync schedule:', this.attendanceSyncSchedule.map(s =>
+      `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}:${String(s.second).padStart(2, '0')}`
+    ).join(', '));
+
+    // Check every second for scheduled sync times
+    this.scheduledSyncCheckInterval = setInterval(() => {
+      this.checkScheduledSyncTime();
+    }, 1000);
+
+    // Also check immediately after 2 seconds
+    setTimeout(() => this.checkScheduledSyncTime(), 2000);
+  }
+
+  // SCHEDULED SYNC: Check if current time matches sync schedule
+  checkScheduledSyncTime() {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentSecond = now.getSeconds();
+
+    const matchedSchedule = this.attendanceSyncSchedule.find(
+      schedule => schedule.hour === currentHour &&
+        schedule.minute === currentMinute &&
+        schedule.second === currentSecond
+    );
+
+    if (matchedSchedule) {
+      const timeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}:${String(currentSecond).padStart(2, '0')}`;
+      console.log(`⏰ Scheduled sync triggered at ${timeStr}`);
+
+      // Prevent duplicate syncs within the same minute
+      const lastSyncKey = `${currentHour}-${currentMinute}`;
+      if (this.lastScheduledSyncTime !== lastSyncKey) {
+        this.lastScheduledSyncTime = lastSyncKey;
+        this.performScheduledSync();
+      }
+    }
+  }
+
+  // SCHEDULED SYNC: Perform the actual sync
+  async performScheduledSync() {
+    try {
+      console.log('🔄 Executing scheduled sync (Attendance + Summary)...');
+
+      // STEP 1: Sync Attendance
+      const attendanceCount = await this.electronAPI.getUnsyncedAttendanceCount();
+
+      let attendanceSynced = 0;
+      let summarySynced = 0;
+
+      if (attendanceCount && attendanceCount.success && attendanceCount.count > 0) {
+        this.showDownloadToast(
+          `⏰ Scheduled Sync: Uploading ${attendanceCount.count} attendance records...`,
+          'info'
+        );
+
+        const attendanceSync = await this.performAttendanceSync(false, 0, true);
+
+        if (attendanceSync && attendanceSync.success) {
+          this.pendingAttendanceSync = false;
+          attendanceSynced = attendanceCount.count;
+          console.log(`✓ Attendance sync: ${attendanceSynced} records uploaded`);
+        } else {
+          console.error('✗ Attendance sync failed:', attendanceSync?.error || 'Unknown error');
+        }
+      } else {
+        console.log('✓ No attendance records to sync');
+      }
+
+      // STEP 2: Sync Summary (wait a moment for attendance to process)
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+
+      const summaryCount = await this.electronAPI.getUnsyncedDailySummaryCount();
+
+      if (summaryCount && summaryCount.success && summaryCount.count > 0) {
+        this.showDownloadToast(
+          `⏰ Scheduled Sync: Uploading ${summaryCount.count} summary records...`,
+          'info'
+        );
+
+        const summarySync = await this.performSummarySync(false, 0, true);
+
+        if (summarySync && summarySync.success) {
+          this.pendingSummarySync = false;
+          summarySynced = summaryCount.count;
+          console.log(`✓ Summary sync: ${summarySynced} records uploaded`);
+        } else {
+          console.error('✗ Summary sync failed:', summarySync?.error || 'Unknown error');
+        }
+      } else {
+        console.log('✓ No summary records to sync');
+      }
+
+      // STEP 3: Final success message
+      const totalRecords = attendanceSynced + summarySynced;
+
+      if (totalRecords > 0) {
+        this.showDownloadToast(
+          `✅ Scheduled Sync Complete!\n` +
+          `Attendance: ${attendanceSynced} | Summary: ${summarySynced}`,
+          'success'
+        );
+      }
+
+    } catch (error) {
+      console.error('Scheduled sync error:', error);
+      this.showDownloadToast(
+        `❌ Scheduled Sync Error: ${error.message}`,
+        'error'
+      );
+    }
+  }
+
+  // SCHEDULED SYNC: Stop scheduled sync
+  stopScheduledSync() {
+    if (this.scheduledSyncCheckInterval) {
+      clearInterval(this.scheduledSyncCheckInterval);
+      this.scheduledSyncCheckInterval = null;
+      console.log('Scheduled attendance sync stopped');
+    }
+  }
+
+  // SCHEDULED SYNC: Mark that attendance data needs syncing
+  markAttendanceForSync() {
+    this.pendingAttendanceSync = true;
+    console.log('📌 Attendance marked for next scheduled sync');
+  }
+
   // Helper method to wait for face-api.js
   waitForFaceApi(timeout = 15000) {
     return new Promise((resolve) => {
@@ -93,13 +254,13 @@ this.faceRecognitionSchedule = [
         resolve(true);
         return;
       }
-      
+
       const startTime = Date.now();
       let attempts = 0;
-      
+
       const checkInterval = setInterval(() => {
         attempts++;
-        
+
         if (typeof faceapi !== 'undefined') {
           clearInterval(checkInterval);
           console.log(`face-api.js loaded after ${attempts} attempts`);
@@ -128,9 +289,10 @@ this.faceRecognitionSchedule = [
     await this.loadInitialData();
 
     await this.loadSyncSettings();
+    this.startScheduledAttendanceSync();
     this.startAutoSync();
-    this.startSummaryAutoSync();
-    
+    // this.startSummaryAutoSync();
+
     this.focusInput();
     this.startCacheMonitoring();
 
@@ -144,331 +306,349 @@ this.faceRecognitionSchedule = [
     }
   }
 
-// Add this new method for when user updates a profile image
-async onProfileImageUpdated(employeeUID) {
-  if (this.faceRecognitionManager) {
-    // Force regenerate descriptor for this employee
-    await this.faceRecognitionManager.refreshSingleDescriptor(employeeUID, true);
-    console.log(`Face descriptor refreshed for employee ${employeeUID}`);
+  // Add this new method for when user updates a profile image
+  async onProfileImageUpdated(employeeUID) {
+    if (this.faceRecognitionManager) {
+      // Force regenerate descriptor for this employee
+      await this.faceRecognitionManager.refreshSingleDescriptor(employeeUID, true);
+      console.log(`Face descriptor refreshed for employee ${employeeUID}`);
+    }
   }
-}
 
-startFaceRecognitionScheduler() {
-  console.log('Starting face recognition scheduler...');
-  // Check every second instead of every minute
-  this.faceRecognitionCheckInterval = setInterval(() => {
-    this.checkFaceRecognitionSchedule();
-  }, 1000);  // Changed from 60000 to 1000 (1 second)
-  setTimeout(() => this.checkFaceRecognitionSchedule(), 2000);
-}
-
-checkFaceRecognitionSchedule() {
-  if (!this.faceRecognitionManager) return;
-  
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const currentSecond = now.getSeconds();  // ADD THIS LINE
-  
-  const matchedSchedule = this.faceRecognitionSchedule.find(
-    schedule => schedule.hour === currentHour && 
-                schedule.minute === currentMinute &&
-                schedule.second === currentSecond  // ADD THIS CONDITION
-  );
-  
-  if (matchedSchedule) {
-    console.log(`Face recognition auto-start at ${currentHour}:${String(currentMinute).padStart(2, '0')}:${String(currentSecond).padStart(2, '0')}`);
-    this.autoOpenFaceRecognition();
+  startFaceRecognitionScheduler() {
+    console.log('Starting face recognition scheduler...');
+    // Check every second instead of every minute
+    this.faceRecognitionCheckInterval = setInterval(() => {
+      this.checkFaceRecognitionSchedule();
+    }, 1000);  // Changed from 60000 to 1000 (1 second)
+    setTimeout(() => this.checkFaceRecognitionSchedule(), 2000);
   }
-}
 
-async autoOpenFaceRecognition() {
-  if (!this.faceRecognitionManager) return;
-  
-  try {
-    console.log('Auto-opening face recognition...');
-    
-    // Clear any existing auto-close mechanisms first
+  checkFaceRecognitionSchedule() {
+    if (!this.faceRecognitionManager) return;
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentSecond = now.getSeconds();  // ADD THIS LINE
+
+    const matchedSchedule = this.faceRecognitionSchedule.find(
+      schedule => schedule.hour === currentHour &&
+        schedule.minute === currentMinute &&
+        schedule.second === currentSecond  // ADD THIS CONDITION
+    );
+
+    if (matchedSchedule) {
+      console.log(`Face recognition auto-start at ${currentHour}:${String(currentMinute).padStart(2, '0')}:${String(currentSecond).padStart(2, '0')}`);
+      this.autoOpenFaceRecognition();
+    }
+  }
+
+  async autoOpenFaceRecognition() {
+    if (!this.faceRecognitionManager) return;
+
+    // Check if face recognition is enabled in settings
+    try {
+      const settingsResult = await this.electronAPI.getSettings();
+      if (settingsResult.success) {
+        const faceRecognitionEnabled = settingsResult.data.face_detection_enabled === "true" ||
+          settingsResult.data.face_detection_enabled === true;
+
+        if (!faceRecognitionEnabled) {
+          console.log('Face recognition is disabled in settings - skipping auto-open');
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn('Could not check face recognition settings:', error);
+      // If we can't check settings, don't auto-open (fail safe)
+      return;
+    }
+
+    try {
+      console.log('Auto-opening face recognition...');
+
+      // Clear any existing auto-close mechanisms first
+      if (this.faceRecognitionAutoCloseTimeout) {
+        clearTimeout(this.faceRecognitionAutoCloseTimeout);
+        this.faceRecognitionAutoCloseTimeout = null;
+        console.log('Cleared existing auto-close timeout');
+      }
+      if (this.faceRecognitionAutoCloseInterval) {
+        clearInterval(this.faceRecognitionAutoCloseInterval);
+        this.faceRecognitionAutoCloseInterval = null;
+        console.log('Cleared existing auto-close interval');
+      }
+
+      // Show the modal first
+      await this.faceRecognitionManager.show();
+
+      // Wait a moment for UI to render
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Ensure models are loaded and initialized
+      if (!this.faceRecognitionManager.modelsLoaded) {
+        console.log('Waiting for models to load...');
+        await this.faceRecognitionManager.init();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Ensure descriptors are loaded
+      if (!this.faceRecognitionManager.descriptorsLoaded) {
+        console.log('Waiting for descriptors to load...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Now start recognition
+      if (!this.faceRecognitionManager.isActive) {
+        console.log('Starting recognition automatically...');
+        await this.faceRecognitionManager.startRecognition();
+      }
+
+      // Calculate the target close time based on actual system clock
+      const durationMs = this.faceRecognitionDuration * 60 * 1000;
+      this.faceRecognitionAutoCloseTime = Date.now() + durationMs;
+
+      console.log(`Setting auto-close for ${this.faceRecognitionDuration} minutes (${durationMs}ms)`);
+      console.log(`Target close time: ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
+
+      // Show countdown timer
+      this.faceRecognitionManager.showCountdownTimer(this.faceRecognitionAutoCloseTime);
+
+      // Use interval-based checking that respects system clock
+      // Check every 1 second for countdown updates
+      this.faceRecognitionAutoCloseInterval = setInterval(() => {
+        const now = Date.now();
+
+        // Check if modal is still visible
+        const container = document.getElementById('faceRecognitionContainer');
+        if (!container || container.classList.contains('hidden')) {
+          console.log('Face recognition closed manually, clearing auto-close');
+          clearInterval(this.faceRecognitionAutoCloseInterval);
+          this.faceRecognitionAutoCloseInterval = null;
+          if (this.faceRecognitionManager) {
+            this.faceRecognitionManager.hideCountdownTimer();
+          }
+          return;
+        }
+
+        const remaining = Math.floor((this.faceRecognitionAutoCloseTime - now) / 1000);
+
+        // Update countdown display
+        if (this.faceRecognitionManager) {
+          this.faceRecognitionManager.updateCountdown(remaining);
+        }
+
+        if (remaining <= 0) {
+          console.log('Auto-close time reached! Closing face recognition...');
+          clearInterval(this.faceRecognitionAutoCloseInterval);
+          this.faceRecognitionAutoCloseInterval = null;
+          this.autoCloseFaceRecognition();
+        }
+      }, 1000); // Check every 1 second for smooth countdown
+
+      this.showDownloadToast(
+        `🎥 Face Recognition Auto-Started (closes in ${this.faceRecognitionDuration} min)`,
+        'info'
+      );
+
+      console.log(`✓ Auto-close scheduled at ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
+    } catch (error) {
+      console.error('Error auto-opening face recognition:', error);
+    }
+  }
+
+  autoCloseFaceRecognition() {
+    if (!this.faceRecognitionManager) return;
+
+    try {
+      if (this.faceRecognitionManager.isActive) {
+        this.faceRecognitionManager.stopRecognition();
+      }
+      this.faceRecognitionManager.hide();
+      this.showDownloadToast('🎥 Face Recognition Auto-Closed', 'info');
+    } catch (error) {
+      console.error('Error auto-closing face recognition:', error);
+    }
+  }
+
+  stopFaceRecognitionScheduler() {
+    if (this.faceRecognitionCheckInterval) {
+      clearInterval(this.faceRecognitionCheckInterval);
+      this.faceRecognitionCheckInterval = null;
+    }
     if (this.faceRecognitionAutoCloseTimeout) {
       clearTimeout(this.faceRecognitionAutoCloseTimeout);
       this.faceRecognitionAutoCloseTimeout = null;
-      console.log('Cleared existing auto-close timeout');
     }
-    if (this.faceRecognitionAutoCloseInterval) {
-      clearInterval(this.faceRecognitionAutoCloseInterval);
-      this.faceRecognitionAutoCloseInterval = null;
-      console.log('Cleared existing auto-close interval');
-    }
-    
-    // Show the modal first
-    await this.faceRecognitionManager.show();
-    
-    // Wait a moment for UI to render
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Ensure models are loaded and initialized
-    if (!this.faceRecognitionManager.modelsLoaded) {
-      console.log('Waiting for models to load...');
-      await this.faceRecognitionManager.init();
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // Ensure descriptors are loaded
-    if (!this.faceRecognitionManager.descriptorsLoaded) {
-      console.log('Waiting for descriptors to load...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // Now start recognition
-    if (!this.faceRecognitionManager.isActive) {
-      console.log('Starting recognition automatically...');
-      await this.faceRecognitionManager.startRecognition();
-    }
-    
-    // Calculate the target close time based on actual system clock
-    const durationMs = this.faceRecognitionDuration * 60 * 1000;
-    this.faceRecognitionAutoCloseTime = Date.now() + durationMs;
-    
-    console.log(`Setting auto-close for ${this.faceRecognitionDuration} minutes (${durationMs}ms)`);
-    console.log(`Target close time: ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
-    
-    // Show countdown timer
-    this.faceRecognitionManager.showCountdownTimer(this.faceRecognitionAutoCloseTime);
-    
-    // Use interval-based checking that respects system clock
-    // Check every 1 second for countdown updates
-    this.faceRecognitionAutoCloseInterval = setInterval(() => {
-      const now = Date.now();
-      
-      // Check if modal is still visible
-      const container = document.getElementById('faceRecognitionContainer');
-      if (!container || container.classList.contains('hidden')) {
-        console.log('Face recognition closed manually, clearing auto-close');
-        clearInterval(this.faceRecognitionAutoCloseInterval);
-        this.faceRecognitionAutoCloseInterval = null;
-        if (this.faceRecognitionManager) {
-          this.faceRecognitionManager.hideCountdownTimer();
+  }
+
+  async generateFaceDescriptorForProfile(employeeUID, imagePath) {
+    try {
+      console.log(`Generating face descriptor for employee ${employeeUID}...`);
+
+      // Wait for face-api.js to be loaded
+      const faceApiLoaded = await this.waitForFaceApi(5000);
+      if (!faceApiLoaded) {
+        console.warn('face-api.js not loaded, skipping descriptor generation');
+        return { success: false, error: 'face-api.js not loaded' };
+      }
+
+      // ⭐ ENSURE CPU BACKEND
+      try {
+        if (faceapi.tf && faceapi.tf.setBackend) {
+          await faceapi.tf.setBackend('cpu');
+          await faceapi.tf.ready();
         }
+      } catch (error) {
+        console.warn('Could not set TensorFlow backend:', error);
+      }
+
+      // Ensure models are loaded
+      if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+        console.log('Loading face-api models for descriptor generation...');
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('models');
+      }
+
+      // Get descriptor path
+      const pathResult = await electronAPI.invoke('generate-face-descriptor-from-image', imagePath);
+      if (!pathResult.success) {
+        return { success: false, error: pathResult.error };
+      }
+
+      // Load image and detect face
+      const img = await faceapi.fetchImage(imagePath);
+      const detection = await faceapi
+        .detectSingleFace(img)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        console.warn(`No face detected in profile image for ${employeeUID}`);
+        return { success: false, error: 'No face detected in image' };
+      }
+
+      // Save descriptor to cache
+      const saveResult = await electronAPI.invoke('save-face-descriptor', {
+        path: pathResult.descriptorPath,
+        descriptor: Array.from(detection.descriptor)
+      });
+
+      if (saveResult.success) {
+        console.log(`✓ Face descriptor generated and cached for ${employeeUID}`);
+        return { success: true, descriptorPath: pathResult.descriptorPath };
+      } else {
+        return { success: false, error: saveResult.error };
+      }
+
+    } catch (error) {
+      console.error('Error generating face descriptor:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Add this method to AttendanceApp class
+  async generateDescriptorsForAllProfiles() {
+    try {
+      console.log('Checking for profiles without descriptors...');
+
+      const employeesResult = await electronAPI.getEmployees();
+      if (!employeesResult.success) return;
+
+      const employees = employeesResult.data;
+      let generated = 0;
+      let skipped = 0;
+      let errors = 0;
+
+      // Wait for face-api.js
+      const faceApiLoaded = await this.waitForFaceApi(5000);
+      if (!faceApiLoaded) {
+        console.warn('face-api.js not available for descriptor generation');
         return;
       }
-      
-      const remaining = Math.floor((this.faceRecognitionAutoCloseTime - now) / 1000);
-      
-      // Update countdown display
-      if (this.faceRecognitionManager) {
-        this.faceRecognitionManager.updateCountdown(remaining);
-      }
-      
-      if (remaining <= 0) {
-        console.log('Auto-close time reached! Closing face recognition...');
-        clearInterval(this.faceRecognitionAutoCloseInterval);
-        this.faceRecognitionAutoCloseInterval = null;
-        this.autoCloseFaceRecognition();
-      }
-    }, 1000); // Check every 1 second for smooth countdown
-    
-    this.showDownloadToast(
-      `🎥 Face Recognition Auto-Started (closes in ${this.faceRecognitionDuration} min)`,
-      'info'
-    );
-    
-    console.log(`✓ Auto-close scheduled at ${new Date(this.faceRecognitionAutoCloseTime).toLocaleTimeString()}`);
-  } catch (error) {
-    console.error('Error auto-opening face recognition:', error);
-  }
-}
 
-autoCloseFaceRecognition() {
-  if (!this.faceRecognitionManager) return;
-  
-  try {
-    if (this.faceRecognitionManager.isActive) {
-      this.faceRecognitionManager.stopRecognition();
-    }
-    this.faceRecognitionManager.hide();
-    this.showDownloadToast('🎥 Face Recognition Auto-Closed', 'info');
-  } catch (error) {
-    console.error('Error auto-closing face recognition:', error);
-  }
-}
-
-stopFaceRecognitionScheduler() {
-  if (this.faceRecognitionCheckInterval) {
-    clearInterval(this.faceRecognitionCheckInterval);
-    this.faceRecognitionCheckInterval = null;
-  }
-  if (this.faceRecognitionAutoCloseTimeout) {
-    clearTimeout(this.faceRecognitionAutoCloseTimeout);
-    this.faceRecognitionAutoCloseTimeout = null;
-  }
-}
-
-async generateFaceDescriptorForProfile(employeeUID, imagePath) {
-  try {
-    console.log(`Generating face descriptor for employee ${employeeUID}...`);
-    
-    // Wait for face-api.js to be loaded
-    const faceApiLoaded = await this.waitForFaceApi(5000);
-    if (!faceApiLoaded) {
-      console.warn('face-api.js not loaded, skipping descriptor generation');
-      return { success: false, error: 'face-api.js not loaded' };
-    }
-    
-    // ⭐ ENSURE CPU BACKEND
-    try {
-      if (faceapi.tf && faceapi.tf.setBackend) {
-        await faceapi.tf.setBackend('cpu');
-        await faceapi.tf.ready();
-      }
-    } catch (error) {
-      console.warn('Could not set TensorFlow backend:', error);
-    }
-    
-    // Ensure models are loaded
-    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
-      console.log('Loading face-api models for descriptor generation...');
-      await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('models');
-    }
-    
-    // Get descriptor path
-    const pathResult = await electronAPI.invoke('generate-face-descriptor-from-image', imagePath);
-    if (!pathResult.success) {
-      return { success: false, error: pathResult.error };
-    }
-    
-    // Load image and detect face
-    const img = await faceapi.fetchImage(imagePath);
-    const detection = await faceapi
-      .detectSingleFace(img)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-    
-    if (!detection) {
-      console.warn(`No face detected in profile image for ${employeeUID}`);
-      return { success: false, error: 'No face detected in image' };
-    }
-    
-    // Save descriptor to cache
-    const saveResult = await electronAPI.invoke('save-face-descriptor', {
-      path: pathResult.descriptorPath,
-      descriptor: Array.from(detection.descriptor)
-    });
-    
-    if (saveResult.success) {
-      console.log(`✓ Face descriptor generated and cached for ${employeeUID}`);
-      return { success: true, descriptorPath: pathResult.descriptorPath };
-    } else {
-      return { success: false, error: saveResult.error };
-    }
-    
-  } catch (error) {
-    console.error('Error generating face descriptor:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-// Add this method to AttendanceApp class
-async generateDescriptorsForAllProfiles() {
-  try {
-    console.log('Checking for profiles without descriptors...');
-    
-    const employeesResult = await electronAPI.getEmployees();
-    if (!employeesResult.success) return;
-    
-    const employees = employeesResult.data;
-    let generated = 0;
-    let skipped = 0;
-    let errors = 0;
-    
-    // Wait for face-api.js
-    const faceApiLoaded = await this.waitForFaceApi(5000);
-    if (!faceApiLoaded) {
-      console.warn('face-api.js not available for descriptor generation');
-      return;
-    }
-    
-    // ⭐ FORCE CPU BACKEND BEFORE LOADING MODELS
-    try {
-      if (faceapi.tf && faceapi.tf.setBackend) {
-        console.log('Setting TensorFlow backend to CPU...');
-        await faceapi.tf.setBackend('cpu');
-        await faceapi.tf.ready();
-        console.log('✓ TensorFlow backend set to CPU');
-      }
-    } catch (error) {
-      console.warn('Could not set TensorFlow backend:', error);
-      // Continue anyway - it will try to fall back to CPU
-    }
-    
-    // Load models if not loaded
-    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
-      console.log('Loading face-api models on CPU...');
-      await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('models');
-      console.log('✓ Models loaded successfully');
-    }
-    
-    console.log(`Processing ${employees.length} employees for descriptor generation...`);
-    
-    for (const employee of employees) {
+      // ⭐ FORCE CPU BACKEND BEFORE LOADING MODELS
       try {
-        const pathResult = await electronAPI.invoke('generate-descriptor-for-employee', employee.uid);
-        
-        if (!pathResult.success) {
-          skipped++;
-          continue;
+        if (faceapi.tf && faceapi.tf.setBackend) {
+          console.log('Setting TensorFlow backend to CPU...');
+          await faceapi.tf.setBackend('cpu');
+          await faceapi.tf.ready();
+          console.log('✓ TensorFlow backend set to CPU');
         }
-        
-        // Check if descriptor already exists
-        const descriptorExists = await electronAPI.invoke('read-face-descriptor', pathResult.descriptorPath);
-        if (descriptorExists.success) {
-          console.log(`Descriptor exists for ${employee.first_name} ${employee.last_name}, skipping`);
-          skipped++;
-          continue;
-        }
-        
-        // Generate new descriptor
-        console.log(`Generating descriptor for ${employee.first_name} ${employee.last_name}...`);
-        const result = await this.generateFaceDescriptorForProfile(employee.uid, pathResult.imagePath);
-        
-        if (result.success) {
-          generated++;
-          console.log(`✓ Generated descriptor for ${employee.first_name} ${employee.last_name}`);
-        } else {
-          errors++;
-          console.warn(`Failed to generate descriptor for ${employee.first_name} ${employee.last_name}: ${result.error}`);
-        }
-        
-        // Small delay to prevent blocking
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
       } catch (error) {
-        errors++;
-        console.error(`Error generating descriptor for ${employee.uid}:`, error);
+        console.warn('Could not set TensorFlow backend:', error);
+        // Continue anyway - it will try to fall back to CPU
       }
+
+      // Load models if not loaded
+      if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+        console.log('Loading face-api models on CPU...');
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('models');
+        console.log('✓ Models loaded successfully');
+      }
+
+      console.log(`Processing ${employees.length} employees for descriptor generation...`);
+
+      for (const employee of employees) {
+        try {
+          const pathResult = await electronAPI.invoke('generate-descriptor-for-employee', employee.uid);
+
+          if (!pathResult.success) {
+            skipped++;
+            continue;
+          }
+
+          // Check if descriptor already exists
+          const descriptorExists = await electronAPI.invoke('read-face-descriptor', pathResult.descriptorPath);
+          if (descriptorExists.success) {
+            console.log(`Descriptor exists for ${employee.first_name} ${employee.last_name}, skipping`);
+            skipped++;
+            continue;
+          }
+
+          // Generate new descriptor
+          console.log(`Generating descriptor for ${employee.first_name} ${employee.last_name}...`);
+          const result = await this.generateFaceDescriptorForProfile(employee.uid, pathResult.imagePath);
+
+          if (result.success) {
+            generated++;
+            console.log(`✓ Generated descriptor for ${employee.first_name} ${employee.last_name}`);
+          } else {
+            errors++;
+            console.warn(`Failed to generate descriptor for ${employee.first_name} ${employee.last_name}: ${result.error}`);
+          }
+
+          // Small delay to prevent blocking
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+        } catch (error) {
+          errors++;
+          console.error(`Error generating descriptor for ${employee.uid}:`, error);
+        }
+      }
+
+      console.log(`Descriptor generation complete: ${generated} generated, ${skipped} skipped, ${errors} errors`);
+
+      return {
+        success: true,
+        generated,
+        skipped,
+        errors,
+        total: employees.length
+      };
+
+    } catch (error) {
+      console.error('Error in bulk descriptor generation:', error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
-    
-    console.log(`Descriptor generation complete: ${generated} generated, ${skipped} skipped, ${errors} errors`);
-    
-    return {
-      success: true,
-      generated,
-      skipped,
-      errors,
-      total: employees.length
-    };
-    
-  } catch (error) {
-    console.error('Error in bulk descriptor generation:', error);
-    return {
-      success: false,
-      error: error.message
-    };
   }
-}
 
 
   /**
@@ -482,10 +662,10 @@ async generateDescriptorsForAllProfiles() {
 
     this.electronAPI.onServerEditsApplied((data) => {
       console.log('Server edits received:', data);
-      
+
       // Show notification to user
       this.showServerEditNotification(data);
-      
+
       // Refresh UI data
       this.handleServerEditsApplied(data);
     });
@@ -493,125 +673,125 @@ async generateDescriptorsForAllProfiles() {
     console.log('✓ Server edit sync listener initialized');
   }
 
- /**
- * UPDATED: checkServerEdits method - Keep as manual trigger only
- */
-async checkServerEdits(silent = false) {
-  if (!this.electronAPI || !this.electronAPI.invoke) {
-    return { success: false, error: 'API not available' };
-  }
-
-  try {
-    if (!silent) {
-      this.showDownloadToast('🔄 Checking for server updates...', 'info');
+  /**
+  * UPDATED: checkServerEdits method - Keep as manual trigger only
+  */
+  async checkServerEdits(silent = false) {
+    if (!this.electronAPI || !this.electronAPI.invoke) {
+      return { success: false, error: 'API not available' };
     }
 
-    const result = await this.electronAPI.invoke('check-server-edits', silent);
-
-    if (result.success) {
-      this.lastServerEditCheck = new Date();
-      
-      const hasChanges = result.applied > 0 || result.deleted > 0;
-      
-      if (hasChanges) {
-        let message = '';
-        if (result.applied > 0) message += `Applied: ${result.applied} edits `;
-        if (result.deleted > 0) message += `Deleted: ${result.deleted} records `;
-        if (result.corrected > 0) message += `Corrected: ${result.corrected} `;
-        if (result.summariesRegenerated > 0) message += `Summaries: ${result.summariesRegenerated} regenerated `;
-        if (result.summariesUploaded > 0) message += `Uploaded: ${result.summariesUploaded} summaries`;
-        
-        if (!silent) {
-          this.showDownloadToast(`✅ ${message.trim()}`, 'success');
-        }
-        
-        // Refresh UI to show updated data
-        await this.handleServerEditsApplied({
-          applied: result.applied,
-          deleted: result.deleted,
-          corrected: result.corrected || 0,
-          summariesRegenerated: result.summariesRegenerated || 0,
-          summariesUploaded: result.summariesUploaded || 0
-        });
-      } else {
-        if (!silent) {
-          this.showDownloadToast('✓ All records in sync with server', 'success');
-        }
+    try {
+      if (!silent) {
+        this.showDownloadToast('🔄 Checking for server updates...', 'info');
       }
 
-      return result;
-    } else {
-      throw new Error(result.error);
+      const result = await this.electronAPI.invoke('check-server-edits', silent);
+
+      if (result.success) {
+        this.lastServerEditCheck = new Date();
+
+        const hasChanges = result.applied > 0 || result.deleted > 0;
+
+        if (hasChanges) {
+          let message = '';
+          if (result.applied > 0) message += `Applied: ${result.applied} edits `;
+          if (result.deleted > 0) message += `Deleted: ${result.deleted} records `;
+          if (result.corrected > 0) message += `Corrected: ${result.corrected} `;
+          if (result.summariesRegenerated > 0) message += `Summaries: ${result.summariesRegenerated} regenerated `;
+          if (result.summariesUploaded > 0) message += `Uploaded: ${result.summariesUploaded} summaries`;
+
+          if (!silent) {
+            this.showDownloadToast(`✅ ${message.trim()}`, 'success');
+          }
+
+          // Refresh UI to show updated data
+          await this.handleServerEditsApplied({
+            applied: result.applied,
+            deleted: result.deleted,
+            corrected: result.corrected || 0,
+            summariesRegenerated: result.summariesRegenerated || 0,
+            summariesUploaded: result.summariesUploaded || 0
+          });
+        } else {
+          if (!silent) {
+            this.showDownloadToast('✓ All records in sync with server', 'success');
+          }
+        }
+
+        return result;
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      console.error('Error checking server edits:', error);
+
+      if (!silent) {
+        this.showDownloadToast('❌ Server sync failed', 'error');
+      }
+
+      return { success: false, error: error.message };
     }
-  } catch (error) {
-    console.error('Error checking server edits:', error);
-    
-    if (!silent) {
-      this.showDownloadToast('❌ Server sync failed', 'error');
-    }
-    
-    return { success: false, error: error.message };
   }
-}
 
   /**
  * UPDATED: showServerEditNotification method
  * Shows more detailed notification about what was synced
  */
-showServerEditNotification(data) {
-  const { 
-    updated, 
-    deleted, 
-    corrected, 
-    summariesRegenerated, 
-    summariesUploaded,
-    validated,
-    message 
-  } = data;
-  
-  let notificationMessage = '📝 Server Changes Applied\n\n';
-  
-  if (updated > 0) {
-    notificationMessage += `✏️ Updated: ${updated} record${updated > 1 ? 's' : ''}\n`;
-  }
-  
-  if (deleted > 0) {
-    notificationMessage += `🗑️ Deleted: ${deleted} record${deleted > 1 ? 's' : ''}\n`;
-  }
-  
-  if (corrected > 0) {
-    notificationMessage += `✅ Corrected: ${corrected} record${corrected > 1 ? 's' : ''}\n`;
-  }
-  
-  if (validated > 0) {
-    notificationMessage += `🔍 Validated: ${validated} employee-date${validated > 1 ? 's' : ''}\n`;
-  }
-  
-  if (summariesRegenerated > 0) {
-    notificationMessage += `🔄 Summaries Regenerated: ${summariesRegenerated}\n`;
-  }
-  
-  if (summariesUploaded > 0) {
-    notificationMessage += `📤 Summaries Uploaded: ${summariesUploaded}`;
+  showServerEditNotification(data) {
+    const {
+      updated,
+      deleted,
+      corrected,
+      summariesRegenerated,
+      summariesUploaded,
+      validated,
+      message
+    } = data;
+
+    let notificationMessage = '📝 Server Changes Applied\n\n';
+
+    if (updated > 0) {
+      notificationMessage += `✏️ Updated: ${updated} record${updated > 1 ? 's' : ''}\n`;
+    }
+
+    if (deleted > 0) {
+      notificationMessage += `🗑️ Deleted: ${deleted} record${deleted > 1 ? 's' : ''}\n`;
+    }
+
+    if (corrected > 0) {
+      notificationMessage += `✅ Corrected: ${corrected} record${corrected > 1 ? 's' : ''}\n`;
+    }
+
+    if (validated > 0) {
+      notificationMessage += `🔍 Validated: ${validated} employee-date${validated > 1 ? 's' : ''}\n`;
+    }
+
+    if (summariesRegenerated > 0) {
+      notificationMessage += `🔄 Summaries Regenerated: ${summariesRegenerated}\n`;
+    }
+
+    if (summariesUploaded > 0) {
+      notificationMessage += `📤 Summaries Uploaded: ${summariesUploaded}`;
+    }
+
+    // Show prominent notification
+    this.showDownloadToast(notificationMessage, 'info');
+
+    // Also show in status bar
+    const statusMessage = message ||
+      `Synced ${updated} updates, ${deleted} deletions, ${summariesRegenerated} summaries regenerated`;
+    this.showStatus(statusMessage, 'success');
+
+    // Play notification sound if available
+    this.playNotificationSound();
   }
 
-  // Show prominent notification
-  this.showDownloadToast(notificationMessage, 'info');
-  
-  // Also show in status bar
-  const statusMessage = message || 
-    `Synced ${updated} updates, ${deleted} deletions, ${summariesRegenerated} summaries regenerated`;
-  this.showStatus(statusMessage, 'success');
-
-  // Play notification sound if available
-  this.playNotificationSound();
-}
-
-/**
- * Helper method to explain the sync flow to users
- */
-getServerEditSyncFlowExplanation() {
-  return `
+  /**
+   * Helper method to explain the sync flow to users
+   */
+  getServerEditSyncFlowExplanation() {
+    return `
     <div class="sync-flow-explanation">
       <h4>📋 How Server Edit Sync Works:</h4>
       <ol>
@@ -658,129 +838,129 @@ getServerEditSyncFlowExplanation() {
       </p>
     </div>
   `;
-}
-
- /**
- * UPDATED: handleServerEditsApplied method
- * This now expects that the server has ALREADY deleted the summaries
- * The client just needs to validate, regenerate, and upload them back
- */
-async handleServerEditsApplied(data) {
-  try {
-    console.log('Handling server edits - server already deleted summaries');
-    console.log('Edit data:', data);
-
-    // Step 1: Refresh UI to show updated attendance data
-    // Note: Summary display will be empty since server deleted them
-    await Promise.all([
-      this.loadTodayAttendance(),
-      this.loadDailySummary() // This will show empty/missing summaries
-    ]);
-
-    console.log('✓ UI refreshed - summaries are now empty (server deleted them)');
-
-    // Step 2: Validate and regenerate summaries locally
-    // This is the KEY STEP - it will create fresh summaries from validated data
-    if (data.updated > 0 || data.deleted > 0) {
-      console.log('Validating and regenerating summaries after server edits...');
-      
-      // The validation will:
-      // 1. Validate all affected attendance records
-      // 2. Correct any calculation errors
-      // 3. Regenerate daily summaries
-      await this.validateAttendanceData();
-      
-      console.log('✓ Summaries regenerated locally');
-    }
-
-    // Step 3: Refresh UI again to show the NEW summaries
-    await this.loadDailySummary();
-    console.log('✓ UI refreshed with new summaries');
-
-    // Step 4: Sync the regenerated summaries back to server
-    // The summaries we just regenerated need to go back to the server
-    if (data.updated > 0 || data.deleted > 0) {
-      console.log('Syncing regenerated summaries back to server...');
-      
-      // Wait a moment to ensure summaries are saved locally
-      setTimeout(async () => {
-        // This will upload the regenerated summaries
-        const summarySync = await this.performSummarySync(true, 0, false);
-        
-        if (summarySync.success) {
-          console.log(`✓ Uploaded ${summarySync.syncedCount || 0} regenerated summaries to server`);
-          this.showDownloadToast(
-            `✅ Summaries regenerated and uploaded to server`,
-            'success'
-          );
-        } else {
-          console.warn('⚠️ Failed to upload regenerated summaries:', summarySync.error);
-        }
-      }, 2000); // Wait 2 seconds for local saves to complete
-    }
-
-    // Step 5: Update sync info if settings panel is open
-    if (document.getElementById('settingsModal')?.classList.contains('show')) {
-      await this.loadServerEditSyncInfo();
-    }
-
-    console.log('✓ Server edit handling complete');
-  } catch (error) {
-    console.error('Error handling server edits:', error);
-    this.showStatus('Error processing server updates', 'error');
-  }
-}
-
- /**
- * UPDATED: loadServerEditSyncInfo - Update UI text for manual sync
- */
-async loadServerEditSyncInfo() {
-  if (!this.electronAPI || !this.electronAPI.invoke) {
-    return;
   }
 
-  try {
-    const syncInfoResult = await this.electronAPI.invoke('get-server-edit-last-sync');
+  /**
+  * UPDATED: handleServerEditsApplied method
+  * This now expects that the server has ALREADY deleted the summaries
+  * The client just needs to validate, regenerate, and upload them back
+  */
+  async handleServerEditsApplied(data) {
+    try {
+      console.log('Handling server edits - server already deleted summaries');
+      console.log('Edit data:', data);
 
-    const syncInfoElement = document.getElementById('serverEditSyncInfo');
-    
-    if (!syncInfoElement) {
-      console.warn('serverEditSyncInfo element not found');
+      // Step 1: Refresh UI to show updated attendance data
+      // Note: Summary display will be empty since server deleted them
+      await Promise.all([
+        this.loadTodayAttendance(),
+        this.loadDailySummary() // This will show empty/missing summaries
+      ]);
+
+      console.log('✓ UI refreshed - summaries are now empty (server deleted them)');
+
+      // Step 2: Validate and regenerate summaries locally
+      // This is the KEY STEP - it will create fresh summaries from validated data
+      if (data.updated > 0 || data.deleted > 0) {
+        console.log('Validating and regenerating summaries after server edits...');
+
+        // The validation will:
+        // 1. Validate all affected attendance records
+        // 2. Correct any calculation errors
+        // 3. Regenerate daily summaries
+        await this.validateAttendanceData();
+
+        console.log('✓ Summaries regenerated locally');
+      }
+
+      // Step 3: Refresh UI again to show the NEW summaries
+      await this.loadDailySummary();
+      console.log('✓ UI refreshed with new summaries');
+
+      // Step 4: Sync the regenerated summaries back to server
+      // The summaries we just regenerated need to go back to the server
+      if (data.updated > 0 || data.deleted > 0) {
+        console.log('Syncing regenerated summaries back to server...');
+
+        // Wait a moment to ensure summaries are saved locally
+        setTimeout(async () => {
+          // This will upload the regenerated summaries
+          const summarySync = await this.performSummarySync(true, 0, false);
+
+          if (summarySync.success) {
+            console.log(`✓ Uploaded ${summarySync.syncedCount || 0} regenerated summaries to server`);
+            this.showDownloadToast(
+              `✅ Summaries regenerated and uploaded to server`,
+              'success'
+            );
+          } else {
+            console.warn('⚠️ Failed to upload regenerated summaries:', summarySync.error);
+          }
+        }, 2000); // Wait 2 seconds for local saves to complete
+      }
+
+      // Step 5: Update sync info if settings panel is open
+      if (document.getElementById('settingsModal')?.classList.contains('show')) {
+        await this.loadServerEditSyncInfo();
+      }
+
+      console.log('✓ Server edit handling complete');
+    } catch (error) {
+      console.error('Error handling server edits:', error);
+      this.showStatus('Error processing server updates', 'error');
+    }
+  }
+
+  /**
+  * UPDATED: loadServerEditSyncInfo - Update UI text for manual sync
+  */
+  async loadServerEditSyncInfo() {
+    if (!this.electronAPI || !this.electronAPI.invoke) {
       return;
     }
 
-    let lastSyncText = 'Never';
-    let syncStats = 'No sync data';
+    try {
+      const syncInfoResult = await this.electronAPI.invoke('get-server-edit-last-sync');
 
-    if (syncInfoResult && syncInfoResult.success !== false) {
-      if (syncInfoResult.lastSyncTimestamp) {
-        const syncDate = new Date(syncInfoResult.lastSyncTimestamp);
-        const now = new Date();
-        const minutesAgo = Math.floor((now - syncDate) / (1000 * 60));
-        
-        lastSyncText = minutesAgo < 1 ? 'Just now' : 
-                      minutesAgo < 60 ? `${minutesAgo} minutes ago` :
-                      syncDate.toLocaleString();
+      const syncInfoElement = document.getElementById('serverEditSyncInfo');
+
+      if (!syncInfoElement) {
+        console.warn('serverEditSyncInfo element not found');
+        return;
       }
 
-      // Get history for last sync stats
-      const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 1);
-      
-      if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
-        const lastSync = historyResult.data[0];
-        const parts = [];
-        
-        if (lastSync.applied > 0) parts.push(`${lastSync.applied} applied`);
-        if (lastSync.deleted > 0) parts.push(`${lastSync.deleted} deleted`);
-        if (lastSync.corrected > 0) parts.push(`${lastSync.corrected} corrected`);
-        if (lastSync.summariesRegenerated > 0) parts.push(`${lastSync.summariesRegenerated} summaries`);
-        if (lastSync.summariesUploaded > 0) parts.push(`${lastSync.summariesUploaded} uploaded`);
-        
-        syncStats = parts.length > 0 ? parts.join(', ') : 'No changes';
-      }
-    }
+      let lastSyncText = 'Never';
+      let syncStats = 'No sync data';
 
-    syncInfoElement.innerHTML = `
+      if (syncInfoResult && syncInfoResult.success !== false) {
+        if (syncInfoResult.lastSyncTimestamp) {
+          const syncDate = new Date(syncInfoResult.lastSyncTimestamp);
+          const now = new Date();
+          const minutesAgo = Math.floor((now - syncDate) / (1000 * 60));
+
+          lastSyncText = minutesAgo < 1 ? 'Just now' :
+            minutesAgo < 60 ? `${minutesAgo} minutes ago` :
+              syncDate.toLocaleString();
+        }
+
+        // Get history for last sync stats
+        const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 1);
+
+        if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
+          const lastSync = historyResult.data[0];
+          const parts = [];
+
+          if (lastSync.applied > 0) parts.push(`${lastSync.applied} applied`);
+          if (lastSync.deleted > 0) parts.push(`${lastSync.deleted} deleted`);
+          if (lastSync.corrected > 0) parts.push(`${lastSync.corrected} corrected`);
+          if (lastSync.summariesRegenerated > 0) parts.push(`${lastSync.summariesRegenerated} summaries`);
+          if (lastSync.summariesUploaded > 0) parts.push(`${lastSync.summariesUploaded} uploaded`);
+
+          syncStats = parts.length > 0 ? parts.join(', ') : 'No changes';
+        }
+      }
+
+      syncInfoElement.innerHTML = `
       <div class="sync-info-item">
         <strong>Last Manual Check:</strong> ${lastSyncText}
       </div>
@@ -799,11 +979,11 @@ async loadServerEditSyncInfo() {
       </div>
     `;
 
-    // Also show recent history if available
-    const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 5);
-    
-    if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
-      const historyHtml = `
+      // Also show recent history if available
+      const historyResult = await this.electronAPI.invoke('get-server-edit-sync-history', 5);
+
+      if (historyResult && historyResult.success && historyResult.data && historyResult.data.length > 0) {
+        const historyHtml = `
         <div class="sync-history">
           <strong>Recent Sync History:</strong>
           <table class="sync-history-table">
@@ -849,22 +1029,22 @@ async loadServerEditSyncInfo() {
           </table>
         </div>
       `;
-      
-      syncInfoElement.innerHTML += historyHtml;
-    }
-  } catch (error) {
-    console.error('Error loading server edit sync info:', error);
-    const syncInfoElement = document.getElementById('serverEditSyncInfo');
-    if (syncInfoElement) {
-      syncInfoElement.innerHTML = `
+
+        syncInfoElement.innerHTML += historyHtml;
+      }
+    } catch (error) {
+      console.error('Error loading server edit sync info:', error);
+      const syncInfoElement = document.getElementById('serverEditSyncInfo');
+      if (syncInfoElement) {
+        syncInfoElement.innerHTML = `
         <div class="sync-info-item error">
           <strong>Error:</strong> Failed to load sync information
           <br><small>${error.message}</small>
         </div>
       `;
+      }
     }
   }
-}
 
   /**
    * Play notification sound
@@ -879,25 +1059,25 @@ async loadServerEditSyncInfo() {
     }
   }
 
- /**
- * UPDATED: setupServerEditSyncUI - Update button text and description
- */
-setupServerEditSyncUI() {
-  const syncPanel = document.getElementById('syncPanel');
-  
-  if (!syncPanel) {
-    console.warn('Sync panel not found, cannot setup server edit sync UI');
-    return;
-  }
+  /**
+  * UPDATED: setupServerEditSyncUI - Update button text and description
+  */
+  setupServerEditSyncUI() {
+    const syncPanel = document.getElementById('syncPanel');
 
-  if (document.getElementById('serverEditSyncInfo')) {
-    console.log('Server edit sync UI already setup');
-    return;
-  }
+    if (!syncPanel) {
+      console.warn('Sync panel not found, cannot setup server edit sync UI');
+      return;
+    }
 
-  const serverEditSection = document.createElement('div');
-  serverEditSection.className = 'settings-section server-edit-sync-section';
-  serverEditSection.innerHTML = `
+    if (document.getElementById('serverEditSyncInfo')) {
+      console.log('Server edit sync UI already setup');
+      return;
+    }
+
+    const serverEditSection = document.createElement('div');
+    serverEditSection.className = 'settings-section server-edit-sync-section';
+    serverEditSection.innerHTML = `
     <h3>📝 Server Edit Sync (Manual)</h3>
     <p class="section-description">
       Manually check for attendance corrections made on the server and apply them to local records.
@@ -924,71 +1104,71 @@ setupServerEditSyncUI() {
     </div>
   `;
 
-  const lastSection = syncPanel.querySelector('.settings-section:last-child');
-  if (lastSection) {
-    syncPanel.insertBefore(serverEditSection, lastSection);
-  } else {
-    syncPanel.appendChild(serverEditSection);
-  }
-
-  // Add event listeners
-  const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
-  const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
-
-  if (checkNowBtn) {
-    checkNowBtn.addEventListener('click', async () => {
-      checkNowBtn.disabled = true;
-      checkNowBtn.textContent = '🔄 Checking...';
-      
-      try {
-        await this.checkServerEdits(false);
-      } catch (error) {
-        console.error('Error checking server edits:', error);
-        this.showStatus(`Error: ${error.message}`, 'error');
-      } finally {
-        checkNowBtn.disabled = false;
-        checkNowBtn.textContent = '🔄 Check Server Edits Now';
-        
-        await this.loadServerEditSyncInfo();
-      }
-    });
-  }
-
-  if (viewHistoryBtn) {
-    viewHistoryBtn.addEventListener('click', () => {
-      this.showServerEditSyncHistory();
-    });
-  }
-
-  this.loadServerEditSyncInfo();
-  
-  console.log('✓ Server edit sync UI setup complete (Manual mode)');
-}
-
- /**
- * FIXED: showServerEditSyncHistory method
- * Now properly checks for API availability
- */
-async showServerEditSyncHistory() {
-  if (!this.electronAPI || !this.electronAPI.invoke) {
-    this.showStatus('Server edit sync history not available', 'error');
-    return;
-  }
-
-  try {
-    const result = await this.electronAPI.invoke('get-server-edit-sync-history', 20);
-
-    if (!result || !result.success) {
-      throw new Error(result?.error || 'Failed to load sync history');
+    const lastSection = syncPanel.querySelector('.settings-section:last-child');
+    if (lastSection) {
+      syncPanel.insertBefore(serverEditSection, lastSection);
+    } else {
+      syncPanel.appendChild(serverEditSection);
     }
 
-    const history = result.data || [];
+    // Add event listeners
+    const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+    const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
 
-    // Create modal
-    const modal = document.createElement('div');
-    modal.className = 'modal show';
-    modal.id = 'serverEditHistoryModal';
-    modal.innerHTML = `
+    if (checkNowBtn) {
+      checkNowBtn.addEventListener('click', async () => {
+        checkNowBtn.disabled = true;
+        checkNowBtn.textContent = '🔄 Checking...';
+
+        try {
+          await this.checkServerEdits(false);
+        } catch (error) {
+          console.error('Error checking server edits:', error);
+          this.showStatus(`Error: ${error.message}`, 'error');
+        } finally {
+          checkNowBtn.disabled = false;
+          checkNowBtn.textContent = '🔄 Check Server Edits Now';
+
+          await this.loadServerEditSyncInfo();
+        }
+      });
+    }
+
+    if (viewHistoryBtn) {
+      viewHistoryBtn.addEventListener('click', () => {
+        this.showServerEditSyncHistory();
+      });
+    }
+
+    this.loadServerEditSyncInfo();
+
+    console.log('✓ Server edit sync UI setup complete (Manual mode)');
+  }
+
+  /**
+  * FIXED: showServerEditSyncHistory method
+  * Now properly checks for API availability
+  */
+  async showServerEditSyncHistory() {
+    if (!this.electronAPI || !this.electronAPI.invoke) {
+      this.showStatus('Server edit sync history not available', 'error');
+      return;
+    }
+
+    try {
+      const result = await this.electronAPI.invoke('get-server-edit-sync-history', 20);
+
+      if (!result || !result.success) {
+        throw new Error(result?.error || 'Failed to load sync history');
+      }
+
+      const history = result.data || [];
+
+      // Create modal
+      const modal = document.createElement('div');
+      modal.className = 'modal show';
+      modal.id = 'serverEditHistoryModal';
+      modal.innerHTML = `
       <div class="modal-content" style="max-width: 900px;">
         <div class="modal-header">
           <h2>📊 Server Edit Sync History</h2>
@@ -1035,11 +1215,11 @@ async showServerEditSyncHistory() {
                       ${log.summariesUploaded || 0}
                     </td>
                     <td>
-                      ${log.error ? 
-                        '<span class="status-badge error">Error</span>' : 
-                        log.success ? 
-                        '<span class="status-badge success">Success</span>' :
-                        '<span class="status-badge warning">Partial</span>'}
+                      ${log.error ?
+          '<span class="status-badge error">Error</span>' :
+          log.success ?
+            '<span class="status-badge success">Success</span>' :
+            '<span class="status-badge warning">Partial</span>'}
                     </td>
                   </tr>
                   ${log.error ? `
@@ -1087,19 +1267,19 @@ async showServerEditSyncHistory() {
       </div>
     `;
 
-    document.body.appendChild(modal);
+      document.body.appendChild(modal);
 
-    // Close on background click
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.remove();
-      }
-    });
-  } catch (error) {
-    console.error('Error showing sync history:', error);
-    this.showStatus(`Failed to load sync history: ${error.message}`, 'error');
+      // Close on background click
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.remove();
+        }
+      });
+    } catch (error) {
+      console.error('Error showing sync history:', error);
+      this.showStatus(`Failed to load sync history: ${error.message}`, 'error');
+    }
   }
-}
 
 
 
@@ -1573,8 +1753,7 @@ async showServerEditSyncHistory() {
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
         console.log(
-          `Processing image batch ${batchIndex + 1}/${batches.length} (${
-            batch.length
+          `Processing image batch ${batchIndex + 1}/${batches.length} (${batch.length
           } employees)...`
         );
 
@@ -1621,119 +1800,119 @@ async showServerEditSyncHistory() {
   }
 
   // Helper method to preload individual employee image
-async preloadEmployeeImage(employee_uid, altText) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const cacheKey = `img_${employee_uid}`;
-      console.log(`Preloading image with cache key: "${cacheKey}" for employee ${employee_uid}`);
+  async preloadEmployeeImage(employee_uid, altText) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const cacheKey = `img_${employee_uid}`;
+        console.log(`Preloading image with cache key: "${cacheKey}" for employee ${employee_uid}`);
 
-      // Skip if already cached
-      if (this.imageCache && this.imageCache.has(cacheKey)) {
-        const cached = this.imageCache.get(cacheKey);
-        if (cached && cached.data && Date.now() - cached.timestamp < 3600000) { // 1 hour cache
-          console.log(`Image already cached for ${employee_uid}`);
-          resolve("cached");
-          return;
-        } else {
-          this.imageCache.delete(cacheKey);
-        }
-      }
-
-      let imageData = null;
-      let imageSource = null;
-
-      // Method 1: Try fast profile lookup first
-      if (this.electronAPI && this.electronAPI.invoke) {
-        try {
-          const profileResult = await this.electronAPI.invoke(
-            "get-profile-fast",
-            employee_uid
-          );
-
-          if (
-            profileResult.success &&
-            profileResult.data &&
-            profileResult.data.image
-          ) {
-            // FIXED: Create proper data URL
-            imageData = `data:image/jpeg;base64,${profileResult.data.image}`;
-            imageSource = 'database';
-            console.log(`✓ Got image from database for ${employee_uid}`);
+        // Skip if already cached
+        if (this.imageCache && this.imageCache.has(cacheKey)) {
+          const cached = this.imageCache.get(cacheKey);
+          if (cached && cached.data && Date.now() - cached.timestamp < 3600000) { // 1 hour cache
+            console.log(`Image already cached for ${employee_uid}`);
+            resolve("cached");
+            return;
+          } else {
+            this.imageCache.delete(cacheKey);
           }
-        } catch (error) {
-          console.warn(`Fast profile lookup failed for ${employee_uid}:`, error.message);
         }
-      }
 
-      // Method 2: Try file system if no database image
-      if (!imageData) {
-        try {
-          if (this.electronAPI && this.electronAPI.getLocalProfilePath) {
-            const result = await this.electronAPI.getLocalProfilePath(employee_uid);
+        let imageData = null;
+        let imageSource = null;
 
-            if (result.success && result.path) {
-              const normalizedPath = result.path.replace(/\\/g, "/");
-              const fileUrl = normalizedPath.startsWith("file:///")
-                ? normalizedPath
-                : `file:///${normalizedPath}`;
+        // Method 1: Try fast profile lookup first
+        if (this.electronAPI && this.electronAPI.invoke) {
+          try {
+            const profileResult = await this.electronAPI.invoke(
+              "get-profile-fast",
+              employee_uid
+            );
 
-              // Test if file exists by trying to load it
-              const testImg = new Image();
-              
-              const imageLoadPromise = new Promise((resolveImg, rejectImg) => {
-                testImg.onload = () => {
-                  imageData = fileUrl;
-                  imageSource = 'filesystem';
-                  console.log(`✓ Got image from filesystem for ${employee_uid}`);
-                  resolveImg();
-                };
-                
-                testImg.onerror = () => {
-                  console.log(`File system profile not found: ${employee_uid}`);
-                  rejectImg(new Error('File not found'));
-                };
-                
-                // Set timeout for file loading
-                setTimeout(() => {
-                  rejectImg(new Error('File load timeout'));
-                }, 5000);
-              });
+            if (
+              profileResult.success &&
+              profileResult.data &&
+              profileResult.data.image
+            ) {
+              // FIXED: Create proper data URL
+              imageData = `data:image/jpeg;base64,${profileResult.data.image}`;
+              imageSource = 'database';
+              console.log(`✓ Got image from database for ${employee_uid}`);
+            }
+          } catch (error) {
+            console.warn(`Fast profile lookup failed for ${employee_uid}:`, error.message);
+          }
+        }
 
-              testImg.src = fileUrl;
-              
-              try {
-                await imageLoadPromise;
-              } catch (fileError) {
-                console.log(`File load failed for ${employee_uid}: ${fileError.message}`);
-                imageData = null;
+        // Method 2: Try file system if no database image
+        if (!imageData) {
+          try {
+            if (this.electronAPI && this.electronAPI.getLocalProfilePath) {
+              const result = await this.electronAPI.getLocalProfilePath(employee_uid);
+
+              if (result.success && result.path) {
+                const normalizedPath = result.path.replace(/\\/g, "/");
+                const fileUrl = normalizedPath.startsWith("file:///")
+                  ? normalizedPath
+                  : `file:///${normalizedPath}`;
+
+                // Test if file exists by trying to load it
+                const testImg = new Image();
+
+                const imageLoadPromise = new Promise((resolveImg, rejectImg) => {
+                  testImg.onload = () => {
+                    imageData = fileUrl;
+                    imageSource = 'filesystem';
+                    console.log(`✓ Got image from filesystem for ${employee_uid}`);
+                    resolveImg();
+                  };
+
+                  testImg.onerror = () => {
+                    console.log(`File system profile not found: ${employee_uid}`);
+                    rejectImg(new Error('File not found'));
+                  };
+
+                  // Set timeout for file loading
+                  setTimeout(() => {
+                    rejectImg(new Error('File load timeout'));
+                  }, 5000);
+                });
+
+                testImg.src = fileUrl;
+
+                try {
+                  await imageLoadPromise;
+                } catch (fileError) {
+                  console.log(`File load failed for ${employee_uid}: ${fileError.message}`);
+                  imageData = null;
+                }
               }
             }
+          } catch (error) {
+            console.warn(`File system image load failed for ${employee_uid}:`, error.message);
           }
-        } catch (error) {
-          console.warn(`File system image load failed for ${employee_uid}:`, error.message);
         }
-      }
 
-      // Cache the image if we found one
-      if (imageData && this.imageCache) {
-        this.imageCache.set(cacheKey, {
-          data: imageData,
-          timestamp: Date.now(),
-          source: imageSource,
-        });
-        console.log(`✓ Cached image for ${employee_uid} from ${imageSource}`);
-        resolve(imageSource);
-      } else {
-        console.log(`No image found for employee ${employee_uid}`);
-        resolve("not_found");
+        // Cache the image if we found one
+        if (imageData && this.imageCache) {
+          this.imageCache.set(cacheKey, {
+            data: imageData,
+            timestamp: Date.now(),
+            source: imageSource,
+          });
+          console.log(`✓ Cached image for ${employee_uid} from ${imageSource}`);
+          resolve(imageSource);
+        } else {
+          console.log(`No image found for employee ${employee_uid}`);
+          resolve("not_found");
+        }
+
+      } catch (error) {
+        console.error(`Error preloading image for ${employee_uid}:`, error);
+        reject(error);
       }
-      
-    } catch (error) {
-      console.error(`Error preloading image for ${employee_uid}:`, error);
-      reject(error);
-    }
-  });
-}
+    });
+  }
 
   // Helper method for file system image preloading
   async tryFileSystemImageForPreload(employee_uid) {
@@ -2018,37 +2197,22 @@ async preloadEmployeeImage(employee_uid, altText) {
     } catch (error) {
       console.error("Attendance sync error:", error);
 
-      // Retry logic
-      if (retryCount < this.syncSettings.retryAttempts) {
-        console.log(
-          `Retrying sync in ${
-            this.syncSettings.retryDelay / 1000
-          } seconds... (attempt ${retryCount + 1}/${
-            this.syncSettings.retryAttempts
-          })`
+      // REMOVED RETRY LOGIC - Let scheduled sync handle retries
+      // If this is a scheduled sync, it will retry at the next scheduled time
+      // If this is a manual sync, user can click "Sync Now" again
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Upload failed: ${error.message}`,
+          "error"
         );
-
-        setTimeout(() => {
-          this.performAttendanceSync(silent, retryCount + 1, showDownloadToast);
-        }, this.syncSettings.retryDelay);
-
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `⚠️ Upload failed, retrying... (${retryCount + 1}/${
-              this.syncSettings.retryAttempts
-            })`,
-            "warning"
-          );
-        }
-      } else {
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `❌ Upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
-            "error"
-          );
-        }
-        return { success: false, message: error.message };
       }
+
+      return {
+        success: false,
+        message: error.message,
+        willRetryAtScheduledTime: true
+      };
     }
   }
 
@@ -2122,41 +2286,23 @@ async preloadEmployeeImage(employee_uid, altText) {
     } catch (error) {
       console.error("Daily summary sync error:", error);
 
-      // Retry logic
-      if (retryCount < this.syncSettings.retryAttempts) {
-        console.log(
-          `Retrying summary sync in ${
-            this.syncSettings.retryDelay / 1000
-          } seconds... (attempt ${retryCount + 1}/${
-            this.syncSettings.retryAttempts
-          })`
+      // REMOVED RETRY LOGIC - Let scheduled sync handle retries
+
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          `❌ Summary upload failed: ${error.message}`,
+          "error"
         );
-
-        setTimeout(() => {
-          this.performSummarySync(silent, retryCount + 1, showDownloadToast);
-        }, this.syncSettings.retryDelay);
-
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${
-              this.syncSettings.retryAttempts
-            })`,
-            "warning"
-          );
-        }
-      } else {
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            `❌ Summary upload failed after ${this.syncSettings.retryAttempts} attempts: ${error.message}`,
-            "error"
-          );
-        }
-
-        // Set pending summary sync flag for later retry
-        this.pendingSummarySync = true;
-
-        return { success: false, message: error.message };
       }
+
+      // Set pending summary sync flag for later retry
+      this.pendingSummarySync = true;
+
+      return {
+        success: false,
+        message: error.message,
+        willRetryAtScheduledTime: true
+      };
     }
   }
 
@@ -2329,10 +2475,8 @@ async preloadEmployeeImage(employee_uid, altText) {
       // Retry logic
       if (retryCount < this.summarySyncSettings.retryAttempts) {
         console.log(
-          `Retrying summary sync in ${
-            this.summarySyncSettings.retryDelay / 1000
-          } seconds... (attempt ${retryCount + 1}/${
-            this.summarySyncSettings.retryAttempts
+          `Retrying summary sync in ${this.summarySyncSettings.retryDelay / 1000
+          } seconds... (attempt ${retryCount + 1}/${this.summarySyncSettings.retryAttempts
           })`
         );
 
@@ -2342,8 +2486,7 @@ async preloadEmployeeImage(employee_uid, altText) {
 
         if (showDownloadToast || !silent) {
           this.showDownloadToast(
-            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${
-              this.summarySyncSettings.retryAttempts
+            `⚠️ Summary upload failed, retrying... (${retryCount + 1}/${this.summarySyncSettings.retryAttempts
             })`,
             "warning"
           );
@@ -2371,14 +2514,14 @@ async preloadEmployeeImage(employee_uid, altText) {
     const syncNowBtn = document.getElementById("syncNowBtn");
     const originalText = syncNowBtn.textContent;
 
-      // Generate descriptors for all profiles in background
-  setTimeout(() => {
-    this.generateDescriptorsForAllProfiles().then(result => {
-      if (result && result.success) {
-        console.log(`Generated ${result.generated} face descriptors`);
-      }
-    });
-  }, 2000); // Wait 2 seconds after sync to avoid blocking
+    // Generate descriptors for all profiles in background
+    setTimeout(() => {
+      this.generateDescriptorsForAllProfiles().then(result => {
+        if (result && result.success) {
+          console.log(`Generated ${result.generated} face descriptors`);
+        }
+      });
+    }, 2000); // Wait 2 seconds after sync to avoid blocking
 
     // Show loading state
     syncNowBtn.textContent = "💾 Saving & Syncing...";
@@ -2439,6 +2582,8 @@ async preloadEmployeeImage(employee_uid, altText) {
         document.getElementById("summarySyncInterval")?.value ||
         "10";
 
+      const faceRecognitionEnabled = document.getElementById("faceRecognitionToggle")?.checked || false;
+
       const settings = {
         server_url: fullServerUrl,
         sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
@@ -2446,6 +2591,7 @@ async preloadEmployeeImage(employee_uid, altText) {
           Number.parseInt(summarySyncIntervalInput) * 60000
         ).toString(),
         grace_period: gracePeriodInput,
+        face_detection_enabled: faceRecognitionEnabled.toString(), // ADD THIS LINE
       };
 
       console.log("Saving settings:", settings); // Debug log
@@ -2710,7 +2856,7 @@ async preloadEmployeeImage(employee_uid, altText) {
       }
     });
 
-    manualSubmit.addEventListener("click", () => {});
+    manualSubmit.addEventListener("click", () => { });
 
     // Settings event listeners
     settingsBtn.addEventListener("click", () => {
@@ -2777,13 +2923,13 @@ async preloadEmployeeImage(employee_uid, altText) {
     }
 
     const faceRecognitionBtn = document.getElementById('openFaceRecognition');
-if (faceRecognitionBtn) {
-  faceRecognitionBtn.addEventListener('click', () => {
-    if (this.faceRecognitionManager) {
-      this.faceRecognitionManager.show();
+    if (faceRecognitionBtn) {
+      faceRecognitionBtn.addEventListener('click', () => {
+        if (this.faceRecognitionManager) {
+          this.faceRecognitionManager.show();
+        }
+      });
     }
-  });
-}
   }
 
   showStatus(message, type = "info") {
@@ -2843,17 +2989,19 @@ if (faceRecognitionBtn) {
 
     // Update the inline dashboard employee details section
     const dashboardEmployeeCard = document.getElementById("dashboardEmployeeCard");
-    
-    
+
+
     if (!dashboardEmployeeCard) {
       console.warn("Dashboard employee card not found");
       return;
     }
 
+    // ⭐ Store the currently displayed employee UID
+    dashboardEmployeeCard.dataset.employeeUid = employee.uid;
+
     setTimeout(() => {
       dashboardEmployeeCard.classList.add("show");
     }, 10);
-
     // Update employee photo
     const photo = document.getElementById("dashboardEmployeePhoto");
     if (photo) {
@@ -2889,9 +3037,8 @@ if (faceRecognitionBtn) {
     const clockTypeElement = document.getElementById("dashboardClockType");
     if (clockTypeElement) {
       clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
-      clockTypeElement.className = `clock-badge ${clockType.includes("in") ? "in" : "out"} ${
-        isOvertimeSession ? "overtime" : ""
-      }`;
+      clockTypeElement.className = `clock-badge ${clockType.includes("in") ? "in" : "out"} ${isOvertimeSession ? "overtime" : ""
+        }`;
     }
 
     // Update clock time
@@ -2903,7 +3050,7 @@ if (faceRecognitionBtn) {
     // Update hours breakdown
     const hoursElement = document.getElementById("dashboardHours");
     const totalHours = (regularHours || 0) + (overtimeHours || 0);
-    
+
     if (hoursElement) {
       if (isOvertimeSession) {
         hoursElement.innerHTML = `
@@ -3015,27 +3162,27 @@ if (faceRecognitionBtn) {
     this.loadServerEditSyncInfo(); // ADD THIS LINE
     this.loadDailySummary();
     this.initializeSettingsTabs();
-    
+
     // Setup server edit sync UI if not already done
     if (!document.getElementById('serverEditSyncInfo')?.hasChildNodes()) {
       this.setupServerEditSyncUI();
     }
   }
 
-/**
- * KEEP: destroy method but remove auto-sync cleanup
- */
-destroy() {
-  super.destroy();
-  
-  // Remove server edit sync listener
-  if (this.electronAPI && this.electronAPI.removeServerEditsListener) {
-    this.electronAPI.removeServerEditsListener();
+  /**
+   * KEEP: destroy method but remove auto-sync cleanup
+   */
+  destroy() {
+    super.destroy();
+
+    // Remove server edit sync listener
+    if (this.electronAPI && this.electronAPI.removeServerEditsListener) {
+      this.electronAPI.removeServerEditsListener();
+    }
+
+    // No need to stop auto-sync timer since we don't have one
+    console.log('Server edit sync listener removed');
   }
-  
-  // No need to stop auto-sync timer since we don't have one
-  console.log('Server edit sync listener removed');
-}
 
 
   closeSettings() {
@@ -3083,7 +3230,8 @@ destroy() {
       document.getElementById("serverUrl").value = "URL";
       document.getElementById("syncInterval").value = "5";
       document.getElementById("gracePeriod").value = "5";
-      document.getElementById("summarySyncInterval").value = "10"; // NEW: Demo summary sync interval
+      document.getElementById("summarySyncInterval").value = "10";
+      document.getElementById("faceRecognitionToggle").checked = true; // Demo face recognition enabled
       return;
     }
 
@@ -3099,10 +3247,14 @@ destroy() {
         );
         document.getElementById("gracePeriod").value =
           settings.grace_period || 5;
-        // NEW: Load summary sync interval setting
         document.getElementById("summarySyncInterval").value = Math.floor(
           (settings.summary_sync_interval || 600000) / 60000
         );
+
+        // Load face recognition setting
+        const faceRecognitionEnabled = settings.face_detection_enabled === "true" || settings.face_detection_enabled === true;
+        document.getElementById("faceRecognitionToggle").checked = faceRecognitionEnabled;
+        console.log("Face Recognition loaded:", faceRecognitionEnabled);
       }
     } catch (error) {
       console.error("Error loading settings:", error);
@@ -3246,9 +3398,8 @@ destroy() {
 
         summarySyncInfo.innerHTML = `
           <div class="sync-info-item">
-            <strong>Unsynced Summary Records:</strong> ${
-              unsyncedResult.success ? unsyncedResult.count : 0
-            }
+            <strong>Unsynced Summary Records:</strong> ${unsyncedResult.success ? unsyncedResult.count : 0
+          }
           </div>
           <div class="sync-info-item">
             <strong>Summary Auto-sync:</strong> ${syncStatus}
@@ -3257,9 +3408,8 @@ destroy() {
             <strong>Last Summary Sync:</strong> ${lastSyncText}
           </div>
           <div class="sync-info-item">
-            <strong>Pending Sync:</strong> ${
-              this.pendingSummarySync ? "Yes" : "No"
-            }
+            <strong>Pending Sync:</strong> ${this.pendingSummarySync ? "Yes" : "No"
+          }
           </div>
         `;
       }
@@ -3275,53 +3425,70 @@ destroy() {
       const attendanceSyncInfo = document.getElementById("attendanceSyncInfo");
       if (attendanceSyncInfo) {
         attendanceSyncInfo.innerHTML = `
-          <div class="sync-info-item">
-            <strong>Unsynced Records:</strong> 3 (Demo)
-          </div>
-          <div class="sync-info-item">
-            <strong>Auto-sync:</strong> Enabled - Every 5 minutes
-          </div>
-          <div class="sync-info-item">
-            <strong>Last Attendance Sync:</strong> 2 minutes ago (Demo)
-          </div>
-        `;
+        <div class="sync-info-item">
+          <strong>Unsynced Records:</strong> 3 (Demo)
+        </div>
+        <div class="sync-info-item">
+          <strong>Scheduled Sync:</strong> 08:30, 12:30, 13:30, 17:30
+        </div>
+        <div class="sync-info-item">
+          <strong>Next Sync:</strong> Calculating... (Demo)
+        </div>
+      `;
       }
       return;
     }
 
     try {
-      const unsyncedResult =
-        await this.electronAPI.getUnsyncedAttendanceCount();
+      const unsyncedResult = await this.electronAPI.getUnsyncedAttendanceCount();
       const attendanceSyncInfo = document.getElementById("attendanceSyncInfo");
 
       if (attendanceSyncInfo && unsyncedResult.success) {
-        const syncIntervalMinutes = Math.floor(
-          this.syncSettings.interval / 60000
-        );
-        const syncStatus = this.syncSettings.enabled
-          ? `Enabled - Every ${syncIntervalMinutes} minutes`
-          : "Disabled";
+        // Format schedule times
+        const scheduleTimes = this.attendanceSyncSchedule.map(s =>
+          `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`
+        ).join(', ');
+
+        const nextSync = this.getNextScheduledSyncTime();
+        const summaryCount = await this.electronAPI.getUnsyncedDailySummaryCount();
 
         attendanceSyncInfo.innerHTML = `
-          <div class="sync-info-item">
-            <strong>Unsynced Records:</strong> ${unsyncedResult.count}
-          </div>
-          <div class="sync-info-item">
-            <strong>Auto-sync:</strong> ${syncStatus}
-          </div>
-          <div class="sync-info-item">
-            <strong>Next sync:</strong> <span id="nextSyncTime">Calculating...</span>
-          </div>
-        `;
-
-        // Update next sync time if auto-sync is enabled
-        if (this.syncSettings.enabled && this.autoSyncInterval) {
-          this.updateNextSyncTime();
-        }
+    <div class="sync-info-item">
+      <strong>Unsynced Attendance:</strong> ${unsyncedResult.count}
+    </div>
+    <div class="sync-info-item">
+      <strong>Unsynced Summary:</strong> ${summaryCount.count || 0}
+    </div>
+    <div class="sync-info-item">
+      <strong>Sync Schedule:</strong> ${scheduleTimes} (daily)
+      <br><small>Syncs both attendance and summary together</small>
+    </div>
+    <div class="sync-info-item">
+      <strong>Next Sync:</strong> ${nextSync}
+    </div>
+  `;
       }
     } catch (error) {
       console.error("Error loading attendance sync info:", error);
     }
+  }
+
+  // Helper method to calculate next scheduled sync time
+  getNextScheduledSyncTime() {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    for (const schedule of this.attendanceSyncSchedule) {
+      const scheduleMinutes = schedule.hour * 60 + schedule.minute;
+
+      if (scheduleMinutes > currentMinutes) {
+        return `Today at ${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
+      }
+    }
+
+    // If all times passed today, show first time tomorrow
+    const firstSchedule = this.attendanceSyncSchedule[0];
+    return `Tomorrow at ${String(firstSchedule.hour).padStart(2, '0')}:${String(firstSchedule.minute).padStart(2, '0')}`;
   }
 
   // Update next sync countdown
@@ -3604,6 +3771,7 @@ destroy() {
     setTimeout(() => {
       this.loadTodayAttendance();
       this.markSummaryDataChanged();
+      this.markAttendanceForSync(); // NEW: Mark for scheduled sync instead of immediate sync
     }, 1000);
   }
 
@@ -3848,6 +4016,38 @@ destroy() {
         this.updateTodayActivity(result.data.attendance);
         this.updateStatistics(result.data.statistics);
         this.loadDailySummary();
+
+        // ⭐ Update the dashboard employee card with the most recent clock event
+        if (result.data.attendance && result.data.attendance.length > 0) {
+          const latestAttendance = result.data.attendance[0]; // Most recent is first
+
+          // Check if this is a different employee than currently displayed
+          const currentDisplayUID = document.getElementById('dashboardEmployeeCard')?.dataset?.employeeUid;
+
+          if (currentDisplayUID !== latestAttendance.employee_uid) {
+            console.log('Updating dashboard with latest attendance:', latestAttendance.first_name, latestAttendance.last_name);
+
+            // Construct data in the format showEmployeeDisplay expects
+            const displayData = {
+              employee: {
+                uid: latestAttendance.employee_uid,
+                first_name: latestAttendance.first_name,
+                middle_name: latestAttendance.middle_name || '',
+                last_name: latestAttendance.last_name,
+                department: latestAttendance.department,
+                id_number: latestAttendance.id_number
+              },
+              clockType: latestAttendance.clock_type,
+              sessionType: latestAttendance.session_type,
+              clockTime: latestAttendance.clock_time,
+              regularHours: latestAttendance.regular_hours || 0,
+              overtimeHours: latestAttendance.overtime_hours || 0,
+              isOvertimeSession: latestAttendance.is_overtime_session || false
+            };
+
+            this.showEmployeeDisplay(displayData);
+          }
+        }
       }
     } catch (error) {
       console.error("Error loading attendance:", error);
@@ -4050,9 +4250,8 @@ destroy() {
           <td>${(record.regular_hours || 0).toFixed(2)}</td>
           <td>${(record.overtime_hours || 0).toFixed(2)}</td>
           <td>${(record.total_hours || 0).toFixed(2)}</td>
-          <td><span class="status-badge ${status.class}">${
-          status.text
-        }</span></td>
+          <td><span class="status-badge ${status.class}">${status.text
+          }</span></td>
         </tr>
       `;
       })
@@ -4093,340 +4292,340 @@ destroy() {
   }
 
   async downloadExcel() {
-  try {
-    const summaryData = this.summaryData;
+    try {
+      const summaryData = this.summaryData;
 
-    if (!summaryData || summaryData.length === 0) {
-      this.showStatus("No data available for export", "error");
-      return;
-    }
+      if (!summaryData || summaryData.length === 0) {
+        this.showStatus("No data available for export", "error");
+        return;
+      }
 
-    const workbook = XLSX.utils.book_new();
+      const workbook = XLSX.utils.book_new();
 
-    // Helper function to format time only
-    const formatTimeOnly = (datetime) => {
-      if (!datetime) return "";
-      try {
-        return this.formatDateTime(datetime);
-      } catch {
-        return "";
-      }
-    };
-
-    // Helper function to check if date is Sunday and calculate total hours
-    const getSundayHours = (dateStr, regularHours, overtimeHours) => {
-      const date = new Date(dateStr);
-      const dayOfWeek = date.getDay();
-      
-      if (dayOfWeek === 0) { // Sunday
-        const totalHours = (regularHours || 0) + (overtimeHours || 0);
-        return totalHours > 0 ? totalHours.toFixed(1) : "";
-      }
-      return "";
-    };
-
-    // Helper function to generate intelligent remarks
-    const generateRemarks = (summary) => {
-      const remarks = [];
-      
-      // Check for clock records existence
-      const hasAnyClockIn = summary.morning_in || summary.afternoon_in || summary.evening_in;
-      const hasAnyClockOut = summary.morning_out || summary.afternoon_out || summary.evening_out;
-      
-      // Check for perfect attendance first - if perfect, return empty
-      if (summary.total_hours >= 8 && !summary.has_late_entry && hasAnyClockIn && hasAnyClockOut) {
-        return ""; // Perfect attendance = no remarks
-      }
-      
-      // Check specific incomplete cycles
-      const missingOuts = [];
-      if (summary.morning_in && !summary.morning_out) {
-        missingOuts.push("Morning Out");
-      }
-      if (summary.afternoon_in && !summary.afternoon_out) {
-        missingOuts.push("Afternoon Out");
-      }
-      if (summary.evening_in && !summary.evening_out) {
-        missingOuts.push("Overtime Out");
-      }
-      
-      const missingIns = [];
-      if (!summary.morning_in && summary.morning_out) {
-        missingIns.push("Morning In");
-      }
-      if (!summary.afternoon_in && summary.afternoon_out) {
-        missingIns.push("Afternoon In");
-      }
-      if (!summary.evening_in && summary.evening_out) {
-        missingIns.push("Overtime In");
-      }
-      
-      // Add specific missing clock out remarks
-      if (missingOuts.length > 0) {
-        remarks.push("INCOMPLETE - Missing " + missingOuts.join(", "));
-      }
-      
-      // Add specific missing clock in remarks
-      if (missingIns.length > 0) {
-        remarks.push("INCOMPLETE - Missing " + missingIns.join(", "));
-      }
-      
-      // Check for late entry
-      if (summary.has_late_entry) {
-        remarks.push("LATE ARRIVAL");
-      }
-      
-      // Check for overtime without regular hours
-      if ((summary.overtime_hours > 0) && (summary.regular_hours === 0 || !summary.regular_hours)) {
-        remarks.push("OT WITHOUT REG HOURS");
-      }
-      
-      // Check for excessive overtime
-      if (summary.overtime_hours > 4) {
-        remarks.push("EXCESSIVE OT (" + summary.overtime_hours.toFixed(1) + "h)");
-      }
-      
-      // Check for minimal hours
-      if (summary.total_hours > 0 && summary.total_hours < 4) {
-        remarks.push("MINIMAL HOURS (" + summary.total_hours.toFixed(1) + "h)");
-      }
-      
-      // Check for weekend work
-      const date = new Date(summary.date);
-      const dayOfWeek = date.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
-        remarks.push("WEEKEND WORK");
-      }
-      
-      // Check for no activity
-      if (!hasAnyClockIn && !hasAnyClockOut && (summary.total_hours === 0 || !summary.total_hours)) {
-        remarks.push("NO ACTIVITY");
-      }
-      
-      return remarks.length > 0 ? remarks.join("; ") : "";
-    };
-
-    const employeeSummaryHeaders = [
-      "EMPLOYEE_NAME", "DATE_OF_LOG", "MORNING_IN", "MORNING_OUT",
-      "AFTERNOON_IN", "AFTERNOON_OUT", "OVERTIME_IN", "OVERTIME_OUT",
-      "REG HRS", "OT HRS", "SUNDAY", "REMARKS"
-    ];
-
-    const employeeSummaryData = [];
-
-    // Sort by last_name, then first_name, then date
-    const sortedData = summaryData.sort((a, b) => {
-      const lastNameComparison = (a.last_name || "").localeCompare(b.last_name || "");
-      if (lastNameComparison !== 0) return lastNameComparison;
-      
-      const firstNameComparison = (a.first_name || "").localeCompare(b.first_name || "");
-      if (firstNameComparison !== 0) return firstNameComparison;
-      
-      return new Date(a.date) - new Date(b.date);
-    });
-
-    // Group by both last_name and first_name
-    const groupedByEmployee = {};
-    sortedData.forEach((summary) => {
-      const key = `${summary.last_name || "Unknown"}, ${summary.first_name || "Unknown"}`;
-      if (!groupedByEmployee[key]) {
-        groupedByEmployee[key] = [];
-      }
-      groupedByEmployee[key].push(summary);
-    });
-
-    // Track totals
-    let grandTotalRegularHours = 0;
-    let grandTotalOvertimeHours = 0;
-    let grandTotalSundayHours = 0;
-    let totalLateCount = 0;
-    let totalIncompleteCount = 0;
-    let totalPerfectAttendanceCount = 0;
-
-    // Process each employee group
-    Object.keys(groupedByEmployee).sort().forEach((employeeKey, groupIndex) => {
-      const employeeRecords = groupedByEmployee[employeeKey];
-      
-      // Add empty row before new employee section (except for first employee)
-      if (groupIndex > 0) {
-        employeeSummaryData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-      }
-      
-      // Add the header row for this employee section
-      employeeSummaryData.push([
-        "EMPLOYEE_NAME", "DATE_OF_LOG", "MORNING_IN", "MORNING_OUT", 
-        "AFTERNOON_IN", "AFTERNOON_OUT", "OVERTIME_IN", "OVERTIME_OUT", 
-        "REG HRS", "OT HRS", "SUNDAY", "REMARKS"
-      ]);
-      
-      let subtotalRegularHours = 0;
-      let subtotalOvertimeHours = 0;
-      let subtotalSundayHours = 0;
-      let employeeLateCount = 0;
-      let employeeIncompleteCount = 0;
-      let employeePerfectCount = 0;
-
-      // Add employee records
-      employeeRecords.forEach((summary) => {
-        const employeeName = summary.employee_name || 
-          `${summary.first_name || ""} ${summary.last_name || ""}`.trim() || 
-          "Unknown";
-
-        const sundayHours = getSundayHours(summary.date, summary.regular_hours, summary.overtime_hours);
-        const regularHours = summary.regular_hours || 0;
-        const overtimeHours = summary.overtime_hours || 0;
-        const remarks = generateRemarks(summary);
-
-        // Track statistics
-        subtotalRegularHours += regularHours;
-        subtotalOvertimeHours += overtimeHours;
-        if (sundayHours) {
-          subtotalSundayHours += parseFloat(sundayHours);
+      // Helper function to format time only
+      const formatTimeOnly = (datetime) => {
+        if (!datetime) return "";
+        try {
+          return this.formatDateTime(datetime);
+        } catch {
+          return "";
         }
-        if (summary.has_late_entry) employeeLateCount++;
-        if (remarks.includes("INCOMPLETE")) employeeIncompleteCount++;
-        if (!remarks || remarks === "") employeePerfectCount++;
+      };
 
-        employeeSummaryData.push([
-          employeeName,
-          summary.date,
-          formatTimeOnly(summary.morning_in),
-          formatTimeOnly(summary.morning_out),
-          formatTimeOnly(summary.afternoon_in),
-          formatTimeOnly(summary.afternoon_out),
-          formatTimeOnly(summary.evening_in || summary.overtime_in),
-          formatTimeOnly(summary.evening_out || summary.overtime_out),
-          regularHours.toFixed(1),
-          overtimeHours.toFixed(1),
-          sundayHours,
-          remarks
-        ]);
+      // Helper function to check if date is Sunday and calculate total hours
+      const getSundayHours = (dateStr, regularHours, overtimeHours) => {
+        const date = new Date(dateStr);
+        const dayOfWeek = date.getDay();
+
+        if (dayOfWeek === 0) { // Sunday
+          const totalHours = (regularHours || 0) + (overtimeHours || 0);
+          return totalHours > 0 ? totalHours.toFixed(1) : "";
+        }
+        return "";
+      };
+
+      // Helper function to generate intelligent remarks
+      const generateRemarks = (summary) => {
+        const remarks = [];
+
+        // Check for clock records existence
+        const hasAnyClockIn = summary.morning_in || summary.afternoon_in || summary.evening_in;
+        const hasAnyClockOut = summary.morning_out || summary.afternoon_out || summary.evening_out;
+
+        // Check for perfect attendance first - if perfect, return empty
+        if (summary.total_hours >= 8 && !summary.has_late_entry && hasAnyClockIn && hasAnyClockOut) {
+          return ""; // Perfect attendance = no remarks
+        }
+
+        // Check specific incomplete cycles
+        const missingOuts = [];
+        if (summary.morning_in && !summary.morning_out) {
+          missingOuts.push("Morning Out");
+        }
+        if (summary.afternoon_in && !summary.afternoon_out) {
+          missingOuts.push("Afternoon Out");
+        }
+        if (summary.evening_in && !summary.evening_out) {
+          missingOuts.push("Overtime Out");
+        }
+
+        const missingIns = [];
+        if (!summary.morning_in && summary.morning_out) {
+          missingIns.push("Morning In");
+        }
+        if (!summary.afternoon_in && summary.afternoon_out) {
+          missingIns.push("Afternoon In");
+        }
+        if (!summary.evening_in && summary.evening_out) {
+          missingIns.push("Overtime In");
+        }
+
+        // Add specific missing clock out remarks
+        if (missingOuts.length > 0) {
+          remarks.push("INCOMPLETE - Missing " + missingOuts.join(", "));
+        }
+
+        // Add specific missing clock in remarks
+        if (missingIns.length > 0) {
+          remarks.push("INCOMPLETE - Missing " + missingIns.join(", "));
+        }
+
+        // Check for late entry
+        if (summary.has_late_entry) {
+          remarks.push("LATE ARRIVAL");
+        }
+
+        // Check for overtime without regular hours
+        if ((summary.overtime_hours > 0) && (summary.regular_hours === 0 || !summary.regular_hours)) {
+          remarks.push("OT WITHOUT REG HOURS");
+        }
+
+        // Check for excessive overtime
+        if (summary.overtime_hours > 4) {
+          remarks.push("EXCESSIVE OT (" + summary.overtime_hours.toFixed(1) + "h)");
+        }
+
+        // Check for minimal hours
+        if (summary.total_hours > 0 && summary.total_hours < 4) {
+          remarks.push("MINIMAL HOURS (" + summary.total_hours.toFixed(1) + "h)");
+        }
+
+        // Check for weekend work
+        const date = new Date(summary.date);
+        const dayOfWeek = date.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
+          remarks.push("WEEKEND WORK");
+        }
+
+        // Check for no activity
+        if (!hasAnyClockIn && !hasAnyClockOut && (summary.total_hours === 0 || !summary.total_hours)) {
+          remarks.push("NO ACTIVITY");
+        }
+
+        return remarks.length > 0 ? remarks.join("; ") : "";
+      };
+
+      const employeeSummaryHeaders = [
+        "EMPLOYEE_NAME", "DATE_OF_LOG", "MORNING_IN", "MORNING_OUT",
+        "AFTERNOON_IN", "AFTERNOON_OUT", "OVERTIME_IN", "OVERTIME_OUT",
+        "REG HRS", "OT HRS", "SUNDAY", "REMARKS"
+      ];
+
+      const employeeSummaryData = [];
+
+      // Sort by last_name, then first_name, then date
+      const sortedData = summaryData.sort((a, b) => {
+        const lastNameComparison = (a.last_name || "").localeCompare(b.last_name || "");
+        if (lastNameComparison !== 0) return lastNameComparison;
+
+        const firstNameComparison = (a.first_name || "").localeCompare(b.first_name || "");
+        if (firstNameComparison !== 0) return firstNameComparison;
+
+        return new Date(a.date) - new Date(b.date);
       });
 
-      // Add employee summary row
+      // Group by both last_name and first_name
+      const groupedByEmployee = {};
+      sortedData.forEach((summary) => {
+        const key = `${summary.last_name || "Unknown"}, ${summary.first_name || "Unknown"}`;
+        if (!groupedByEmployee[key]) {
+          groupedByEmployee[key] = [];
+        }
+        groupedByEmployee[key].push(summary);
+      });
+
+      // Track totals
+      let grandTotalRegularHours = 0;
+      let grandTotalOvertimeHours = 0;
+      let grandTotalSundayHours = 0;
+      let totalLateCount = 0;
+      let totalIncompleteCount = 0;
+      let totalPerfectAttendanceCount = 0;
+
+      // Process each employee group
+      Object.keys(groupedByEmployee).sort().forEach((employeeKey, groupIndex) => {
+        const employeeRecords = groupedByEmployee[employeeKey];
+
+        // Add empty row before new employee section (except for first employee)
+        if (groupIndex > 0) {
+          employeeSummaryData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
+        }
+
+        // Add the header row for this employee section
+        employeeSummaryData.push([
+          "EMPLOYEE_NAME", "DATE_OF_LOG", "MORNING_IN", "MORNING_OUT",
+          "AFTERNOON_IN", "AFTERNOON_OUT", "OVERTIME_IN", "OVERTIME_OUT",
+          "REG HRS", "OT HRS", "SUNDAY", "REMARKS"
+        ]);
+
+        let subtotalRegularHours = 0;
+        let subtotalOvertimeHours = 0;
+        let subtotalSundayHours = 0;
+        let employeeLateCount = 0;
+        let employeeIncompleteCount = 0;
+        let employeePerfectCount = 0;
+
+        // Add employee records
+        employeeRecords.forEach((summary) => {
+          const employeeName = summary.employee_name ||
+            `${summary.first_name || ""} ${summary.last_name || ""}`.trim() ||
+            "Unknown";
+
+          const sundayHours = getSundayHours(summary.date, summary.regular_hours, summary.overtime_hours);
+          const regularHours = summary.regular_hours || 0;
+          const overtimeHours = summary.overtime_hours || 0;
+          const remarks = generateRemarks(summary);
+
+          // Track statistics
+          subtotalRegularHours += regularHours;
+          subtotalOvertimeHours += overtimeHours;
+          if (sundayHours) {
+            subtotalSundayHours += parseFloat(sundayHours);
+          }
+          if (summary.has_late_entry) employeeLateCount++;
+          if (remarks.includes("INCOMPLETE")) employeeIncompleteCount++;
+          if (!remarks || remarks === "") employeePerfectCount++;
+
+          employeeSummaryData.push([
+            employeeName,
+            summary.date,
+            formatTimeOnly(summary.morning_in),
+            formatTimeOnly(summary.morning_out),
+            formatTimeOnly(summary.afternoon_in),
+            formatTimeOnly(summary.afternoon_out),
+            formatTimeOnly(summary.evening_in || summary.overtime_in),
+            formatTimeOnly(summary.evening_out || summary.overtime_out),
+            regularHours.toFixed(1),
+            overtimeHours.toFixed(1),
+            sundayHours,
+            remarks
+          ]);
+        });
+
+        // Add employee summary row
+        employeeSummaryData.push([
+          "", "", "", "", "", "", "",
+          "TOTAL HOURS",
+          subtotalRegularHours.toFixed(1),
+          subtotalOvertimeHours.toFixed(1),
+          subtotalSundayHours > 0 ? subtotalSundayHours.toFixed(1) : "",
+          `Late: ${employeeLateCount} | Inc: ${employeeIncompleteCount} | Perfect: ${employeePerfectCount}`
+        ]);
+
+        // Add to grand totals
+        grandTotalRegularHours += subtotalRegularHours;
+        grandTotalOvertimeHours += subtotalOvertimeHours;
+        grandTotalSundayHours += subtotalSundayHours;
+        totalLateCount += employeeLateCount;
+        totalIncompleteCount += employeeIncompleteCount;
+        totalPerfectAttendanceCount += employeePerfectCount;
+      });
+
+      // Add final totals
+      employeeSummaryData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
       employeeSummaryData.push([
-        "", "", "", "", "", "", "", 
-        "TOTAL HOURS",
-        subtotalRegularHours.toFixed(1),
-        subtotalOvertimeHours.toFixed(1),
-        subtotalSundayHours > 0 ? subtotalSundayHours.toFixed(1) : "",
-        `Late: ${employeeLateCount} | Inc: ${employeeIncompleteCount} | Perfect: ${employeePerfectCount}`
+        "", "", "", "", "", "", "",
+        "GRAND TOTALS",
+        grandTotalRegularHours.toFixed(1),
+        grandTotalOvertimeHours.toFixed(1),
+        grandTotalSundayHours > 0 ? grandTotalSundayHours.toFixed(1) : "",
+        `Late: ${totalLateCount} | Inc: ${totalIncompleteCount} | Perfect: ${totalPerfectAttendanceCount}`
       ]);
 
-      // Add to grand totals
-      grandTotalRegularHours += subtotalRegularHours;
-      grandTotalOvertimeHours += subtotalOvertimeHours;
-      grandTotalSundayHours += subtotalSundayHours;
-      totalLateCount += employeeLateCount;
-      totalIncompleteCount += employeeIncompleteCount;
-      totalPerfectAttendanceCount += employeePerfectCount;
-    });
+      const employeeSummarySheet = XLSX.utils.aoa_to_sheet(employeeSummaryData);
 
-    // Add final totals
-    employeeSummaryData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-    employeeSummaryData.push([
-      "", "", "", "", "", "", "",
-      "GRAND TOTALS",
-      grandTotalRegularHours.toFixed(1),
-      grandTotalOvertimeHours.toFixed(1),
-      grandTotalSundayHours > 0 ? grandTotalSundayHours.toFixed(1) : "",
-      `Late: ${totalLateCount} | Inc: ${totalIncompleteCount} | Perfect: ${totalPerfectAttendanceCount}`
-    ]);
+      // Enhanced styling for employee summary
+      const empRange = XLSX.utils.decode_range(employeeSummarySheet['!ref']);
 
-    const employeeSummarySheet = XLSX.utils.aoa_to_sheet(employeeSummaryData);
-
-    // Enhanced styling for employee summary
-    const empRange = XLSX.utils.decode_range(employeeSummarySheet['!ref']);
-    
-    for (let R = empRange.s.r; R <= empRange.e.r; R++) {
-      const cellA = XLSX.utils.encode_cell({r: R, c: 0});
-      if (employeeSummarySheet[cellA] && 
+      for (let R = empRange.s.r; R <= empRange.e.r; R++) {
+        const cellA = XLSX.utils.encode_cell({ r: R, c: 0 });
+        if (employeeSummarySheet[cellA] &&
           employeeSummarySheet[cellA].v === "EMPLOYEE_NAME") {
-        
-        // Style employee section header row
-        for (let C = empRange.s.c; C <= empRange.e.c; C++) {
-          const cellAddress = XLSX.utils.encode_cell({r: R, c: C});
-          if (employeeSummarySheet[cellAddress]) {
-            employeeSummarySheet[cellAddress].s = {
-              font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
-              fill: { fgColor: { rgb: "DC2626" } },
-              alignment: { horizontal: "center", vertical: "center" },
-              border: {
-                top: { style: "thin", color: { rgb: "000000" } },
-                bottom: { style: "thin", color: { rgb: "000000" } },
-                left: { style: "thin", color: { rgb: "000000" } },
-                right: { style: "thin", color: { rgb: "000000" } }
-              }
-            };
+
+          // Style employee section header row
+          for (let C = empRange.s.c; C <= empRange.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            if (employeeSummarySheet[cellAddress]) {
+              employeeSummarySheet[cellAddress].s = {
+                font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
+                fill: { fgColor: { rgb: "DC2626" } },
+                alignment: { horizontal: "center", vertical: "center" },
+                border: {
+                  top: { style: "thin", color: { rgb: "000000" } },
+                  bottom: { style: "thin", color: { rgb: "000000" } },
+                  left: { style: "thin", color: { rgb: "000000" } },
+                  right: { style: "thin", color: { rgb: "000000" } }
+                }
+              };
+            }
+          }
+        }
+
+        const cellH = XLSX.utils.encode_cell({ r: R, c: 7 });
+        if (employeeSummarySheet[cellH] &&
+          (employeeSummarySheet[cellH].v === "TOTAL HOURS" ||
+            employeeSummarySheet[cellH].v === "GRAND TOTALS")) {
+
+          // Style subtotal/total row
+          for (let C = empRange.s.c; C <= empRange.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            if (employeeSummarySheet[cellAddress]) {
+              employeeSummarySheet[cellAddress].s = {
+                font: { bold: true, color: { rgb: "FFFFFF" } },
+                fill: { fgColor: { rgb: "059669" } },
+                alignment: { horizontal: "center" },
+                border: {
+                  top: { style: "thin", color: { rgb: "000000" } },
+                  bottom: { style: "thin", color: { rgb: "000000" } },
+                  left: { style: "thin", color: { rgb: "000000" } },
+                  right: { style: "thin", color: { rgb: "000000" } }
+                }
+              };
+            }
           }
         }
       }
-      
-      const cellH = XLSX.utils.encode_cell({r: R, c: 7});
-      if (employeeSummarySheet[cellH] && 
-          (employeeSummarySheet[cellH].v === "TOTAL HOURS" || 
-           employeeSummarySheet[cellH].v === "GRAND TOTALS")) {
-        
-        // Style subtotal/total row
-        for (let C = empRange.s.c; C <= empRange.e.c; C++) {
-          const cellAddress = XLSX.utils.encode_cell({r: R, c: C});
-          if (employeeSummarySheet[cellAddress]) {
-            employeeSummarySheet[cellAddress].s = {
-              font: { bold: true, color: { rgb: "FFFFFF" } },
-              fill: { fgColor: { rgb: "059669" } },
-              alignment: { horizontal: "center" },
-              border: {
-                top: { style: "thin", color: { rgb: "000000" } },
-                bottom: { style: "thin", color: { rgb: "000000" } },
-                left: { style: "thin", color: { rgb: "000000" } },
-                right: { style: "thin", color: { rgb: "000000" } }
-              }
-            };
-          }
-        }
+
+      employeeSummarySheet["!cols"] = [
+        { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+        { wch: 10 }, { wch: 10 }, { wch: 25 }, { wch: 10 }, { wch: 8 },
+        { wch: 8 }, { wch: 40 }
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, employeeSummarySheet, "Employee Summary");
+
+      // Generate filename
+      let filename = "Employee_Attendance_Summary";
+
+      if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
+        const start = this.currentDateRange.startDate || "all";
+        const end = this.currentDateRange.endDate || "latest";
+        filename += `_${start}_to_${end}`;
+      } else {
+        const today = new Date().toISOString().split("T")[0];
+        filename += `_${today}`;
       }
+
+      filename += ".xlsx";
+
+      // Download file
+      XLSX.writeFile(workbook, filename);
+
+      const recordCount = summaryData.length;
+      const dateRangeText =
+        this.currentDateRange.startDate || this.currentDateRange.endDate
+          ? `for selected date range`
+          : `for all dates`;
+
+      this.showStatus(
+        `Excel file downloaded successfully! ${recordCount} records exported ${dateRangeText}`,
+        "success"
+      );
+    } catch (error) {
+      console.error("Error downloading Excel:", error);
+      this.showStatus("Error downloading Excel file", "error");
     }
-
-    employeeSummarySheet["!cols"] = [
-      { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, 
-      { wch: 10 }, { wch: 10 }, { wch: 25 }, { wch: 10 }, { wch: 8 }, 
-      { wch: 8 }, { wch: 40 }
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, employeeSummarySheet, "Employee Summary");
-
-    // Generate filename
-    let filename = "Employee_Attendance_Summary";
-
-    if (this.currentDateRange.startDate || this.currentDateRange.endDate) {
-      const start = this.currentDateRange.startDate || "all";
-      const end = this.currentDateRange.endDate || "latest";
-      filename += `_${start}_to_${end}`;
-    } else {
-      const today = new Date().toISOString().split("T")[0];
-      filename += `_${today}`;
-    }
-
-    filename += ".xlsx";
-
-    // Download file
-    XLSX.writeFile(workbook, filename);
-
-    const recordCount = summaryData.length;
-    const dateRangeText =
-      this.currentDateRange.startDate || this.currentDateRange.endDate
-        ? `for selected date range`
-        : `for all dates`;
-
-    this.showStatus(
-      `Excel file downloaded successfully! ${recordCount} records exported ${dateRangeText}`,
-      "success"
-    );
-  } catch (error) {
-    console.error("Error downloading Excel:", error);
-    this.showStatus("Error downloading Excel file", "error");
   }
-}
 
   showStatus(message, type) {
     const statusEl = document.getElementById("settingsStatusMessage");
@@ -4478,27 +4677,23 @@ destroy() {
       if (sessionBreakdownElement) {
         sessionBreakdownElement.innerHTML = `
           <div class="session-stat morning">
-            <span class="session-count">${
-              stats.sessionBreakdown.morning || 0
-            }</span>
+            <span class="session-count">${stats.sessionBreakdown.morning || 0
+          }</span>
             <span class="session-label">Morning</span>
           </div>
           <div class="session-stat afternoon">
-            <span class="session-count">${
-              stats.sessionBreakdown.afternoon || 0
-            }</span>
+            <span class="session-count">${stats.sessionBreakdown.afternoon || 0
+          }</span>
             <span class="session-label">Afternoon</span>
           </div>
           <div class="session-stat evening">
-            <span class="session-count">${
-              stats.sessionBreakdown.evening || 0
-            }</span>
+            <span class="session-count">${stats.sessionBreakdown.evening || 0
+          }</span>
             <span class="session-label">Evening</span>
           </div>
           <div class="session-stat overtime">
-            <span class="session-count">${
-              stats.sessionBreakdown.overtime || 0
-            }</span>
+            <span class="session-count">${stats.sessionBreakdown.overtime || 0
+          }</span>
             <span class="session-label">Overtime</span>
           </div>
         `;
@@ -4543,12 +4738,10 @@ destroy() {
                      src="${this.getDefaultImageDataURL()}"
                      alt="${emp.first_name} ${emp.last_name}">
                 <div class="employee-details">
-                    <div class="employee-name">${emp.first_name} ${
-          emp.last_name
-        }</div>
-                    <div class="employee-dept">${
-                      emp.department || "No Department"
-                    }</div>
+                    <div class="employee-name">${emp.first_name} ${emp.last_name
+          }</div>
+                    <div class="employee-dept">${emp.department || "No Department"
+          }</div>
                 </div>
                 <div class="clock-badge ${badgeClass}">
                     ${sessionIcon} ${sessionType}
@@ -4611,17 +4804,15 @@ destroy() {
                      src="${this.getDefaultImageDataURL()}"
                      alt="${record.first_name} ${record.last_name}">
                 <div class="attendance-details">
-                    <div class="attendance-name">${record.first_name} ${
-          record.last_name
-        }</div>
+                    <div class="attendance-name">${record.first_name} ${record.last_name
+          }</div>
                     <div class="attendance-time">${new Date(
-                      record.clock_time
-                    ).toLocaleTimeString()}</div>
-                    ${
-                      isOvertime
-                        ? '<div class="overtime-indicator">Overtime Session</div>'
-                        : ""
-                    }
+            record.clock_time
+          ).toLocaleTimeString()}</div>
+                    ${isOvertime
+            ? '<div class="overtime-indicator">Overtime Session</div>'
+            : ""
+          }
                 </div>
                 <div class="clock-badge ${finalBadgeClass}">
                     ${this.formatClockType(record.clock_type, sessionType)}
@@ -4680,6 +4871,7 @@ destroy() {
   // Clean up performance monitoring
   destroy() {
     this.stopAutoSync();
+    this.stopScheduledSync();
     this.stopFaceRecognitionScheduler();
 
     // PERFORMANCE: Clear cache monitoring
@@ -4719,25 +4911,25 @@ destroy() {
 
   // Add these methods to your AttendanceApp class
 
-/**
- * ENHANCED: Setup server edit sync UI with comparison feature
- */
-setupServerEditSyncUI() {
-  const syncPanel = document.getElementById('syncPanel');
-  
-  if (!syncPanel) {
-    console.warn('Sync panel not found, cannot setup server edit sync UI');
-    return;
-  }
+  /**
+   * ENHANCED: Setup server edit sync UI with comparison feature
+   */
+  setupServerEditSyncUI() {
+    const syncPanel = document.getElementById('syncPanel');
 
-  if (document.getElementById('serverEditSyncInfo')) {
-    console.log('Server edit sync UI already setup');
-    return;
-  }
+    if (!syncPanel) {
+      console.warn('Sync panel not found, cannot setup server edit sync UI');
+      return;
+    }
 
-  const serverEditSection = document.createElement('div');
-  serverEditSection.className = 'settings-section server-edit-sync-section';
-  serverEditSection.innerHTML = `
+    if (document.getElementById('serverEditSyncInfo')) {
+      console.log('Server edit sync UI already setup');
+      return;
+    }
+
+    const serverEditSection = document.createElement('div');
+    serverEditSection.className = 'settings-section server-edit-sync-section';
+    serverEditSection.innerHTML = `
     <h3>📝 Server Edit Sync with Comparison</h3>
     <p class="section-description">
       Compare server and local attendance records to identify differences, then apply selected actions.
@@ -4794,120 +4986,120 @@ setupServerEditSyncUI() {
     </div>
   `;
 
-  const lastSection = syncPanel.querySelector('.settings-section:last-child');
-  if (lastSection) {
-    syncPanel.insertBefore(serverEditSection, lastSection);
-  } else {
-    syncPanel.appendChild(serverEditSection);
-  }
-
-  // Set default dates (last 7 days)
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 7);
-  
-  document.getElementById('compareStartDate').value = startDate.toISOString().split('T')[0];
-  document.getElementById('compareEndDate').value = endDate.toISOString().split('T')[0];
-
-  // Add event listeners
-  const compareBtn = document.getElementById('compareServerLocalBtn');
-  const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
-  const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
-
-  if (compareBtn) {
-    compareBtn.addEventListener('click', async () => {
-      await this.compareServerAndLocal();
-    });
-  }
-
-  if (checkNowBtn) {
-    checkNowBtn.addEventListener('click', async () => {
-      checkNowBtn.disabled = true;
-      checkNowBtn.textContent = '🔄 Checking...';
-      
-      try {
-        await this.checkServerEdits(false);
-      } catch (error) {
-        console.error('Error checking server edits:', error);
-        this.showStatus(`Error: ${error.message}`, 'error');
-      } finally {
-        checkNowBtn.disabled = false;
-        checkNowBtn.textContent = '🔄 Check Server Edits Now';
-        
-        await this.loadServerEditSyncInfo();
-      }
-    });
-  }
-
-  if (viewHistoryBtn) {
-    viewHistoryBtn.addEventListener('click', () => {
-      this.showServerEditSyncHistory();
-    });
-  }
-
-  this.loadServerEditSyncInfo();
-  
-  console.log('✓ Server edit sync UI setup complete with comparison feature');
-}
-
-/**
- * NEW: Compare server and local attendance records
- */
-async compareServerAndLocal() {
-  const startDate = document.getElementById('compareStartDate').value;
-  const endDate = document.getElementById('compareEndDate').value;
-  const compareBtn = document.getElementById('compareServerLocalBtn');
-  const resultsDiv = document.getElementById('comparisonResults');
-
-  if (!startDate || !endDate) {
-    this.showStatus('Please select both start and end dates', 'error');
-    return;
-  }
-
-  if (startDate > endDate) {
-    this.showStatus('Start date cannot be after end date', 'error');
-    return;
-  }
-
-  compareBtn.disabled = true;
-  compareBtn.textContent = '🔄 Comparing...';
-  resultsDiv.style.display = 'none';
-
-  try {
-    this.showDownloadToast('🔍 Comparing server and local records...', 'info');
-
-    const result = await this.electronAPI.invoke('compare-server-and-local', startDate, endDate);
-
-    if (!result.success) {
-      throw new Error(result.error || 'Comparison failed');
+    const lastSection = syncPanel.querySelector('.settings-section:last-child');
+    if (lastSection) {
+      syncPanel.insertBefore(serverEditSection, lastSection);
+    } else {
+      syncPanel.appendChild(serverEditSection);
     }
 
-    const comparison = result.comparison;
+    // Set default dates (last 7 days)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7);
 
-    this.showDownloadToast('✅ Comparison completed', 'success');
+    document.getElementById('compareStartDate').value = startDate.toISOString().split('T')[0];
+    document.getElementById('compareEndDate').value = endDate.toISOString().split('T')[0];
 
-    // Display comparison results
-    this.displayComparisonResults(comparison);
-    resultsDiv.style.display = 'block';
+    // Add event listeners
+    const compareBtn = document.getElementById('compareServerLocalBtn');
+    const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+    const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
 
-  } catch (error) {
-    console.error('Comparison error:', error);
-    this.showDownloadToast(`❌ Comparison failed: ${error.message}`, 'error');
-  } finally {
-    compareBtn.disabled = false;
-    compareBtn.textContent = '🔍 Compare';
+    if (compareBtn) {
+      compareBtn.addEventListener('click', async () => {
+        await this.compareServerAndLocal();
+      });
+    }
+
+    if (checkNowBtn) {
+      checkNowBtn.addEventListener('click', async () => {
+        checkNowBtn.disabled = true;
+        checkNowBtn.textContent = '🔄 Checking...';
+
+        try {
+          await this.checkServerEdits(false);
+        } catch (error) {
+          console.error('Error checking server edits:', error);
+          this.showStatus(`Error: ${error.message}`, 'error');
+        } finally {
+          checkNowBtn.disabled = false;
+          checkNowBtn.textContent = '🔄 Check Server Edits Now';
+
+          await this.loadServerEditSyncInfo();
+        }
+      });
+    }
+
+    if (viewHistoryBtn) {
+      viewHistoryBtn.addEventListener('click', () => {
+        this.showServerEditSyncHistory();
+      });
+    }
+
+    this.loadServerEditSyncInfo();
+
+    console.log('✓ Server edit sync UI setup complete with comparison feature');
   }
-}
 
-/**
- * NEW: Display comparison results in UI
- */
-displayComparisonResults(comparison) {
-  const resultsDiv = document.getElementById('comparisonResults');
-  
-  const { serverOnly, localOnly, different, identical, duplicates } = comparison;
+  /**
+   * NEW: Compare server and local attendance records
+   */
+  async compareServerAndLocal() {
+    const startDate = document.getElementById('compareStartDate').value;
+    const endDate = document.getElementById('compareEndDate').value;
+    const compareBtn = document.getElementById('compareServerLocalBtn');
+    const resultsDiv = document.getElementById('comparisonResults');
 
-  let html = `
+    if (!startDate || !endDate) {
+      this.showStatus('Please select both start and end dates', 'error');
+      return;
+    }
+
+    if (startDate > endDate) {
+      this.showStatus('Start date cannot be after end date', 'error');
+      return;
+    }
+
+    compareBtn.disabled = true;
+    compareBtn.textContent = '🔄 Comparing...';
+    resultsDiv.style.display = 'none';
+
+    try {
+      this.showDownloadToast('🔍 Comparing server and local records...', 'info');
+
+      const result = await this.electronAPI.invoke('compare-server-and-local', startDate, endDate);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Comparison failed');
+      }
+
+      const comparison = result.comparison;
+
+      this.showDownloadToast('✅ Comparison completed', 'success');
+
+      // Display comparison results
+      this.displayComparisonResults(comparison);
+      resultsDiv.style.display = 'block';
+
+    } catch (error) {
+      console.error('Comparison error:', error);
+      this.showDownloadToast(`❌ Comparison failed: ${error.message}`, 'error');
+    } finally {
+      compareBtn.disabled = false;
+      compareBtn.textContent = '🔍 Compare';
+    }
+  }
+
+  /**
+   * NEW: Display comparison results in UI
+   */
+  displayComparisonResults(comparison) {
+    const resultsDiv = document.getElementById('comparisonResults');
+
+    const { serverOnly, localOnly, different, identical, duplicates } = comparison;
+
+    let html = `
     <div class="comparison-summary" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px;">
       <div class="stat-card" style="background: #dbeafe; padding: 10px; border-radius: 6px; text-align: center;">
         <div style="font-size: 24px; font-weight: bold; color: #1e40af;">${serverOnly.length}</div>
@@ -4967,94 +5159,94 @@ displayComparisonResults(comparison) {
     </div>
   `;
 
-  resultsDiv.innerHTML = html;
+    resultsDiv.innerHTML = html;
 
-  // Store comparison data
-  this.currentComparison = comparison;
-  this.selectedActions = [];
-
-  // Setup tab switching
-  this.setupComparisonTabs();
-
-  // Show initial tab content
-  this.showComparisonTab('serverOnly');
-
-  // Setup action buttons
-  document.getElementById('clearSelectionsBtn')?.addEventListener('click', () => {
+    // Store comparison data
+    this.currentComparison = comparison;
     this.selectedActions = [];
-    this.updateSelectedActionsBar();
-    this.showComparisonTab(this.currentComparisonTab || 'serverOnly');
-  });
 
-  document.getElementById('applyActionsBtn')?.addEventListener('click', () => {
-    this.applySelectedActions();
-  });
-}
+    // Setup tab switching
+    this.setupComparisonTabs();
 
-/**
- * NEW: Setup comparison tab switching
- */
-setupComparisonTabs() {
-  const tabs = document.querySelectorAll('.comparison-tab');
-  tabs.forEach(tab => {
-    tab.addEventListener('click', (e) => {
-      tabs.forEach(t => {
-        t.classList.remove('active');
-        t.style.borderBottom = 'none';
-        t.style.fontWeight = 'normal';
-      });
-      
-      e.target.classList.add('active');
-      e.target.style.borderBottom = '3px solid #3b82f6';
-      e.target.style.fontWeight = 'bold';
-      
-      const tabName = e.target.dataset.tab;
-      this.showComparisonTab(tabName);
+    // Show initial tab content
+    this.showComparisonTab('serverOnly');
+
+    // Setup action buttons
+    document.getElementById('clearSelectionsBtn')?.addEventListener('click', () => {
+      this.selectedActions = [];
+      this.updateSelectedActionsBar();
+      this.showComparisonTab(this.currentComparisonTab || 'serverOnly');
     });
-  });
-}
 
-/**
- * NEW: Show specific comparison tab content
- */
-showComparisonTab(tabName) {
-  this.currentComparisonTab = tabName;
-  const content = document.getElementById('comparisonTabContent');
-  const data = this.currentComparison[tabName];
+    document.getElementById('applyActionsBtn')?.addEventListener('click', () => {
+      this.applySelectedActions();
+    });
+  }
 
-  if (!data || data.length === 0) {
-    content.innerHTML = `
+  /**
+   * NEW: Setup comparison tab switching
+   */
+  setupComparisonTabs() {
+    const tabs = document.querySelectorAll('.comparison-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        tabs.forEach(t => {
+          t.classList.remove('active');
+          t.style.borderBottom = 'none';
+          t.style.fontWeight = 'normal';
+        });
+
+        e.target.classList.add('active');
+        e.target.style.borderBottom = '3px solid #3b82f6';
+        e.target.style.fontWeight = 'bold';
+
+        const tabName = e.target.dataset.tab;
+        this.showComparisonTab(tabName);
+      });
+    });
+  }
+
+  /**
+   * NEW: Show specific comparison tab content
+   */
+  showComparisonTab(tabName) {
+    this.currentComparisonTab = tabName;
+    const content = document.getElementById('comparisonTabContent');
+    const data = this.currentComparison[tabName];
+
+    if (!data || data.length === 0) {
+      content.innerHTML = `
       <div style="text-align: center; padding: 40px; color: #6b7280;">
         <p style="font-size: 18px; margin: 0;">No ${tabName} records found</p>
       </div>
     `;
-    return;
+      return;
+    }
+
+    let html = '<div class="comparison-records" style="max-height: 400px; overflow-y: auto;">';
+
+    if (tabName === 'serverOnly') {
+      html += this.renderServerOnlyRecords(data);
+    } else if (tabName === 'localOnly') {
+      html += this.renderLocalOnlyRecords(data);
+    } else if (tabName === 'different') {
+      html += this.renderDifferentRecords(data);
+    } else if (tabName === 'duplicates') {
+      html += this.renderDuplicateRecords(data);
+    }
+
+    html += '</div>';
+    content.innerHTML = html;
+
+    // Setup record action buttons
+    this.setupRecordActionButtons();
   }
 
-  let html = '<div class="comparison-records" style="max-height: 400px; overflow-y: auto;">';
-
-  if (tabName === 'serverOnly') {
-    html += this.renderServerOnlyRecords(data);
-  } else if (tabName === 'localOnly') {
-    html += this.renderLocalOnlyRecords(data);
-  } else if (tabName === 'different') {
-    html += this.renderDifferentRecords(data);
-  } else if (tabName === 'duplicates') {
-    html += this.renderDuplicateRecords(data);
-  }
-
-  html += '</div>';
-  content.innerHTML = html;
-
-  // Setup record action buttons
-  this.setupRecordActionButtons();
-}
-
-/**
- * NEW: Render server-only records
- */
-renderServerOnlyRecords(records) {
-  return records.map(record => `
+  /**
+   * NEW: Render server-only records
+   */
+  renderServerOnlyRecords(records) {
+    return records.map(record => `
     <div class="record-card" style="background: #eff6ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
       <div style="display: flex; justify-content: space-between; align-items: start;">
         <div style="flex: 1;">
@@ -5082,13 +5274,13 @@ renderServerOnlyRecords(records) {
       </div>
     </div>
   `).join('');
-}
+  }
 
-/**
- * NEW: Render local-only records
- */
-renderLocalOnlyRecords(records) {
-  return records.map(record => `
+  /**
+   * NEW: Render local-only records
+   */
+  renderLocalOnlyRecords(records) {
+    return records.map(record => `
     <div class="record-card" style="background: #f0fdf4; border: 1px solid #10b981; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
       <div style="display: flex; justify-content: space-between; align-items: start;">
         <div style="flex: 1;">
@@ -5118,13 +5310,13 @@ renderLocalOnlyRecords(records) {
       </div>
     </div>
   `).join('');
-}
+  }
 
-/**
- * NEW: Render different records (same ID, different data)
- */
-renderDifferentRecords(records) {
-  return records.map(diff => `
+  /**
+   * NEW: Render different records (same ID, different data)
+   */
+  renderDifferentRecords(records) {
+    return records.map(diff => `
     <div class="record-card" style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
       <div style="font-weight: bold; margin-bottom: 10px;">
         Record ID #${diff.id} - Differences Found
@@ -5168,13 +5360,13 @@ renderDifferentRecords(records) {
       </div>
     </div>
   `).join('');
-}
+  }
 
-/**
- * NEW: Render duplicate records
- */
-renderDuplicateRecords(duplicates) {
-  return duplicates.map((dup, idx) => `
+  /**
+   * NEW: Render duplicate records
+   */
+  renderDuplicateRecords(duplicates) {
+    return duplicates.map((dup, idx) => `
     <div class="record-card" style="background: #fae8ff; border: 1px solid #a855f7; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
       <div style="font-weight: bold; color: #7e22ce; margin-bottom: 10px;">
         🔄 Duplicate Set #${idx + 1} - ${dup.records.length} similar records
@@ -5211,139 +5403,139 @@ renderDuplicateRecords(duplicates) {
       `).join('')}
     </div>
   `).join('');
-}
+  }
 
-/**
- * NEW: Setup action button listeners
- */
-setupRecordActionButtons() {
-  const actionButtons = document.querySelectorAll('.action-btn');
-  
-  actionButtons.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const button = e.target;
-      const recordId = parseInt(button.dataset.recordId);
-      const actionType = button.dataset.action;
-      const employeeUid = button.dataset.employeeUid;
-      const date = button.dataset.date;
+  /**
+   * NEW: Setup action button listeners
+   */
+  setupRecordActionButtons() {
+    const actionButtons = document.querySelectorAll('.action-btn');
 
-      // Find the full record data
-      let recordData = null;
-      const tabName = this.currentComparisonTab;
-      const tabData = this.currentComparison[tabName];
+    actionButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const button = e.target;
+        const recordId = parseInt(button.dataset.recordId);
+        const actionType = button.dataset.action;
+        const employeeUid = button.dataset.employeeUid;
+        const date = button.dataset.date;
 
-      if (actionType === 'add_from_server') {
-        recordData = tabData.find(r => r.id === recordId);
-      } else if (actionType === 'update_from_server') {
-        const diff = tabData.find(d => d.id === recordId);
-        recordData = diff ? diff.server : null;
-      }
+        // Find the full record data
+        let recordData = null;
+        const tabName = this.currentComparisonTab;
+        const tabData = this.currentComparison[tabName];
 
-      const action = {
-        type: actionType,
-        recordId: recordId,
-        record: recordData,
-        employeeUid: employeeUid,
-        date: date
-      };
+        if (actionType === 'add_from_server') {
+          recordData = tabData.find(r => r.id === recordId);
+        } else if (actionType === 'update_from_server') {
+          const diff = tabData.find(d => d.id === recordId);
+          recordData = diff ? diff.server : null;
+        }
 
-      // Toggle selection
-      const existingIndex = this.selectedActions.findIndex(a => 
-        a.recordId === recordId && a.type === actionType
-      );
+        const action = {
+          type: actionType,
+          recordId: recordId,
+          record: recordData,
+          employeeUid: employeeUid,
+          date: date
+        };
 
-      if (existingIndex >= 0) {
-        this.selectedActions.splice(existingIndex, 1);
-        button.style.opacity = '1';
-        button.style.transform = 'scale(1)';
-      } else {
-        this.selectedActions.push(action);
-        button.style.opacity = '0.6';
-        button.style.transform = 'scale(0.95)';
-      }
+        // Toggle selection
+        const existingIndex = this.selectedActions.findIndex(a =>
+          a.recordId === recordId && a.type === actionType
+        );
 
-      this.updateSelectedActionsBar();
+        if (existingIndex >= 0) {
+          this.selectedActions.splice(existingIndex, 1);
+          button.style.opacity = '1';
+          button.style.transform = 'scale(1)';
+        } else {
+          this.selectedActions.push(action);
+          button.style.opacity = '0.6';
+          button.style.transform = 'scale(0.95)';
+        }
+
+        this.updateSelectedActionsBar();
+      });
     });
-  });
-}
-
-/**
- * NEW: Update selected actions bar
- */
-updateSelectedActionsBar() {
-  const bar = document.getElementById('selectedActionsBar');
-  const countElement = document.getElementById('selectedActionsCount');
-
-  if (this.selectedActions.length > 0) {
-    bar.style.display = 'block';
-    countElement.textContent = this.selectedActions.length;
-  } else {
-    bar.style.display = 'none';
-  }
-}
-
-/**
- * NEW: Apply selected actions
- */
-async applySelectedActions() {
-  if (this.selectedActions.length === 0) {
-    this.showStatus('No actions selected', 'warning');
-    return;
   }
 
-  const confirmMessage = `Apply ${this.selectedActions.length} action(s)?\n\nThis will:\n` +
-    `- Modify your local database\n` +
-    `- Validate affected records\n` +
-    `- Rebuild daily summaries\n` +
-    `- Upload summaries to server\n\n` +
-    `This operation cannot be undone.`;
+  /**
+   * NEW: Update selected actions bar
+   */
+  updateSelectedActionsBar() {
+    const bar = document.getElementById('selectedActionsBar');
+    const countElement = document.getElementById('selectedActionsCount');
 
-  if (!confirm(confirmMessage)) {
-    return;
+    if (this.selectedActions.length > 0) {
+      bar.style.display = 'block';
+      countElement.textContent = this.selectedActions.length;
+    } else {
+      bar.style.display = 'none';
+    }
   }
 
-  const applyBtn = document.getElementById('applyActionsBtn');
-  applyBtn.disabled = true;
-  applyBtn.textContent = '⏳ Applying...';
-
-  try {
-    this.showDownloadToast(`🔄 Applying ${this.selectedActions.length} actions...`, 'info');
-
-    const result = await this.electronAPI.invoke('apply-comparison-actions', this.selectedActions);
-
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to apply actions');
+  /**
+   * NEW: Apply selected actions
+   */
+  async applySelectedActions() {
+    if (this.selectedActions.length === 0) {
+      this.showStatus('No actions selected', 'warning');
+      return;
     }
 
-    const { results } = result;
+    const confirmMessage = `Apply ${this.selectedActions.length} action(s)?\n\nThis will:\n` +
+      `- Modify your local database\n` +
+      `- Validate affected records\n` +
+      `- Rebuild daily summaries\n` +
+      `- Upload summaries to server\n\n` +
+      `This operation cannot be undone.`;
 
-    this.showDownloadToast(
-      `✅ Success!\n` +
-      `Added: ${results.added}\n` +
-      `Updated: ${results.updated}\n` +
-      `Deleted: ${results.deleted}\n` +
-      `Summaries: ${results.summariesRebuilt} rebuilt, ${results.summariesUploaded} uploaded`,
-      'success'
-    );
+    if (!confirm(confirmMessage)) {
+      return;
+    }
 
-    // Clear selections and refresh comparison
-    this.selectedActions = [];
-    this.updateSelectedActionsBar();
+    const applyBtn = document.getElementById('applyActionsBtn');
+    applyBtn.disabled = true;
+    applyBtn.textContent = '⏳ Applying...';
 
-    // Refresh comparison to show updated state
-    await this.compareServerAndLocal();
+    try {
+      this.showDownloadToast(`🔄 Applying ${this.selectedActions.length} actions...`, 'info');
 
-    // Refresh attendance data
-    await this.loadTodayAttendance();
+      const result = await this.electronAPI.invoke('apply-comparison-actions', this.selectedActions);
 
-  } catch (error) {
-    console.error('Error applying actions:', error);
-    this.showDownloadToast(`❌ Error: ${error.message}`, 'error');
-  } finally {
-    applyBtn.disabled = false;
-    applyBtn.textContent = '✅ Apply Selected Actions';
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to apply actions');
+      }
+
+      const { results } = result;
+
+      this.showDownloadToast(
+        `✅ Success!\n` +
+        `Added: ${results.added}\n` +
+        `Updated: ${results.updated}\n` +
+        `Deleted: ${results.deleted}\n` +
+        `Summaries: ${results.summariesRebuilt} rebuilt, ${results.summariesUploaded} uploaded`,
+        'success'
+      );
+
+      // Clear selections and refresh comparison
+      this.selectedActions = [];
+      this.updateSelectedActionsBar();
+
+      // Refresh comparison to show updated state
+      await this.compareServerAndLocal();
+
+      // Refresh attendance data
+      await this.loadTodayAttendance();
+
+    } catch (error) {
+      console.error('Error applying actions:', error);
+      this.showDownloadToast(`❌ Error: ${error.message}`, 'error');
+    } finally {
+      applyBtn.disabled = false;
+      applyBtn.textContent = '✅ Apply Selected Actions';
+    }
   }
-}
 }
 
 // Optimized AttendanceApp for rapid barcode scanning
@@ -5386,18 +5578,16 @@ class OptimizedAttendanceApp extends AttendanceApp {
         isOvertimeSession,
       } = data;
       const totalHours = (regularHours || 0) + (overtimeHours || 0);
-      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${
-        employee.last_name
-      }`.trim();
+      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name
+        }`.trim();
 
       return {
         name: fullName,
         department: employee.department || "No Department",
         idNumber: `ID: ${employee.id_number}`,
         clockType: this.formatClockType(clockType, sessionType),
-        clockTypeClass: `clock-type ${clockType.replace("_", "-")} ${
-          isOvertimeSession ? "overtime" : ""
-        }`,
+        clockTypeClass: `clock-type ${clockType.replace("_", "-")} ${isOvertimeSession ? "overtime" : ""
+          }`,
         clockTime: new Date(clockTime).toLocaleTimeString(),
         hoursHtml: isOvertimeSession
           ? `
@@ -5405,17 +5595,16 @@ class OptimizedAttendanceApp extends AttendanceApp {
             <div class="regular-hours">Regular: ${regularHours || 0}h</div>
             <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
             <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
-            <div class="session-indicator">🌙 ${
-              sessionType || "Overtime Session"
-            }</div>
+            <div class="session-indicator">🌙 ${sessionType || "Overtime Session"
+          }</div>
           </div>
         `
           : `
           <div class="hours-breakdown">
             <div class="regular-hours">Regular: ${regularHours || 0}h</div>
             <div class="overtime-hours">Overtime: ${overtimeHours.toFixed(
-              2
-            )}h</div>
+            2
+          )}h</div>
             <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
           </div>
         `,
@@ -5434,9 +5623,8 @@ class OptimizedAttendanceApp extends AttendanceApp {
         sessionType,
         isOvertimeSession,
       } = data;
-      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${
-        employee.last_name
-      }`.trim();
+      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name
+        }`.trim();
       const clockInDate = new Date(clockInTime);
       const duration = currentHours
         ? `${currentHours.toFixed(1)}h`
@@ -5460,9 +5648,8 @@ class OptimizedAttendanceApp extends AttendanceApp {
     return (data) => {
       const { employee, clockType, clockTime, sessionType, isOvertimeSession } =
         data;
-      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${
-        employee.last_name
-      }`.trim();
+      const fullName = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name
+        }`.trim();
       const timeFormatted = new Date(clockTime).toLocaleTimeString();
 
       return {
@@ -5470,9 +5657,8 @@ class OptimizedAttendanceApp extends AttendanceApp {
         department: employee.department || "No Department",
         clockType: this.formatClockType(clockType, sessionType),
         clockTime: timeFormatted,
-        activityClass: `activity-${clockType.replace("_", "-")} ${
-          isOvertimeSession ? "overtime" : ""
-        }`,
+        activityClass: `activity-${clockType.replace("_", "-")} ${isOvertimeSession ? "overtime" : ""
+          }`,
         sessionIndicator: isOvertimeSession ? "🌙" : "☀️",
         uid: employee.uid,
       };
@@ -5548,9 +5734,8 @@ class OptimizedAttendanceApp extends AttendanceApp {
         }
 
         this.clearInput();
-        await this.loadTodayAttendance();
         this.showStatus("Attendance recorded successfully", "success");
-        this.markSummaryDataChanged();
+        this.deferredOperations(result.data);
       } else {
         await new Promise((resolve) => setTimeout(resolve, 2000));
         this.hideLoadingScreen();
@@ -5871,10 +6056,10 @@ class OptimizedAttendanceApp extends AttendanceApp {
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('DOM loaded, initializing attendance system...');
-  
+
   // Store reference globally for cleanup if needed
   window.attendanceApp = new AttendanceApp();
-  
+
   // Log face-api.js status for debugging
   setTimeout(() => {
     if (typeof faceapi !== 'undefined') {
@@ -5889,10 +6074,10 @@ window.addEventListener('beforeunload', () => {
   if (window.attendanceApp && typeof window.attendanceApp.destroy === 'function') {
     window.attendanceApp.destroy();
   }
-  
+
   // Clean up face recognition
-  if (window.attendanceApp?.faceRecognitionManager && 
-      typeof window.attendanceApp.faceRecognitionManager.destroy === 'function') {
+  if (window.attendanceApp?.faceRecognitionManager &&
+    typeof window.attendanceApp.faceRecognitionManager.destroy === 'function') {
     window.attendanceApp.faceRecognitionManager.destroy();
   }
 });

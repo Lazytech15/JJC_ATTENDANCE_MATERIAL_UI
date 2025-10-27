@@ -2658,22 +2658,31 @@ class FaceRecognitionManager {
   }
 
   hide() {
-    this.stopRecognition();
+  this.stopRecognition();
 
-    // Stop current time display
-    this.stopCurrentTimeDisplay();
+  // Stop current time display
+  this.stopCurrentTimeDisplay();
 
-    // Clear auto-close countdown
-    this.stopAutoCloseCountdown();
+  // Clear auto-close countdown
+  this.stopAutoCloseCountdown();
 
-    if (this.container) {
-      this.container.classList.add('hidden');
-    }
-
-    this.clearScanLog();
-    this.clearIntegratedEmployeeDisplay();
-    console.log('Face recognition closed - scan log cleared');
+  if (this.container) {
+    this.container.classList.add('hidden');
   }
+
+  this.clearScanLog();
+  this.clearIntegratedEmployeeDisplay();
+  
+  // ⭐ IMPORTANT: Refresh main app's attendance display when closing
+  if (this.attendanceApp) {
+    console.log('Refreshing main app attendance display...');
+    setTimeout(() => {
+      this.attendanceApp.loadTodayAttendance();
+    }, 500);
+  }
+  
+  console.log('Face recognition closed - scan log cleared');
+}
 
   async refreshEmployeeFaceDescriptors() {
     this.faceDescriptors.clear();

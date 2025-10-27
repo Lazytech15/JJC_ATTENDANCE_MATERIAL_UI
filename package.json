@@ -1,7 +1,7 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.1.8",
-  "description": "Offline and dynamic tracking of employee attendance via barcode scanner",
+  "version": "1.2.1",
+  "description": "Fixing adding on/off for face detection.",
   "main": "src/main.js",
   "type": "commonjs",
   "scripts": {

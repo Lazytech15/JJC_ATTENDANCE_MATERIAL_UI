@@ -314,7 +314,8 @@ function createTables() {
       ["overtime_start", "17:10"], // Overtime starts at 5:10 PM
       ["overtime_grace", "5"], // 5 minutes grace for overtime
       ["overtime_session_grace", "15"], // 15 minutes grace for overtime sessions
-      ["regular_grace", "5"] // 5 minutes grace for regular hours
+      ["regular_grace", "5"], // 5 minutes grace for regular hours
+      ["face_detection_enabled", "true"]
     ]
 
     defaultSettings.forEach(([key, value]) => {
