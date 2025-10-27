@@ -80,7 +80,7 @@ class FaceRecognitionManager {
 
     this.autoCloseTimeout = null;
     this.autoCloseCountdownInterval = null;
-    this.autoCloseDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+    this.autoCloseDuration = 5 * 60 * 1000; // 15 minutes in milliseconds
     this.autoCloseStartTime = null;
 
     // Current time display
@@ -300,7 +300,7 @@ class FaceRecognitionManager {
     this.container.innerHTML = `
   <div class="face-recognition-header">
   <div class="header-left">
-    <h3>👤 Face Recognition System</h3>
+    <h3>👤 Face Detection Mode</h3>
     <span class="badge badge-ultra">Ultra Mode</span>
   </div>
   <div class="header-center">
@@ -628,7 +628,7 @@ class FaceRecognitionManager {
 }
 
 .current-time-badge {
-  font-size: 16px;
+  font-size: 32px;
   font-weight: 700;
   background: rgba(255, 255, 255, 0.25);
   color: white;
@@ -647,7 +647,7 @@ class FaceRecognitionManager {
     }
 
     .countdown-badge {
-      font-size: 13px;
+      font-size: 20px;
       font-weight: 700;
       background: rgba(255, 255, 255, 0.25);
       color: white;
@@ -1027,7 +1027,7 @@ class FaceRecognitionManager {
     }
 
     .employee-display-header {
-      padding: 16px 20px;
+      padding: 21px 20px;
       background: linear-gradient(135deg, #52525b 0%, #3f3f46 100%);
       border-radius: 12px 12px 0 0;
       flex-shrink: 0;
@@ -1041,6 +1041,7 @@ class FaceRecognitionManager {
     }
 
     .employee-display-content {
+      width: 450px;
       padding: 20px;
       overflow-y: auto;
       flex: 1;
@@ -1099,8 +1100,8 @@ class FaceRecognitionManager {
     }
 
     .employee-photo {
-      width: 140px;
-      height: 140px;
+      width: 200px;
+      height: 200px;
       border-radius: 12px;
       object-fit: cover;
       border: 3px solid #e5e7eb;
@@ -1207,15 +1208,16 @@ class FaceRecognitionManager {
     }
 
     .hours-label {
-      font-size: 12px;
+      font-size: 20px;
       color: #6b7280;
     }
 
     .hours-value {
-      font-size: 12px;
+      font-size: 20px;
       font-weight: 600;
       color: #1f2937;
     }
+
 
     /* Scan Log Panel */
     .scan-log-panel {
@@ -1536,9 +1538,9 @@ class FaceRecognitionManager {
       clearTimeout(this.employeeDisplayTimeout);
     }
 
-    this.employeeDisplayTimeout = setTimeout(() => {
-      this.clearIntegratedEmployeeDisplay();
-    }, 30000);
+    // this.employeeDisplayTimeout = setTimeout(() => {
+    //   this.clearIntegratedEmployeeDisplay();
+    // }, 30000);
   }
 
   clearIntegratedEmployeeDisplay() {

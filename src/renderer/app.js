@@ -2831,7 +2831,6 @@ if (faceRecognitionBtn) {
   }
 
   showEmployeeDisplay(data) {
-    const display = document.getElementById("employeeDisplay");
     const {
       employee,
       clockType,
@@ -2842,104 +2841,124 @@ if (faceRecognitionBtn) {
       isOvertimeSession,
     } = data;
 
-    // Immediate display update
-    document.getElementById("employeeName").textContent = `${
-      employee.first_name
-    } ${employee.middle_name || ""} ${employee.last_name}`.trim();
-    document.getElementById("employeeDepartment").textContent =
-      employee.department || "No Department";
-    document.getElementById(
-      "employeeId"
-    ).textContent = `ID: ${employee.id_number}`;
-
-    // Setup image without blocking
-    const photo = document.getElementById("employeePhoto");
-    photo.style.display = "block";
-    photo.src = this.getDefaultImageDataURL(); // Set default immediately
-
-    // Load actual image asynchronously
-    this.setupImageWithFallback(
-      photo,
-      employee.uid,
-      `${employee.first_name} ${employee.last_name}`
-    ).catch((error) => {
-      console.warn(`Employee photo setup failed:`, error);
-    });
-
-    // Update clock info
-    const clockTypeElement = document.getElementById("clockType");
-    clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
-    clockTypeElement.className = `clock-type ${clockType.replace("_", "-")} ${
-      isOvertimeSession ? "overtime" : ""
-    }`;
-
-    document.getElementById("clockTime").textContent = new Date(
-      clockTime
-    ).toLocaleTimeString();
-
-    // Enhanced hours display
-    const hoursInfo = document.getElementById("hoursInfo");
-    const totalHours = (regularHours || 0) + (overtimeHours || 0);
-
-    if (isOvertimeSession) {
-      hoursInfo.innerHTML = `
-      <div class="hours-breakdown overtime-session">
-        <div class="regular-hours">Regular: ${regularHours || 0}h</div>
-        <div class="overtime-hours">Overtime: ${overtimeHours || 0}h</div>
-        <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
-        <div class="session-indicator">🌙 ${
-          sessionType || "Overtime Session"
-        }</div>
-      </div>
-    `;
-    } else {
-      hoursInfo.innerHTML = `
-      <div class="hours-breakdown">
-        <div class="regular-hours">Regular: ${regularHours || 0}h</div>
-        <div class="overtime-hours">Overtime: ${overtimeHours.toFixed(2)}h</div>
-        <div class="total-hours">Total: ${totalHours.toFixed(2)}h</div>
-      </div>
-    `;
+    // Update the inline dashboard employee details section
+    const dashboardEmployeeCard = document.getElementById("dashboardEmployeeCard");
+    
+    
+    if (!dashboardEmployeeCard) {
+      console.warn("Dashboard employee card not found");
+      return;
     }
 
-    display.style.display = "block";
+    setTimeout(() => {
+      dashboardEmployeeCard.classList.add("show");
+    }, 10);
 
-    // Auto-hide timeout
-    if (this.employeeDisplayTimeout) {
-      clearTimeout(this.employeeDisplayTimeout);
-    }
-
-    this.employeeDisplayTimeout = setTimeout(() => {
-      display.style.display = "none";
-      this.focusInput();
-    }, 5000); // Reduced from 10 seconds to 5 seconds
-
-    const syncSummaryBtn = document.getElementById("syncSummaryBtn");
-    if (syncSummaryBtn) {
-      syncSummaryBtn.addEventListener("click", () => {
-        this.performSummarySync(false, 0, true); // Not silent, with download toast
+    // Update employee photo
+    const photo = document.getElementById("dashboardEmployeePhoto");
+    if (photo) {
+      photo.src = this.getDefaultImageDataURL();
+      this.setupImageWithFallback(
+        photo,
+        employee.uid,
+        `${employee.first_name} ${employee.last_name}`
+      ).catch((error) => {
+        console.warn(`Employee photo setup failed:`, error);
       });
     }
 
-    // Keep input focused but allow interaction with employee display
-    document.addEventListener("click", (e) => {
-      if (
-        !e.target.closest(".employee-display") &&
-        !e.target.closest("button") &&
-        !e.target.closest("input")
-      ) {
-        this.focusInput();
+    // Update employee name
+    const nameElement = document.getElementById("dashboardEmployeeName");
+    if (nameElement) {
+      nameElement.textContent = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
+    }
+
+    // Update department
+    const deptElement = document.getElementById("dashboardEmployeeDept");
+    if (deptElement) {
+      deptElement.textContent = employee.department || "No Department";
+    }
+
+    // Update ID number
+    const idElement = document.getElementById("dashboardEmployeeId");
+    if (idElement) {
+      idElement.textContent = `ID: ${employee.id_number}`;
+    }
+
+    // Update clock type badge
+    const clockTypeElement = document.getElementById("dashboardClockType");
+    if (clockTypeElement) {
+      clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
+      clockTypeElement.className = `clock-badge ${clockType.includes("in") ? "in" : "out"} ${
+        isOvertimeSession ? "overtime" : ""
+      }`;
+    }
+
+    // Update clock time
+    const clockTimeElement = document.getElementById("dashboardClockTime");
+    if (clockTimeElement) {
+      clockTimeElement.textContent = new Date(clockTime).toLocaleTimeString();
+    }
+
+    // Update hours breakdown
+    const hoursElement = document.getElementById("dashboardHours");
+    const totalHours = (regularHours || 0) + (overtimeHours || 0);
+    
+    if (hoursElement) {
+      if (isOvertimeSession) {
+        hoursElement.innerHTML = `
+          <div class="hours-row">
+            <span class="hours-label">Regular:</span>
+            <span class="hours-value">${regularHours || 0}h</span>
+          </div>
+          <div class="hours-row">
+            <span class="hours-label">Overtime:</span>
+            <span class="hours-value overtime">${overtimeHours || 0}h</span>
+          </div>
+          <div class="hours-row total">
+            <span class="hours-label">Total:</span>
+            <span class="hours-value">${totalHours.toFixed(2)}h</span>
+          </div>
+          <div class="session-indicator overtime">🌙 ${sessionType || "Overtime Session"}</div>
+        `;
+      } else {
+        hoursElement.innerHTML = `
+          <div class="hours-row">
+            <span class="hours-label">Regular:</span>
+            <span class="hours-value">${regularHours || 0}h</span>
+          </div>
+          <div class="hours-row">
+            <span class="hours-label">Overtime:</span>
+            <span class="hours-value">${overtimeHours.toFixed(2)}h</span>
+          </div>
+          <div class="hours-row total">
+            <span class="hours-label">Total:</span>
+            <span class="hours-value">${totalHours.toFixed(2)}h</span>
+          </div>
+        `;
       }
-    });
+    }
+
+    // Brief highlight animation
+    dashboardEmployeeCard.classList.add("highlight");
+    setTimeout(() => {
+      dashboardEmployeeCard.classList.remove("highlight");
+    }, 1000);
+
+    // Show success status
+    this.showStatus("✓ Attendance Recorded", "success");
+
+    // Keep card visible - no auto-hide
+    // The card will stay visible showing the last scanned employee
+
+    // Focus input immediately for next scan
+    this.focusInput();
 
     // Handle input type changes
-    const inputTypeRadios = document.querySelectorAll(
-      'input[name="inputType"]'
-    );
+    const inputTypeRadios = document.querySelectorAll('input[name="inputType"]');
     inputTypeRadios.forEach((radio) => {
       radio.addEventListener("change", () => {
         this.focusInput();
-        // Clear any pending timeouts when switching input types
         if (this.barcodeTimeout) {
           clearTimeout(this.barcodeTimeout);
         }
@@ -2948,9 +2967,8 @@ if (faceRecognitionBtn) {
 
     // Listen for IPC events from main process using the exposed API
     if (this.electronAPI) {
-      // Set up listener for sync attendance events
       this.electronAPI.onSyncAttendanceToServer(() => {
-        this.performAttendanceSync(false, 0, true); // Show download toast
+        this.performAttendanceSync(false, 0, true);
       });
     }
   }

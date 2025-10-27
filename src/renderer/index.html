@@ -87,7 +87,7 @@
     }
 
     .container {
-      max-width: 1400px;
+      max-width: 1550px;
       margin: 0 auto;
       padding: 16px 20px;
       height: 100vh;
@@ -328,12 +328,12 @@
 
     .header-right {
       display: flex;
-      flex-direction: column-reverse;
+      flex-direction: row;
       align-items: flex-end;
       gap: 16px;
     }
 
-    .header-button-container{
+    .header-button-container {
       display: flex;
       flex-direction: row;
       gap: 10px;
@@ -378,7 +378,8 @@
       transform: translateY(0);
     }
 
-    .refresh-btn, .facerecog-btn {
+    .refresh-btn,
+    .facerecog-btn {
       background: rgba(33, 33, 33, 0.1);
       /* subtle blue tint */
       color: black;
@@ -397,14 +398,16 @@
       backdrop-filter: blur(10px);
     }
 
-    .refresh-btn:hover, .facerecog-btn:hover {
+    .refresh-btn:hover,
+    .facerecog-btn:hover {
       background: rgba(0, 123, 255, 0.15);
       border-color: rgba(0, 123, 255, 0.3);
       box-shadow: var(--shadow-2);
       transform: translateY(-1px);
     }
 
-    .refresh-btn:active, .facerecog-btn:active {
+    .refresh-btn:active,
+    .facerecog-btn:active {
       transform: translateY(0);
     }
 
@@ -672,10 +675,19 @@
     /* Dashboard */
     .dashboard {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 16px;
       flex: 1;
       min-height: 0;
+    }
+
+    /* Dashboard row layout for clocked in and activity */
+    .dashboard-row {
+      overflow: auto;
+      display: grid;
+      grid-template-columns: 0.5fr 0.5fr 0.5fr;
+      gap: 16px;
+      justify-content: center;
     }
 
     .dashboard-section {
@@ -711,6 +723,7 @@
       font-weight: 500;
       color: black;
       letter-spacing: -0.01em;
+      transition: all 0.3s ease;
     }
 
     .employee-list,
@@ -753,7 +766,6 @@
       gap: 12px;
       padding: 12px;
       background: var(--surface);
-      border: 1px solid var(--divider);
       border-radius: var(--radius);
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       flex-shrink: 0;
@@ -1414,38 +1426,46 @@
     }
 
     .queue-status {
-  display: none;
-  margin: 15px 0;
-  padding: 12px;
-  background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-  border: 2px solid #2196f3;
-  border-radius: 8px;
-  font-family: 'Segoe UI', sans-serif;
-}
+      display: none;
+      margin: 15px 0;
+      padding: 12px;
+      background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+      border: 2px solid #2196f3;
+      border-radius: 8px;
+      font-family: 'Segoe UI', sans-serif;
+    }
 
-.queue-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
-  color: #1976d2;
-  font-weight: 500;
-}
+    .queue-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+      color: #1976d2;
+      font-weight: 500;
+    }
 
-.queue-indicator .processing {
-  background: #4caf50;
-  color: white;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  animation: pulse 1.5s infinite;
-}
+    .queue-indicator .processing {
+      background: #4caf50;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      animation: pulse 1.5s infinite;
+    }
 
-@keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.7; }
-  100% { opacity: 1; }
-}
+    @keyframes pulse {
+      0% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.7;
+      }
+
+      100% {
+        opacity: 1;
+      }
+    }
 
     /* Responsive Design */
     @media (max-width: 768px) {
@@ -1497,588 +1517,867 @@
     }
 
     /* Performance Panel Styles */
-.performance-section {
-  padding: 20px 0;
-}
-
-.performance-title {
-  color: #2c3e50;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.performance-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.performance-stat {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  position: relative;
-  overflow: hidden;
-}
-
-.performance-stat::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(45deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%);
-  pointer-events: none;
-}
-
-.performance-stat .stat-value {
-  font-size: 1.8rem;
-  font-weight: 700;
-  margin: 8px 0;
-}
-
-.performance-stat .stat-detail {
-  font-size: 0.85rem;
-  opacity: 0.9;
-  margin-top: 4px;
-}
-
-.cache-details {
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 24px;
-}
-
-.cache-details h4 {
-  color: #2c3e50;
-  margin-bottom: 16px;
-  font-size: 1.1rem;
-}
-
-.cache-breakdown {
-  display: grid;
-  gap: 12px;
-}
-
-.cache-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 6px;
-}
-
-.cache-type {
-  font-weight: 600;
-  color: #495057;
-}
-
-.cache-info {
-  color: #6c757d;
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
-}
-
-.performance-actions {
-  margin-bottom: 24px;
-}
-
-.performance-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.performance-buttons .btn {
-  padding: 12px 16px;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.performance-buttons .btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
-
-.performance-buttons .btn:active {
-  transform: translateY(0);
-}
-
-.btn-info {
-  background: linear-gradient(135deg, #17a2b8, #138496);
-  border: none;
-  color: white;
-}
-
-.btn-warning {
-  background: linear-gradient(135deg, #ffc107, #e0a800);
-  border: none;
-  color: #212529;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #007bff, #0056b3);
-  border: none;
-}
-
-.btn-secondary {
-  background: linear-gradient(135deg, #6c757d, #545b62);
-  border: none;
-}
-
-.performance-tips {
-  background: #e7f3ff;
-  border: 1px solid #b6d7ff;
-  border-radius: 8px;
-  padding: 20px;
-}
-
-.performance-tips h4 {
-  color: #0056b3;
-  margin-bottom: 12px;
-  font-size: 1.1rem;
-}
-
-.tips-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.tips-list li {
-  padding: 6px 0;
-  position: relative;
-  padding-left: 20px;
-  color: #495057;
-}
-
-.tips-list li::before {
-  content: '💡';
-  position: absolute;
-  left: 0;
-  top: 6px;
-}
-
-/* Cache Statistics Display */
-.cache-stats {
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
-  color: #6c757d;
-  margin-top: 4px;
-}
-
-.cache-stats span {
-  display: inline-block;
-  padding: 2px 6px;
-  background: rgba(0,123,255,0.1);
-  border-radius: 3px;
-  margin: 2px;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .performance-stats {
-    grid-template-columns: 1fr;
-  }
-  
-  .performance-buttons {
-    grid-template-columns: 1fr;
-  }
-  
-  .cache-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-}
-
-/* Loading states */
-.performance-stat.loading .stat-value::after {
-  content: '...';
-  animation: dots 1.5s infinite;
-}
-
-@keyframes dots {
-  0%, 20% { opacity: 0; }
-  50% { opacity: 1; }
-  80%, 100% { opacity: 0; }
-}
-
-/* Success/Error states for buttons */
-.btn.success {
-  background: linear-gradient(135deg, #28a745, #1e7e34) !important;
-}
-
-.btn.error {
-  background: linear-gradient(135deg, #dc3545, #c82333) !important;
-}
-
-.btn.loading {
-  position: relative;
-  pointer-events: none;
-}
-
-.btn.loading::after {
-  content: '';
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  margin: auto;
-  border: 2px solid transparent;
-  border-top-color: #ffffff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-
-/* Server Edit Sync Section */
-#serverEditSyncInfo {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-  margin: 16px 0;
-}
-
-#serverEditSyncInfo .sync-info-item {
-  padding: 8px 0;
-  border-bottom: 1px solid #e9ecef;
-}
-
-#serverEditSyncInfo .sync-info-item:last-child {
-  border-bottom: none;
-}
-
-#serverEditSyncInfo strong {
-  color: #495057;
-  font-weight: 600;
-  margin-right: 8px;
-}
-
-/* Status Badges */
-.status-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.status-badge.success {
-  background: #d1f4e0;
-  color: #0f5132;
-}
-
-.status-badge.inactive {
-  background: #f8d7da;
-  color: #842029;
-}
-
-.status-badge.error {
-  background: #f8d7da;
-  color: #842029;
-}
-
-.status-badge.warning {
-  background: #fff3cd;
-  color: #664d03;
-}
-
-/* Sync History Table */
-.sync-history {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 2px solid #dee2e6;
-}
-
-.sync-history-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 8px;
-  font-size: 13px;
-}
-
-.sync-history-table th {
-  background: #e9ecef;
-  padding: 8px;
-  text-align: left;
-  font-weight: 600;
-  color: #495057;
-  border: 1px solid #dee2e6;
-}
-
-.sync-history-table td {
-  padding: 8px;
-  border: 1px solid #dee2e6;
-  color: #212529;
-}
-
-.sync-history-table tbody tr:hover {
-  background: #f8f9fa;
-}
-
-/* Server Edit History Modal */
-#serverEditHistoryModal .modal-content {
-  max-width: 900px;
-}
-
-#serverEditHistoryModal .data-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 16px;
-}
-
-#serverEditHistoryModal .data-table th {
-  background: #007cff;
-  color: white;
-  padding: 12px;
-  text-align: left;
-  font-weight: 600;
-  border: 1px solid #0066cc;
-}
-
-#serverEditHistoryModal .data-table td {
-  padding: 10px 12px;
-  border: 1px solid #dee2e6;
-  color: #212529;
-}
-
-#serverEditHistoryModal .data-table tbody tr:hover {
-  background: #f8f9fa;
-}
-
-#serverEditHistoryModal .data-table tbody tr:nth-child(even) {
-  background: #fafbfc;
-}
-
-.highlight-success {
-  color: #0f5132;
-  font-weight: 600;
-  background: #d1f4e0 !important;
-}
-
-.highlight-warning {
-  color: #664d03;
-  font-weight: 600;
-  background: #fff3cd !important;
-}
-
-.error-detail {
-  background: #f8d7da !important;
-}
-
-.error-detail td {
-  padding: 12px !important;
-}
-
-.error-detail pre {
-  margin: 8px 0 0 0;
-  padding: 8px;
-  background: white;
-  border-radius: 4px;
-  font-size: 12px;
-  overflow-x: auto;
-  color: #842029;
-}
-
-/* Button Groups */
-.button-group {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-
-.primary-button,
-.secondary-button {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.primary-button {
-  background: #007cff;
-  color: white;
-}
-
-.primary-button:hover {
-  background: #0066cc;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 124, 255, 0.3);
-}
-
-.primary-button:active {
-  transform: translateY(0);
-}
-
-.primary-button:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.secondary-button {
-  background: #6c757d;
-  color: white;
-}
-
-.secondary-button:hover {
-  background: #5a6268;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
-}
-
-.secondary-button:active {
-  transform: translateY(0);
-}
-
-/* Loading State */
-.loading {
-  text-align: center;
-  padding: 20px;
-  color: #6c757d;
-  font-style: italic;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .button-group {
-    flex-direction: column;
-  }
-
-  .primary-button,
-  .secondary-button {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .sync-history-table {
-    font-size: 11px;
-  }
-
-  .sync-history-table th,
-  .sync-history-table td {
-    padding: 6px;
-  }
-
-  #serverEditHistoryModal .modal-content {
-    max-width: 95%;
-    margin: 20px auto;
-  }
-
-  #serverEditHistoryModal .data-table {
-    font-size: 12px;
-  }
-
-  #serverEditHistoryModal .data-table th,
-  #serverEditHistoryModal .data-table td {
-    padding: 8px;
-  }
-}
-
-/* Animation for new updates */
-@keyframes highlightUpdate {
-  0% {
-    background: #cfe2ff;
-  }
-  100% {
-    background: transparent;
-  }
-}
-
-.updated-row {
-  animation: highlightUpdate 2s ease;
-}
-
-/* Server Edit Notification Toast */
-.download-toast.server-edit {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-left: 4px solid #f59e0b;
-}
-
-/* Section Description */
-.section-description {
-  color: #6c757d;
-  font-size: 14px;
-  margin: 8px 0 16px 0;
-  line-height: 1.5;
-}
-
-/* Settings Section Spacing */
-.settings-section {
-  margin-bottom: 32px;
-  padding-bottom: 32px;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.settings-section:last-child {
-  border-bottom: none;
-  margin-bottom: 0;
-  padding-bottom: 0;
-}
-
-.settings-section h3 {
-  color: #212529;
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.face-recognition-countdown {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: #dbeafe;
-  color: #1e40af;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  margin-left: auto;
-  margin-right: 10px;
-  transition: all 0.3s ease;
-  animation: fadeIn 0.3s ease-in;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
+    .performance-section {
+      padding: 20px 0;
+    }
+
+    .performance-title {
+      color: #2c3e50;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .performance-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .performance-stat {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .performance-stat::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(45deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 50%);
+      pointer-events: none;
+    }
+
+    .performance-stat .stat-value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 8px 0;
+    }
+
+    .performance-stat .stat-detail {
+      font-size: 0.85rem;
+      opacity: 0.9;
+      margin-top: 4px;
+    }
+
+    .cache-details {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .cache-details h4 {
+      color: #2c3e50;
+      margin-bottom: 16px;
+      font-size: 1.1rem;
+    }
+
+    .cache-breakdown {
+      display: grid;
+      gap: 12px;
+    }
+
+    .cache-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: white;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+    }
+
+    .cache-type {
+      font-weight: 600;
+      color: #495057;
+    }
+
+    .cache-info {
+      color: #6c757d;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+    }
+
+    .performance-actions {
+      margin-bottom: 24px;
+    }
+
+    .performance-buttons {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .performance-buttons .btn {
+      padding: 12px 16px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .performance-buttons .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .performance-buttons .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-info {
+      background: linear-gradient(135deg, #17a2b8, #138496);
+      border: none;
+      color: white;
+    }
+
+    .btn-warning {
+      background: linear-gradient(135deg, #ffc107, #e0a800);
+      border: none;
+      color: #212529;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #007bff, #0056b3);
+      border: none;
+    }
+
+    .btn-secondary {
+      background: linear-gradient(135deg, #6c757d, #545b62);
+      border: none;
+    }
+
+    .performance-tips {
+      background: #e7f3ff;
+      border: 1px solid #b6d7ff;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .performance-tips h4 {
+      color: #0056b3;
+      margin-bottom: 12px;
+      font-size: 1.1rem;
+    }
+
+    .tips-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .tips-list li {
+      padding: 6px 0;
+      position: relative;
+      padding-left: 20px;
+      color: #495057;
+    }
+
+    .tips-list li::before {
+      content: '💡';
+      position: absolute;
+      left: 0;
+      top: 6px;
+    }
+
+    /* Cache Statistics Display */
+    .cache-stats {
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      color: #6c757d;
+      margin-top: 4px;
+    }
+
+    .cache-stats span {
+      display: inline-block;
+      padding: 2px 6px;
+      background: rgba(0, 123, 255, 0.1);
+      border-radius: 3px;
+      margin: 2px;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .performance-stats {
+        grid-template-columns: 1fr;
+      }
+
+      .performance-buttons {
+        grid-template-columns: 1fr;
+      }
+
+      .cache-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+    }
+
+    /* Loading states */
+    .performance-stat.loading .stat-value::after {
+      content: '...';
+      animation: dots 1.5s infinite;
+    }
+
+    @keyframes dots {
+
+      0%,
+      20% {
+        opacity: 0;
+      }
+
+      50% {
+        opacity: 1;
+      }
+
+      80%,
+      100% {
+        opacity: 0;
+      }
+    }
+
+    /* Success/Error states for buttons */
+    .btn.success {
+      background: linear-gradient(135deg, #28a745, #1e7e34) !important;
+    }
+
+    .btn.error {
+      background: linear-gradient(135deg, #dc3545, #c82333) !important;
+    }
+
+    .btn.loading {
+      position: relative;
+      pointer-events: none;
+    }
+
+    .btn.loading::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      margin: auto;
+      border: 2px solid transparent;
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+
+    /* Server Edit Sync Section */
+    #serverEditSyncInfo {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    #serverEditSyncInfo .sync-info-item {
+      padding: 8px 0;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    #serverEditSyncInfo .sync-info-item:last-child {
+      border-bottom: none;
+    }
+
+    #serverEditSyncInfo strong {
+      color: #495057;
+      font-weight: 600;
+      margin-right: 8px;
+    }
+
+    /* Status Badges */
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-badge.success {
+      background: #d1f4e0;
+      color: #0f5132;
+    }
+
+    .status-badge.inactive {
+      background: #f8d7da;
+      color: #842029;
+    }
+
+    .status-badge.error {
+      background: #f8d7da;
+      color: #842029;
+    }
+
+    .status-badge.warning {
+      background: #fff3cd;
+      color: #664d03;
+    }
+
+    /* Sync History Table */
+    .sync-history {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 2px solid #dee2e6;
+    }
+
+    .sync-history-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    .sync-history-table th {
+      background: #e9ecef;
+      padding: 8px;
+      text-align: left;
+      font-weight: 600;
+      color: #495057;
+      border: 1px solid #dee2e6;
+    }
+
+    .sync-history-table td {
+      padding: 8px;
+      border: 1px solid #dee2e6;
+      color: #212529;
+    }
+
+    .sync-history-table tbody tr:hover {
+      background: #f8f9fa;
+    }
+
+    /* Server Edit History Modal */
+    #serverEditHistoryModal .modal-content {
+      max-width: 900px;
+    }
+
+    #serverEditHistoryModal .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    #serverEditHistoryModal .data-table th {
+      background: #007cff;
+      color: white;
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      border: 1px solid #0066cc;
+    }
+
+    #serverEditHistoryModal .data-table td {
+      padding: 10px 12px;
+      border: 1px solid #dee2e6;
+      color: #212529;
+    }
+
+    #serverEditHistoryModal .data-table tbody tr:hover {
+      background: #f8f9fa;
+    }
+
+    #serverEditHistoryModal .data-table tbody tr:nth-child(even) {
+      background: #fafbfc;
+    }
+
+    .highlight-success {
+      color: #0f5132;
+      font-weight: 600;
+      background: #d1f4e0 !important;
+    }
+
+    .highlight-warning {
+      color: #664d03;
+      font-weight: 600;
+      background: #fff3cd !important;
+    }
+
+    .error-detail {
+      background: #f8d7da !important;
+    }
+
+    .error-detail td {
+      padding: 12px !important;
+    }
+
+    .error-detail pre {
+      margin: 8px 0 0 0;
+      padding: 8px;
+      background: white;
+      border-radius: 4px;
+      font-size: 12px;
+      overflow-x: auto;
+      color: #842029;
+    }
+
+    /* Button Groups */
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .primary-button,
+    .secondary-button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .primary-button {
+      background: #007cff;
+      color: white;
+    }
+
+    .primary-button:hover {
+      background: #0066cc;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(0, 124, 255, 0.3);
+    }
+
+    .primary-button:active {
+      transform: translateY(0);
+    }
+
+    .primary-button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .secondary-button {
+      background: #6c757d;
+      color: white;
+    }
+
+    .secondary-button:hover {
+      background: #5a6268;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+    }
+
+    .secondary-button:active {
+      transform: translateY(0);
+    }
+
+    /* Loading State */
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #6c757d;
+      font-style: italic;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .button-group {
+        flex-direction: column;
+      }
+
+      .primary-button,
+      .secondary-button {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .sync-history-table {
+        font-size: 11px;
+      }
+
+      .sync-history-table th,
+      .sync-history-table td {
+        padding: 6px;
+      }
+
+      #serverEditHistoryModal .modal-content {
+        max-width: 95%;
+        margin: 20px auto;
+      }
+
+      #serverEditHistoryModal .data-table {
+        font-size: 12px;
+      }
+
+      #serverEditHistoryModal .data-table th,
+      #serverEditHistoryModal .data-table td {
+        padding: 8px;
+      }
+    }
+
+    /* Animation for new updates */
+    @keyframes highlightUpdate {
+      0% {
+        background: #cfe2ff;
+      }
+
+      100% {
+        background: transparent;
+      }
+    }
+
+    .updated-row {
+      animation: highlightUpdate 2s ease;
+    }
+
+    /* Server Edit Notification Toast */
+    .download-toast.server-edit {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-left: 4px solid #f59e0b;
+    }
+
+    /* Section Description */
+    .section-description {
+      color: #6c757d;
+      font-size: 14px;
+      margin: 8px 0 16px 0;
+      line-height: 1.5;
+    }
+
+    /* Settings Section Spacing */
+    .settings-section {
+      margin-bottom: 32px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .settings-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .settings-section h3 {
+      color: #212529;
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .face-recognition-countdown {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-left: auto;
+      margin-right: 10px;
+      transition: all 0.3s ease;
+      animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    /* Dashboard Employee Card Styles */
+    .dashboard-employee-card {
+      color: black;
+      border: none;
+      display: block !important;
+      /* Always visible */
+      opacity: 1;
+      transform: translateY(0);
+      transition: all 0.3s ease;
+    }
+
+    .dashboard-employee-card.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .dashboard-employee-card.highlight {
+      animation: highlightPulse 1s ease;
+    }
+
+    @keyframes highlightPulse {
+
+      0%,
+      100% {
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      50% {
+        box-shadow: 0 0 30px rgba(255, 255, 255, 0.5), 0 0 60px rgba(102, 126, 234, 0.3);
+        transform: translateY(0) scale(1.02);
+      }
+    }
+
+    .dashboard-employee-card .dashboard-header {
+      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+      color: black;
+    }
+
+    .dashboard-employee-card .dashboard-header h2 {
+      color: black;
+    }
+
+    .dashboard-employee-card .dashboard-icon {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .employee-card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      align-items: center;
+      padding: 20px 0;
+      text-align: center;
+      border-radius: 20px;
+    }
+
+    .employee-photo-section {
+      width: 200px;
+      height: 200px;
+    }
+
+    .employee-photo-large {
+      width: 100%;
+      height: 100%;
+      border-radius: 12px;
+      object-fit: cover;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    .employee-info-section {
+      flex: 1;
+    }
+
+    .employee-name-large {
+      margin: 0 0 8px 0;
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .employee-dept-large {
+      margin: 0 0 4px 0;
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .employee-id-large {
+      margin: 0;
+      font-size: 14px;
+      color: black;
+      font-weight: 500;
+    }
+
+    .employee-clock-section {
+      text-align: right;
+      min-width: 220px;
+    }
+
+    .clock-info-row {
+      display: flex;
+      flex-direction: row;
+      gap: 10px;
+      margin-bottom: 15px;
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .clock-badge {
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: 600;
+      font-size: 14px;
+      display: inline-block;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .clock-badge.in {
+      background: #10b981;
+      color: white;
+    }
+
+    .clock-badge.out {
+      background: #ef4444;
+      color: white;
+    }
+
+    .clock-badge.overtime {
+      background: #f59e0b;
+      color: white;
+    }
+
+    .clock-time-large {
+      font-size: 18px;
+      font-weight: bold;
+      color: red;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+
+    .hours-breakdown-large {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .hours-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 14px;
+      gap: 20px;
+    }
+
+    .hours-row.total {
+      border-top: 2px solid #e5e7eb;
+      margin-top: 8px;
+      padding-top: 10px;
+      font-weight: bold;
+      font-size: 16px;
+    }
+
+    .hours-label {
+      color: #6b7280;
+      font-weight: 500;
+    }
+
+    .hours-value {
+      color: #111827;
+      font-weight: 700;
+      min-width: 60px;
+      text-align: right;
+    }
+
+    .hours-value.overtime {
+      color: #f59e0b;
+    }
+
+    .session-indicator {
+      margin-top: 10px;
+      padding: 10px;
+      background: rgba(254, 243, 199, 0.9);
+      border-radius: 8px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #92400e;
+      border: 2px solid rgba(251, 191, 36, 0.3);
+    }
+
+    .session-indicator.overtime {
+      background: rgba(237, 233, 254, 0.95);
+      color: #6b21a8;
+      border-color: rgba(167, 139, 250, 0.3);
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 1024px) {
+      .employee-card-body {
+        grid-template-columns: auto 1fr;
+        gap: 15px;
+      }
+
+      .employee-clock-section {
+        grid-column: 1 / -1;
+        text-align: left;
+        min-width: unset;
+        width: 100%;
+      }
+
+      .clock-info-row {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .hours-breakdown-large {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .employee-card-body {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+
+      .employee-photo-section {
+        margin: 0 auto;
+        width: 80px;
+        height: 80px;
+      }
+
+      .employee-info-section {
+        text-align: center;
+      }
+
+      .employee-name-large {
+        font-size: 20px;
+      }
+
+      .employee-clock-section {
+        text-align: center;
+      }
+
+      .clock-info-row {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+
+    /* Elevation classes for depth */
+    .elevation-2 {
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15), 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
   </style>
 </head>
 
@@ -2109,15 +2408,15 @@
       <div class="header-right">
         <div class="datetime" id="datetime"></div>
         <div class="header-button-container">
-        <button class="settings-btn elevation-1" id="settingsBtn">
-          ⚙️ Settings
-        </button>
-        <button class="refresh-btn elevation-1" onclick="location.reload();">
-          🔄 Refresh
-        </button>
-        <button id="openFaceRecognition" class="facerecog-btn elevation-1">
-                📷 Face Recog
-        </button>
+          <button class="settings-btn elevation-1" id="settingsBtn">
+            ⚙️ Settings
+          </button>
+          <button class="refresh-btn elevation-1" onclick="location.reload();">
+            🔄 Refresh
+          </button>
+          <button id="openFaceRecognition" class="facerecog-btn elevation-1">
+            📷 Face Recog
+          </button>
         </div>
       </div>
     </header>
@@ -2126,8 +2425,8 @@
     <div class="main-grid">
       <!-- Scanner Section -->
       <section class="scanner-section elevation-1">
-        <div class="scanner-icon">📱</div>
-        <h2>Scan Employee Badge</h2>
+        <!-- <div class="scanner-icon">📱</div>
+        <h2>Scan Employee Badge</h2> -->
         <div class="input-group">
           <input type="text" id="barcodeInput" placeholder="Scan barcode or enter ID number..." autocomplete="off"
             autofocus />
@@ -2149,10 +2448,10 @@
 
       <!-- Statistics Section -->
       <section class="stats-section elevation-1">
-        <div class="stats-header">
+        <!-- <div class="stats-header">
           <div class="stats-icon">📊</div>
           <h2>Today's Statistics</h2>
-        </div>
+        </div> -->
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-value" id="totalRegularHours">0</div>
@@ -2200,329 +2499,372 @@
 
     <!-- Dashboard -->
     <div class="dashboard">
-      <!-- Currently Clocked In -->
-      <section class="dashboard-section elevation-1">
-        <div class="dashboard-header">
-          <div class="dashboard-icon">👥</div>
-          <h2>Currently Clocked In</h2>
-        </div>
-        <div class="employee-list" id="currentlyClocked">
-          <div class="loading">Loading...</div>
-        </div>
-      </section>
 
-      <!-- Today's Activity -->
-      <section class="dashboard-section elevation-1">
-        <div class="dashboard-header">
-          <div class="dashboard-icon">📋</div>
-          <h2>Today's Activity</h2>
-        </div>
-        <div class="attendance-list" id="todayActivity">
-          <div class="loading">Loading...</div>
-        </div>
-      </section>
+      <!-- Row for Currently Clocked In and Today's Activity -->
+      <div class="dashboard-row">
+        <!-- Currently Clocked In -->
+        <section class="dashboard-section elevation-1">
+          <div class="dashboard-header">
+            <div class="dashboard-icon">👥</div>
+            <h2>Currently Clocked In</h2>
+          </div>
+          <div class="employee-list" id="currentlyClocked">
+            <div class="loading">Loading...</div>
+          </div>
+        </section>
+
+        <!-- Last Scanned Employee Card - ALWAYS VISIBLE IN MIDDLE -->
+        <section id="dashboardEmployeeCard" class="dashboard-section elevation-2 dashboard-employee-card">
+          <div class="dashboard-header">
+            <div class="dashboard-icon">✅</div>
+            <h2>Last Scanned Employee</h2>
+          </div>
+          <div class="employee-card-body">
+            <div class="employee-photo-section">
+              <img id="dashboardEmployeePhoto" class="employee-photo-large" src="assets/profile.png"
+                alt="Employee Photo">
+            </div>
+            <div class="employee-info-section">
+              <h2 id="dashboardEmployeeName" class="employee-name-large">Waiting for scan...</h2>
+              <p id="dashboardEmployeeDept" class="employee-dept-large">-</p>
+              <p id="dashboardEmployeeId" class="employee-id-large">-</p>
+            </div>
+            <div class="employee-clock-section">
+              <div class="clock-info-row">
+                <span id="dashboardClockType" class="clock-badge">-</span>
+                <span id="dashboardClockTime" class="clock-time-large">-</span>
+              </div>
+              <div id="dashboardHours" class="hours-breakdown-large">
+                <div class="hours-row">
+                  <span class="hours-label">Regular:</span>
+                  <span class="hours-value">0h</span>
+                </div>
+                <div class="hours-row">
+                  <span class="hours-label">Overtime:</span>
+                  <span class="hours-value">0h</span>
+                </div>
+                <div class="hours-row total">
+                  <span class="hours-label">Total:</span>
+                  <span class="hours-value">0h</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Today's Activity -->
+        <section class="dashboard-section elevation-1">
+          <div class="dashboard-header">
+            <div class="dashboard-icon">📋</div>
+            <h2>Today's Activity</h2>
+          </div>
+          <div class="attendance-list" id="todayActivity">
+            <div class="loading">Loading...</div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <!-- Status Messages -->
     <div class="status-message" id="statusMessage"></div>
 
     <!-- Settings Modal -->
-<div class="settings-modal" id="settingsModal">
-  <div class="settings-content elevation-4">
-    <div class="settings-header">
-      <h2>Settings & Reports</h2>
-      <button class="close-btn" id="closeSettings">&times;</button>
-    </div>
+    <div class="settings-modal" id="settingsModal">
+      <div class="settings-content elevation-4">
+        <div class="settings-header">
+          <h2>Settings & Reports</h2>
+          <button class="close-btn" id="closeSettings">&times;</button>
+        </div>
 
-    <!-- Added tabbed navigation for settings -->
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-tab="general">
-        ⚙️ General Settings
-      </button>
-      <button class="settings-tab" data-tab="reports">
-        📊 Daily Reports
-      </button>
-      <button class="settings-tab" data-tab="sync">🔄 Sync Status</button>
-      <button class="settings-tab" data-tab="performance">
-        ⚡ Performance
-      </button>
-    </div>
+        <!-- Added tabbed navigation for settings -->
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="general">
+            ⚙️ General Settings
+          </button>
+          <button class="settings-tab" data-tab="reports">
+            📊 Daily Reports
+          </button>
+          <button class="settings-tab" data-tab="sync">🔄 Sync Status</button>
+          <button class="settings-tab" data-tab="performance">
+            ⚡ Performance
+          </button>
+        </div>
 
-    <div class="settings-body">
-      <div id="settingsStatusMessage" style="display: none"></div>
+        <div class="settings-body">
+          <div id="settingsStatusMessage" style="display: none"></div>
 
-      <!-- General Settings Panel -->
-      <div class="settings-panel active" id="generalPanel">
-        <form id="settingsForm">
-          <div class="form-group">
-            <label for="serverUrl">Server URL</label>
-            <input type="url" id="serverUrl" name="server_url" placeholder="" />
-            <div class="help-text">
-              URL to fetch employee data from your server
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="syncInterval">Sync Interval (minutes)</label>
-            <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5" />
-            <div class="help-text">
-              How often to sync attendance data (1-1440 minutes)
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="summarySyncInterval">Summary Sync Interval (minutes)</label>
-            <input type="number" id="summarySyncInterval" name="summary_sync_interval" min="1" max="1440"
-              placeholder="10" />
-            <div class="help-text">
-              How often to sync daily summary data (1-1440 minutes)
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="gracePeriod">Grace Period (minutes)</label>
-            <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5" />
-            <div class="help-text">
-              Late arrival tolerance (0-30 minutes)
-            </div>
-          </div>
-
-          <div class="button-group">
-            <button type="button" class="btn btn-success" id="syncNowBtn">
-              🔄 Sync Now
-            </button>
-            <button type="button" class="btn btn-secondary" id="cancelSettings">
-              ✕ Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- Daily Reports Panel -->
-      <div class="settings-panel" id="reportsPanel">
-        <div class="summary-section">
-          <div class="summary-header">
-            <h3 class="summary-title">
-              <span>📊</span>
-              Daily Attendance Summary
-            </h3>
-
-            <!-- Date Range Filter Section -->
-            <div class="date-filter-section">
-              <div class="date-range-container">
-                <div class="date-input-group">
-                  <label for="startDate">From:</label>
-                  <input type="date" id="startDate" class="date-input" />
+          <!-- General Settings Panel -->
+          <div class="settings-panel active" id="generalPanel">
+            <form id="settingsForm">
+              <div class="form-group">
+                <label for="serverUrl">Server URL</label>
+                <input type="url" id="serverUrl" name="server_url" placeholder="" />
+                <div class="help-text">
+                  URL to fetch employee data from your server
                 </div>
-                <div class="date-input-group">
-                  <label for="endDate">To:</label>
-                  <input type="date" id="endDate" class="date-input" />
+              </div>
+
+              <div class="form-group">
+                <label for="syncInterval">Sync Interval (minutes)</label>
+                <input type="number" id="syncInterval" name="sync_interval" min="1" max="1440" placeholder="5" />
+                <div class="help-text">
+                  How often to sync attendance data (1-1440 minutes)
                 </div>
-                <div class="date-actions">
-                  <button class="btn btn-primary btn-sm" id="applyDateFilter">
-                    🔍 Filter
+              </div>
+
+              <div class="form-group">
+                <label for="summarySyncInterval">Summary Sync Interval (minutes)</label>
+                <input type="number" id="summarySyncInterval" name="summary_sync_interval" min="1" max="1440"
+                  placeholder="10" />
+                <div class="help-text">
+                  How often to sync daily summary data (1-1440 minutes)
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="gracePeriod">Grace Period (minutes)</label>
+                <input type="number" id="gracePeriod" name="grace_period" min="0" max="30" placeholder="5" />
+                <div class="help-text">
+                  Late arrival tolerance (0-30 minutes)
+                </div>
+              </div>
+
+              <div class="button-group">
+                <button type="button" class="btn btn-success" id="syncNowBtn">
+                  🔄 Sync Now
+                </button>
+                <button type="button" class="btn btn-secondary" id="cancelSettings">
+                  ✕ Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Daily Reports Panel -->
+          <div class="settings-panel" id="reportsPanel">
+            <div class="summary-section">
+              <div class="summary-header">
+                <h3 class="summary-title">
+                  <span>📊</span>
+                  Daily Attendance Summary
+                </h3>
+
+                <!-- Date Range Filter Section -->
+                <div class="date-filter-section">
+                  <div class="date-range-container">
+                    <div class="date-input-group">
+                      <label for="startDate">From:</label>
+                      <input type="date" id="startDate" class="date-input" />
+                    </div>
+                    <div class="date-input-group">
+                      <label for="endDate">To:</label>
+                      <input type="date" id="endDate" class="date-input" />
+                    </div>
+                    <div class="date-actions">
+                      <button class="btn btn-primary btn-sm" id="applyDateFilter">
+                        🔍 Filter
+                      </button>
+                      <button class="btn btn-secondary btn-sm" id="clearDateFilter">
+                        🗑️ Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Quick Date Range Buttons -->
+                  <div class="quick-date-buttons">
+                    <button class="btn btn-outline btn-sm" data-range="today">
+                      Today
+                    </button>
+                    <button class="btn btn-outline btn-sm" data-range="yesterday">
+                      Yesterday
+                    </button>
+                    <button class="btn btn-outline btn-sm" data-range="week">
+                      This Week
+                    </button>
+                    <button class="btn btn-outline btn-sm" data-range="month">
+                      This Month
+                    </button>
+                    <button class="btn btn-outline btn-sm" data-range="last7">
+                      Last 7 Days
+                    </button>
+                    <button class="btn btn-outline btn-sm" data-range="last30">
+                      Last 30 Days
+                    </button>
+                  </div>
+                </div>
+
+                <button class="download-btn elevation-1" id="downloadExcelBtn">
+                  📥 Download Excel
+                </button>
+              </div>
+
+              <!-- Summary Stats -->
+              <div class="summary-stats" id="summaryStats">
+                <div class="stat-card">
+                  <div class="stat-label">Total Records</div>
+                  <div class="stat-value" id="totalRecords">-</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Date Range</div>
+                  <div class="stat-value" id="dateRangeText">All Records</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Total Hours</div>
+                  <div class="stat-value" id="totalHours">-</div>
+                </div>
+              </div>
+
+              <div class="summary-table-container">
+                <table class="summary-table" id="dailySummaryTable">
+                  <thead>
+                    <tr>
+                      <th>Employee Name</th>
+                      <th>First Name</th>
+                      <th>Last Name</th>
+                      <th>Department</th>
+                      <th>ID Number</th>
+                      <th>Date</th>
+                      <th>First Clock In</th>
+                      <th>Last Clock Out</th>
+                      <th>Morning In</th>
+                      <th>Morning Out</th>
+                      <th>Afternoon In</th>
+                      <th>Afternoon Out</th>
+                      <th>Evening In</th>
+                      <th>Evening Out</th>
+                      <th>Overtime In</th>
+                      <th>Overtime Out</th>
+                      <th>Regular Hours</th>
+                      <th>Overtime Hours</th>
+                      <th>Total Hours</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="summaryTableBody">
+                    <tr>
+                      <td colspan="20" class="loading">Loading...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sync Status Panel -->
+          <div class="settings-panel" id="syncPanel">
+            <div class="sync-info" id="syncInfo" style="display: block">
+              <h3>📊 Sync Information</h3>
+              <p id="employeeCount">Employees in database: Loading...</p>
+              <p id="lastSync">Last sync: Loading...</p>
+              <p id="profileStatus">Profile images: Loading...</p>
+              <div id="cacheInfo" style="margin-top: 16px;">
+                <div class="sync-info-item">
+                  <strong>Cache Performance:</strong>
+                  <div class="cache-stats">
+                    <span>Profiles: 0 cached</span> |
+                    <span>Images: 0 cached</span> |
+                    <span>Preloaded: 0 ready</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sync-info" id="attendanceSyncInfo" style="display: block; margin-top: 16px">
+              <h3>📋 Attendance Sync Status</h3>
+              <div class="sync-info-item">
+                <strong>Unsynced Records:</strong> Loading...
+              </div>
+              <div class="sync-info-item">
+                <strong>Auto-sync:</strong> Loading...
+              </div>
+              <div class="sync-info-item">
+                <strong>Next sync:</strong> Loading...
+              </div>
+            </div>
+          </div>
+
+          <!-- Performance Panel -->
+          <div class="settings-panel" id="performancePanel">
+            <div class="performance-section">
+              <h3 class="performance-title">⚡ Performance & Cache Management</h3>
+
+              <div class="performance-stats" id="performanceStats">
+                <div class="stat-card performance-stat">
+                  <div class="stat-label">Main Process Cache</div>
+                  <div class="stat-value" id="mainProcessCacheSize">Loading...</div>
+                  <div class="stat-detail">Profiles & Images</div>
+                </div>
+                <div class="stat-card performance-stat">
+                  <div class="stat-label">Renderer Cache</div>
+                  <div class="stat-value" id="rendererCacheSize">Loading...</div>
+                  <div class="stat-detail">Local Storage</div>
+                </div>
+                <div class="stat-card performance-stat">
+                  <div class="stat-label">Preloaded Profiles</div>
+                  <div class="stat-value" id="preloadedCount">Loading...</div>
+                  <div class="stat-detail">Ready for Scanning</div>
+                </div>
+                <div class="stat-card performance-stat">
+                  <div class="stat-label">Cache Hit Rate</div>
+                  <div class="stat-value" id="cacheHitRate">Loading...</div>
+                  <div class="stat-detail">Performance Metric</div>
+                </div>
+              </div>
+
+              <div class="cache-details" id="cacheDetails">
+                <h4>Cache Details</h4>
+                <div class="cache-breakdown">
+                  <div class="cache-item">
+                    <span class="cache-type">Profile Cache:</span>
+                    <span class="cache-info" id="profileCacheInfo">0/500 slots used</span>
+                  </div>
+                  <div class="cache-item">
+                    <span class="cache-type">Image Cache:</span>
+                    <span class="cache-info" id="imageCacheInfo">0/200 slots used</span>
+                  </div>
+                  <div class="cache-item">
+                    <span class="cache-type">Memory Usage:</span>
+                    <span class="cache-info" id="memoryUsage">Calculating...</span>
+                  </div>
+                  <div class="cache-item">
+                    <span class="cache-type">Last Cleanup:</span>
+                    <span class="cache-info" id="lastCleanup">Never</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="performance-actions">
+                <div class="button-group performance-buttons">
+                  <button type="button" class="btn btn-info" id="showCacheStatsBtn">
+                    📊 Show Cache Stats
                   </button>
-                  <button class="btn btn-secondary btn-sm" id="clearDateFilter">
-                    🗑️ Clear
+                  <button type="button" class="btn btn-warning" id="clearCacheBtn">
+                    🗑️ Clear All Caches
+                  </button>
+                  <button type="button" class="btn btn-primary" id="preloadProfilesBtn">
+                    ⚡ Preload Profiles
+                  </button>
+                  <button type="button" class="btn btn-secondary" id="refreshStatsBtn">
+                    🔄 Refresh Stats
                   </button>
                 </div>
               </div>
 
-              <!-- Quick Date Range Buttons -->
-              <div class="quick-date-buttons">
-                <button class="btn btn-outline btn-sm" data-range="today">
-                  Today
-                </button>
-                <button class="btn btn-outline btn-sm" data-range="yesterday">
-                  Yesterday
-                </button>
-                <button class="btn btn-outline btn-sm" data-range="week">
-                  This Week
-                </button>
-                <button class="btn btn-outline btn-sm" data-range="month">
-                  This Month
-                </button>
-                <button class="btn btn-outline btn-sm" data-range="last7">
-                  Last 7 Days
-                </button>
-                <button class="btn btn-outline btn-sm" data-range="last30">
-                  Last 30 Days
-                </button>
+              <div class="performance-tips">
+                <h4>Performance Tips</h4>
+                <ul class="tips-list">
+                  <li>Cache automatically preloads frequently scanned employees</li>
+                  <li>Images are cached for 5 minutes to improve scanning speed</li>
+                  <li>Clear cache if experiencing memory issues</li>
+                  <li>Preload profiles before busy scanning periods</li>
+                  <li>Cache statistics update every 2 minutes automatically</li>
+                </ul>
               </div>
             </div>
-
-            <button class="download-btn elevation-1" id="downloadExcelBtn">
-              📥 Download Excel
-            </button>
-          </div>
-
-          <!-- Summary Stats -->
-          <div class="summary-stats" id="summaryStats">
-            <div class="stat-card">
-              <div class="stat-label">Total Records</div>
-              <div class="stat-value" id="totalRecords">-</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Date Range</div>
-              <div class="stat-value" id="dateRangeText">All Records</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Total Hours</div>
-              <div class="stat-value" id="totalHours">-</div>
-            </div>
-          </div>
-
-          <div class="summary-table-container">
-            <table class="summary-table" id="dailySummaryTable">
-              <thead>
-                <tr>
-                  <th>Employee Name</th>
-                  <th>First Name</th>
-                  <th>Last Name</th>
-                  <th>Department</th>
-                  <th>ID Number</th>
-                  <th>Date</th>
-                  <th>First Clock In</th>
-                  <th>Last Clock Out</th>
-                  <th>Morning In</th>
-                  <th>Morning Out</th>
-                  <th>Afternoon In</th>
-                  <th>Afternoon Out</th>
-                  <th>Evening In</th>
-                  <th>Evening Out</th>
-                  <th>Overtime In</th>
-                  <th>Overtime Out</th>
-                  <th>Regular Hours</th>
-                  <th>Overtime Hours</th>
-                  <th>Total Hours</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="summaryTableBody">
-                <tr>
-                  <td colspan="20" class="loading">Loading...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Sync Status Panel -->
-      <div class="settings-panel" id="syncPanel">
-        <div class="sync-info" id="syncInfo" style="display: block">
-          <h3>📊 Sync Information</h3>
-          <p id="employeeCount">Employees in database: Loading...</p>
-          <p id="lastSync">Last sync: Loading...</p>
-          <p id="profileStatus">Profile images: Loading...</p>
-          <div id="cacheInfo" style="margin-top: 16px;">
-            <div class="sync-info-item">
-              <strong>Cache Performance:</strong>
-              <div class="cache-stats">
-                <span>Profiles: 0 cached</span> |
-                <span>Images: 0 cached</span> |
-                <span>Preloaded: 0 ready</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="sync-info" id="attendanceSyncInfo" style="display: block; margin-top: 16px">
-          <h3>📋 Attendance Sync Status</h3>
-          <div class="sync-info-item">
-            <strong>Unsynced Records:</strong> Loading...
-          </div>
-          <div class="sync-info-item">
-            <strong>Auto-sync:</strong> Loading...
-          </div>
-          <div class="sync-info-item">
-            <strong>Next sync:</strong> Loading...
-          </div>
-        </div>
-      </div>
-
-      <!-- Performance Panel -->
-      <div class="settings-panel" id="performancePanel">
-        <div class="performance-section">
-          <h3 class="performance-title">⚡ Performance & Cache Management</h3>
-          
-          <div class="performance-stats" id="performanceStats">
-            <div class="stat-card performance-stat">
-              <div class="stat-label">Main Process Cache</div>
-              <div class="stat-value" id="mainProcessCacheSize">Loading...</div>
-              <div class="stat-detail">Profiles & Images</div>
-            </div>
-            <div class="stat-card performance-stat">
-              <div class="stat-label">Renderer Cache</div>
-              <div class="stat-value" id="rendererCacheSize">Loading...</div>
-              <div class="stat-detail">Local Storage</div>
-            </div>
-            <div class="stat-card performance-stat">
-              <div class="stat-label">Preloaded Profiles</div>
-              <div class="stat-value" id="preloadedCount">Loading...</div>
-              <div class="stat-detail">Ready for Scanning</div>
-            </div>
-            <div class="stat-card performance-stat">
-              <div class="stat-label">Cache Hit Rate</div>
-              <div class="stat-value" id="cacheHitRate">Loading...</div>
-              <div class="stat-detail">Performance Metric</div>
-            </div>
-          </div>
-
-          <div class="cache-details" id="cacheDetails">
-            <h4>Cache Details</h4>
-            <div class="cache-breakdown">
-              <div class="cache-item">
-                <span class="cache-type">Profile Cache:</span>
-                <span class="cache-info" id="profileCacheInfo">0/500 slots used</span>
-              </div>
-              <div class="cache-item">
-                <span class="cache-type">Image Cache:</span>
-                <span class="cache-info" id="imageCacheInfo">0/200 slots used</span>
-              </div>
-              <div class="cache-item">
-                <span class="cache-type">Memory Usage:</span>
-                <span class="cache-info" id="memoryUsage">Calculating...</span>
-              </div>
-              <div class="cache-item">
-                <span class="cache-type">Last Cleanup:</span>
-                <span class="cache-info" id="lastCleanup">Never</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="performance-actions">
-            <div class="button-group performance-buttons">
-              <button type="button" class="btn btn-info" id="showCacheStatsBtn">
-                📊 Show Cache Stats
-              </button>
-              <button type="button" class="btn btn-warning" id="clearCacheBtn">
-                🗑️ Clear All Caches
-              </button>
-              <button type="button" class="btn btn-primary" id="preloadProfilesBtn">
-                ⚡ Preload Profiles
-              </button>
-              <button type="button" class="btn btn-secondary" id="refreshStatsBtn">
-                🔄 Refresh Stats
-              </button>
-            </div>
-          </div>
-
-          <div class="performance-tips">
-            <h4>Performance Tips</h4>
-            <ul class="tips-list">
-              <li>Cache automatically preloads frequently scanned employees</li>
-              <li>Images are cached for 5 minutes to improve scanning speed</li>
-              <li>Clear cache if experiencing memory issues</li>
-              <li>Preload profiles before busy scanning periods</li>
-              <li>Cache statistics update every 2 minutes automatically</li>
-            </ul>
           </div>
         </div>
       </div>
     </div>
-  </div>
-</div>
 
     <!-- Download Toast -->
     <div class="download-toast" id="downloadToast"></div>
