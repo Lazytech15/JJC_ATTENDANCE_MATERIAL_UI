@@ -2977,148 +2977,199 @@ class AttendanceApp {
   }
 
   showEmployeeDisplay(data) {
-    const {
-      employee,
-      clockType,
-      sessionType,
-      clockTime,
-      regularHours,
-      overtimeHours,
-      isOvertimeSession,
-    } = data;
+  const {
+    employee,
+    clockType,
+    sessionType,
+    clockTime,
+    regularHours,
+    overtimeHours,
+    isOvertimeSession,
+  } = data;
 
-    // Update the inline dashboard employee details section
-    const dashboardEmployeeCard = document.getElementById("dashboardEmployeeCard");
+  console.log("Displaying employee data on dashboard:", );
 
+  if (!dashboardEmployeeCard) {
+    console.warn("Dashboard employee card not found");
+    return;
+  }
 
-    if (!dashboardEmployeeCard) {
-      console.warn("Dashboard employee card not found");
-      return;
-    }
+  // ⭐ Store the currently displayed employee UID
+  dashboardEmployeeCard.dataset.employeeUid = employee.uid;
 
-    // ⭐ Store the currently displayed employee UID
-    dashboardEmployeeCard.dataset.employeeUid = employee.uid;
+  // Show immediately without delay
+  dashboardEmployeeCard.classList.add("show");
 
-    setTimeout(() => {
-      dashboardEmployeeCard.classList.add("show");
-    }, 10);
-    // Update employee photo
-    const photo = document.getElementById("dashboardEmployeePhoto");
-    if (photo) {
-      photo.src = this.getDefaultImageDataURL();
-      this.setupImageWithFallback(
-        photo,
-        employee.uid,
-        `${employee.first_name} ${employee.last_name}`
-      ).catch((error) => {
-        console.warn(`Employee photo setup failed:`, error);
-      });
-    }
-
-    // Update employee name
-    const nameElement = document.getElementById("dashboardEmployeeName");
-    if (nameElement) {
-      nameElement.textContent = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
-    }
-
-    // Update department
-    const deptElement = document.getElementById("dashboardEmployeeDept");
-    if (deptElement) {
-      deptElement.textContent = employee.department || "No Department";
-    }
-
-    // Update ID number
-    const idElement = document.getElementById("dashboardEmployeeId");
-    if (idElement) {
-      idElement.textContent = `ID: ${employee.id_number}`;
-    }
-
-    // Update clock type badge
-    const clockTypeElement = document.getElementById("dashboardClockType");
-    if (clockTypeElement) {
-      clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
-      clockTypeElement.className = `clock-badge ${clockType.includes("in") ? "in" : "out"} ${isOvertimeSession ? "overtime" : ""
-        }`;
-    }
-
-    // Update clock time
-    const clockTimeElement = document.getElementById("dashboardClockTime");
-    if (clockTimeElement) {
-      clockTimeElement.textContent = new Date(clockTime).toLocaleTimeString();
-    }
-
-    // Update hours breakdown
-    const hoursElement = document.getElementById("dashboardHours");
-    const totalHours = (regularHours || 0) + (overtimeHours || 0);
-
-    if (hoursElement) {
-      if (isOvertimeSession) {
-        hoursElement.innerHTML = `
-          <div class="hours-row">
-            <span class="hours-label">Regular:</span>
-            <span class="hours-value">${regularHours || 0}h</span>
-          </div>
-          <div class="hours-row">
-            <span class="hours-label">Overtime:</span>
-            <span class="hours-value overtime">${overtimeHours || 0}h</span>
-          </div>
-          <div class="hours-row total">
-            <span class="hours-label">Total:</span>
-            <span class="hours-value">${totalHours.toFixed(2)}h</span>
-          </div>
-          <div class="session-indicator overtime">🌙 ${sessionType || "Overtime Session"}</div>
-        `;
-      } else {
-        hoursElement.innerHTML = `
-          <div class="hours-row">
-            <span class="hours-label">Regular:</span>
-            <span class="hours-value">${regularHours || 0}h</span>
-          </div>
-          <div class="hours-row">
-            <span class="hours-label">Overtime:</span>
-            <span class="hours-value">${overtimeHours.toFixed(2)}h</span>
-          </div>
-          <div class="hours-row total">
-            <span class="hours-label">Total:</span>
-            <span class="hours-value">${totalHours.toFixed(2)}h</span>
-          </div>
-        `;
-      }
-    }
-
-    // Brief highlight animation
-    dashboardEmployeeCard.classList.add("highlight");
-    setTimeout(() => {
-      dashboardEmployeeCard.classList.remove("highlight");
-    }, 1000);
-
-    // Show success status
-    this.showStatus("✓ Attendance Recorded", "success");
-
-    // Keep card visible - no auto-hide
-    // The card will stay visible showing the last scanned employee
-
-    // Focus input immediately for next scan
-    this.focusInput();
-
-    // Handle input type changes
-    const inputTypeRadios = document.querySelectorAll('input[name="inputType"]');
-    inputTypeRadios.forEach((radio) => {
-      radio.addEventListener("change", () => {
-        this.focusInput();
-        if (this.barcodeTimeout) {
-          clearTimeout(this.barcodeTimeout);
-        }
-      });
+  // Update employee photo
+  const photo = document.getElementById("dashboardEmployeePhoto");
+  if (photo) {
+    photo.src = this.getDefaultImageDataURL();
+    this.setupImageWithFallback(
+      photo,
+      employee.uid,
+      `${employee.first_name} ${employee.last_name}`
+    ).catch((error) => {
+      console.warn(`Employee photo setup failed:`, error);
     });
+  }
 
-    // Listen for IPC events from main process using the exposed API
-    if (this.electronAPI) {
-      this.electronAPI.onSyncAttendanceToServer(() => {
-        this.performAttendanceSync(false, 0, true);
-      });
+  // Update employee name
+  const nameElement = document.getElementById("dashboardEmployeeName");
+  if (nameElement) {
+    nameElement.textContent = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
+  }
+
+  // Update department
+  const deptElement = document.getElementById("dashboardEmployeeDept");
+  if (deptElement) {
+    deptElement.textContent = employee.department || "No Department";
+  }
+
+  // Update ID number
+  const idElement = document.getElementById("dashboardEmployeeId");
+  if (idElement) {
+    idElement.textContent = `ID: ${employee.id_number}`;
+  }
+
+  // Determine if this is a clock IN or clock OUT
+  const isClockIn = clockType.includes("_in");
+  const isClockOut = clockType.includes("_out");
+
+  // Update clock type badge with appropriate color
+  const clockTypeElement = document.getElementById("dashboardClockType");
+  if (clockTypeElement) {
+    clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
+    
+    // Apply inline styles based on clock type
+    if (isClockIn) {
+      // GREEN for clock in
+      clockTypeElement.style.backgroundColor = "#10b981";
+      clockTypeElement.style.color = "white";
+      clockTypeElement.style.padding = "8px 16px";
+      clockTypeElement.style.borderRadius = "8px";
+      clockTypeElement.style.fontWeight = "bold";
+      clockTypeElement.style.fontSize = "14px";
+      clockTypeElement.style.display = "inline-block";
+    } else if (isClockOut) {
+      // RED for clock out
+      clockTypeElement.style.backgroundColor = "#ef4444";
+      clockTypeElement.style.color = "white";
+      clockTypeElement.style.padding = "8px 16px";
+      clockTypeElement.style.borderRadius = "8px";
+      clockTypeElement.style.fontWeight = "bold";
+      clockTypeElement.style.fontSize = "14px";
+      clockTypeElement.style.display = "inline-block";
+    }
+
+    // Add overtime indicator if applicable
+    if (isOvertimeSession) {
+      clockTypeElement.style.border = "2px solid #f59e0b";
     }
   }
+
+  // Update clock time with background color
+  const clockTimeElement = document.getElementById("dashboardClockTime");
+  if (clockTimeElement) {
+    clockTimeElement.textContent = new Date(clockTime).toLocaleTimeString();
+    
+    // Apply background color based on clock type
+    if (isClockIn) {
+      // Light green for clock in
+      clockTimeElement.style.backgroundColor = "#d1fae5";
+      clockTimeElement.style.color = "#065f46";
+    } else if (isClockOut) {
+      // Light red for clock out
+      clockTimeElement.style.backgroundColor = "#fee2e2";
+      clockTimeElement.style.color = "#991b1b";
+    }
+    
+    // Add padding and styling
+    clockTimeElement.style.padding = "8px 16px";
+    clockTimeElement.style.borderRadius = "8px";
+    clockTimeElement.style.fontWeight = "bold";
+    clockTimeElement.style.fontSize = "18px";
+    clockTimeElement.style.display = "inline-block";
+    clockTimeElement.style.marginLeft = "10px";
+  }
+
+  // Update hours breakdown
+  const hoursElement = document.getElementById("dashboardHours");
+  const totalHours = (regularHours || 0) + (overtimeHours || 0);
+
+  if (hoursElement) {
+    if (isOvertimeSession) {
+      hoursElement.innerHTML = `
+        <div class="hours-row">
+          <span class="hours-label">Regular:</span>
+          <span class="hours-value">${regularHours || 0}h</span>
+        </div>
+        <div class="hours-row">
+          <span class="hours-label">Overtime:</span>
+          <span class="hours-value overtime">${overtimeHours || 0}h</span>
+        </div>
+        <div class="hours-row total">
+          <span class="hours-label">Total:</span>
+          <span class="hours-value">${totalHours.toFixed(2)}h</span>
+        </div>
+        <div class="session-indicator overtime">🌙 ${sessionType || "Overtime Session"}</div>
+      `;
+    } else {
+      hoursElement.innerHTML = `
+        <div class="hours-row">
+          <span class="hours-label">Regular:</span>
+          <span class="hours-value">${regularHours || 0}h</span>
+        </div>
+        <div class="hours-row">
+          <span class="hours-label">Overtime:</span>
+          <span class="hours-value">${overtimeHours.toFixed(2)}h</span>
+        </div>
+        <div class="hours-row total">
+          <span class="hours-label">Total:</span>
+          <span class="hours-value">${totalHours.toFixed(2)}h</span>
+        </div>
+      `;
+    }
+  }
+
+  // Update the card background color based on clock type
+  if (isClockIn) {
+    dashboardEmployeeCard.style.border = "6px solid #10b981";
+    dashboardEmployeeCard.style.backgroundColor = "#f0fdf4";
+  } else if (isClockOut) {
+    dashboardEmployeeCard.style.border = "6px solid #ef4444";
+    dashboardEmployeeCard.style.backgroundColor = "#fef2f2";
+  }
+
+  // No animation - removed highlight class add/remove
+
+  // Show success status with appropriate message
+  if (isClockIn) {
+    this.showStatus("✓ Clocked In Successfully", "success");
+  } else if (isClockOut) {
+    this.showStatus("✓ Clocked Out Successfully", "success");
+  }
+
+  // Focus input immediately for next scan
+  this.focusInput();
+
+  // Handle input type changes
+  const inputTypeRadios = document.querySelectorAll('input[name="inputType"]');
+  inputTypeRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      this.focusInput();
+      if (this.barcodeTimeout) {
+        clearTimeout(this.barcodeTimeout);
+      }
+    });
+  });
+
+  // Listen for IPC events from main process using the exposed API
+  if (this.electronAPI) {
+    this.electronAPI.onSyncAttendanceToServer(() => {
+      this.performAttendanceSync(false, 0, true);
+    });
+  }
+}
 
   // Enhanced sync employees with download toast
   async syncEmployees() {
@@ -4702,139 +4753,142 @@ class AttendanceApp {
   }
 
   updateCurrentlyClocked(employees) {
-    const container = document.getElementById("currentlyClocked");
+  const container = document.getElementById("currentlyClocked");
 
-    if (!employees || employees.length === 0) {
-      container.innerHTML =
-        '<div class="loading">No employees currently clocked in</div>';
-      return;
-    }
-
-    const imageIds = [];
-
-    container.innerHTML = employees
-      .map((emp) => {
-        const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
-        imageIds.push({
-          id: empId,
-          uid: emp.employee_uid,
-          name: `${emp.first_name} ${emp.last_name}`,
-        });
-
-        // Determine session type and styling
-        const sessionType =
-          emp.sessionType ||
-          this.getSessionTypeFromClockType(emp.last_clock_type);
-        const isOvertime =
-          emp.isOvertimeSession ||
-          this.isOvertimeClockType(emp.last_clock_type);
-        const badgeClass = isOvertime ? "overtime" : "in";
-        const sessionIcon = this.getSessionIcon(emp.last_clock_type);
-
-        return `
-            <div class="employee-item ${isOvertime ? "overtime-employee" : ""}">
-                <img class="employee-avatar" 
-                     id="${empId}"
-                     src="${this.getDefaultImageDataURL()}"
-                     alt="${emp.first_name} ${emp.last_name}">
-                <div class="employee-details">
-                    <div class="employee-name">${emp.first_name} ${emp.last_name
-          }</div>
-                    <div class="employee-dept">${emp.department || "No Department"
-          }</div>
-                </div>
-                <div class="clock-badge ${badgeClass}">
-                    ${sessionIcon} ${sessionType}
-                </div>
-            </div>
-        `;
-      })
-      .join("");
-
-    // Load images asynchronously after DOM is updated
-    setTimeout(() => {
-      imageIds.forEach(({ id, uid, name }) => {
-        const imgElement = document.getElementById(id);
-        if (imgElement) {
-          // Use the bound method
-          this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
-            console.warn(`Image setup failed for ${uid}:`, error);
-          });
-        }
-      });
-    }, 10);
+  if (!employees || employees.length === 0) {
+    container.innerHTML =
+      '<div class="loading">No employees currently clocked in</div>';
+    return;
   }
 
-  updateTodayActivity(attendance) {
-    const container = document.getElementById("todayActivity");
+  const imageIds = [];
 
-    if (!attendance || attendance.length === 0) {
-      container.innerHTML = '<div class="loading">No activity today</div>';
-      return;
-    }
-
-    const attendanceSlice = attendance.slice(0, 10);
-    const imageIds = [];
-
-    container.innerHTML = attendanceSlice
-      .map((record, index) => {
-        const recordId = this.generateUniqueId(
-          `activity-${record.employee_uid}-${index}`
-        );
-        imageIds.push({
-          id: recordId,
-          uid: record.employee_uid,
-          name: `${record.first_name} ${record.last_name}`,
-        });
-
-        // Enhanced display for overtime sessions
-        const sessionType =
-          record.sessionType ||
-          this.getSessionTypeFromClockType(record.clock_type);
-        const isOvertime =
-          record.isOvertimeSession ||
-          this.isOvertimeClockType(record.clock_type);
-        const badgeClass = record.clock_type.includes("in") ? "in" : "out";
-        const finalBadgeClass = `${badgeClass} ${isOvertime ? "overtime" : ""}`;
-
-        return `
-            <div class="attendance-item ${isOvertime ? "overtime-record" : ""}">
-                <img class="attendance-avatar" 
-                     id="${recordId}"
-                     src="${this.getDefaultImageDataURL()}"
-                     alt="${record.first_name} ${record.last_name}">
-                <div class="attendance-details">
-                    <div class="attendance-name">${record.first_name} ${record.last_name
-          }</div>
-                    <div class="attendance-time">${new Date(
-            record.clock_time
-          ).toLocaleTimeString()}</div>
-                    ${isOvertime
-            ? '<div class="overtime-indicator">Overtime Session</div>'
-            : ""
-          }
-                </div>
-                <div class="clock-badge ${finalBadgeClass}">
-                    ${this.formatClockType(record.clock_type, sessionType)}
-                </div>
-            </div>
-        `;
-      })
-      .join("");
-
-    // Load images asynchronously after DOM is updated
-    setTimeout(() => {
-      imageIds.forEach(({ id, uid, name }) => {
-        const imgElement = document.getElementById(id);
-        if (imgElement) {
-          // Use the bound method
-          this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
-            console.warn(`Image setup failed for ${uid}:`, error);
-          });
-        }
+  container.innerHTML = employees
+    .map((emp) => {
+      const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
+      imageIds.push({
+        id: empId,
+        uid: emp.employee_uid,
+        name: `${emp.first_name} ${emp.last_name}`,
       });
-    }, 10);
+
+      const sessionType =
+        emp.sessionType ||
+        this.getSessionTypeFromClockType(emp.last_clock_type);
+      const isOvertime =
+        emp.isOvertimeSession ||
+        this.isOvertimeClockType(emp.last_clock_type);
+      const sessionIcon = this.getSessionIcon(emp.last_clock_type);
+
+      return `
+        <div class="employee-item ${isOvertime ? "overtime-employee" : ""}" style="background-color: #d1fae5; border: 1px solid #10b981; padding: 10px; border-radius: 8px; margin-bottom: 8px;">
+            <img class="employee-avatar" 
+                 id="${empId}"
+                 src="${this.getDefaultImageDataURL()}"
+                 alt="${emp.first_name} ${emp.last_name}"
+                 style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
+            <div class="employee-details">
+                <div class="employee-name" style="font-weight: bold;">${emp.first_name} ${emp.last_name}</div>
+                <div class="employee-dept" style="font-size: 12px; color: #6b7280;">${emp.department || "No Department"}</div>
+            </div>
+            <div class="clock-badge in" style="background-color: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px;">
+                ${sessionIcon} ${sessionType}
+            </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  // Load images asynchronously after DOM is updated
+  setTimeout(() => {
+    imageIds.forEach(({ id, uid, name }) => {
+      const imgElement = document.getElementById(id);
+      if (imgElement) {
+        this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
+          console.warn(`Image setup failed for ${uid}:`, error);
+        });
+      }
+    });
+  }, 10);
+}
+
+updateTodayActivity(attendance) {
+  const container = document.getElementById("todayActivity");
+
+  if (!attendance || attendance.length === 0) {
+    container.innerHTML = '<div class="loading">No activity today</div>';
+    return;
   }
+
+  // Filter to show only clock OUT records from today
+  const today = new Date().toDateString();
+  const clockOutRecords = attendance.filter(record => {
+    const recordDate = new Date(record.clock_time).toDateString();
+    return recordDate === today && record.clock_type.includes('out');
+  });
+
+  if (clockOutRecords.length === 0) {
+    container.innerHTML = '<div class="loading">No clock out activity today</div>';
+    return;
+  }
+
+  const attendanceSlice = clockOutRecords.slice(0, 10);
+  const imageIds = [];
+
+  container.innerHTML = attendanceSlice
+    .map((record, index) => {
+      const recordId = this.generateUniqueId(
+        `activity-${record.employee_uid}-${index}`
+      );
+      imageIds.push({
+        id: recordId,
+        uid: record.employee_uid,
+        name: `${record.first_name} ${record.last_name}`,
+      });
+
+      const sessionType =
+        record.sessionType ||
+        this.getSessionTypeFromClockType(record.clock_type);
+      const isOvertime =
+        record.isOvertimeSession ||
+        this.isOvertimeClockType(record.clock_type);
+      
+      // Use RED color for out badges
+      const badgeClass = isOvertime ? "overtime" : "";
+
+      return `
+        <div class="attendance-item ${isOvertime ? "overtime-record" : ""}">
+            <img class="attendance-avatar" 
+                 id="${recordId}"
+                 src="${this.getDefaultImageDataURL()}"
+                 alt="${record.first_name} ${record.last_name}">
+            <div class="attendance-details">
+                <div class="attendance-name">${record.first_name} ${record.last_name}</div>
+                <div class="attendance-time">${new Date(
+                  record.clock_time
+                ).toLocaleTimeString()}</div>
+                ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ""}
+            </div>
+            <div class="clock-badge out ${badgeClass}" style="background-color: #ef4444; color: white;">
+                ${this.formatClockType(record.clock_type, sessionType)}
+            </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  // Load images asynchronously after DOM is updated
+  setTimeout(() => {
+    imageIds.forEach(({ id, uid, name }) => {
+      const imgElement = document.getElementById(id);
+      if (imgElement) {
+        this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
+          console.warn(`Image setup failed for ${uid}:`, error);
+        });
+      }
+    });
+  }, 10);
+}
 
   // Helper function to determine if clock type is overtime
   isOvertimeClockType(clockType) {

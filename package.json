@@ -1,6 +1,6 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Fixing adding on/off for face detection.",
   "main": "src/main.js",
   "type": "commonjs",
