@@ -2976,19 +2976,18 @@ class AttendanceApp {
     }, 1500);
   }
 
-  showEmployeeDisplay(data) {
+  async showEmployeeDisplay(data) {
   const {
     employee,
     clockType,
     sessionType,
     clockTime,
-    regularHours,
-    overtimeHours,
     isOvertimeSession,
   } = data;
 
-  console.log("Displaying employee data on dashboard:", );
+  console.log("Displaying employee data on dashboard");
 
+  const dashboardEmployeeCard = document.getElementById('dashboardEmployeeCard');
   if (!dashboardEmployeeCard) {
     console.warn("Dashboard employee card not found");
     return;
@@ -3092,24 +3091,53 @@ class AttendanceApp {
     clockTimeElement.style.marginLeft = "10px";
   }
 
-  // Update hours breakdown
+  // 🆕 Fetch daily summary data for this employee's total hours today
+  let regularHours = 0;
+  let overtimeHours = 0;
+  let totalHours = 0;
+
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const summaryResult = await this.electronAPI.getDailySummary(today, today);
+    
+    if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
+      // Find the summary record for this specific employee
+      const employeeSummary = summaryResult.data.find(
+        record => record.employee_uid === employee.uid
+      );
+      
+      if (employeeSummary) {
+        regularHours = employeeSummary.regular_hours || 0;
+        overtimeHours = employeeSummary.overtime_hours || 0;
+        totalHours = employeeSummary.total_hours || 0;
+        
+        console.log(`Daily summary for ${employee.first_name}: Regular=${regularHours}h, OT=${overtimeHours}h, Total=${totalHours}h`);
+      } else {
+        console.log(`No daily summary found for employee ${employee.uid}, using zero values`);
+      }
+    }
+  } catch (error) {
+    console.warn("Error fetching daily summary:", error);
+    // Continue with zero values if fetch fails
+  }
+
+  // Update hours breakdown with daily summary data
   const hoursElement = document.getElementById("dashboardHours");
-  const totalHours = (regularHours || 0) + (overtimeHours || 0);
 
   if (hoursElement) {
     if (isOvertimeSession) {
       hoursElement.innerHTML = `
         <div class="hours-row">
           <span class="hours-label">Regular:</span>
-          <span class="hours-value">${regularHours || 0}h</span>
+          <span class="hours-value">${regularHours.toFixed(1)}h</span>
         </div>
         <div class="hours-row">
           <span class="hours-label">Overtime:</span>
-          <span class="hours-value overtime">${overtimeHours || 0}h</span>
+          <span class="hours-value overtime">${overtimeHours.toFixed(1)}h</span>
         </div>
         <div class="hours-row total">
           <span class="hours-label">Total:</span>
-          <span class="hours-value">${totalHours.toFixed(2)}h</span>
+          <span class="hours-value">${totalHours.toFixed(1)}h</span>
         </div>
         <div class="session-indicator overtime">🌙 ${sessionType || "Overtime Session"}</div>
       `;
@@ -3117,15 +3145,15 @@ class AttendanceApp {
       hoursElement.innerHTML = `
         <div class="hours-row">
           <span class="hours-label">Regular:</span>
-          <span class="hours-value">${regularHours || 0}h</span>
+          <span class="hours-value">${regularHours.toFixed(1)}h</span>
         </div>
         <div class="hours-row">
           <span class="hours-label">Overtime:</span>
-          <span class="hours-value">${overtimeHours.toFixed(2)}h</span>
+          <span class="hours-value">${overtimeHours.toFixed(1)}h</span>
         </div>
         <div class="hours-row total">
           <span class="hours-label">Total:</span>
-          <span class="hours-value">${totalHours.toFixed(2)}h</span>
+          <span class="hours-value">${totalHours.toFixed(1)}h</span>
         </div>
       `;
     }
@@ -3139,8 +3167,6 @@ class AttendanceApp {
     dashboardEmployeeCard.style.border = "6px solid #ef4444";
     dashboardEmployeeCard.style.backgroundColor = "#fef2f2";
   }
-
-  // No animation - removed highlight class add/remove
 
   // Show success status with appropriate message
   if (isClockIn) {
@@ -4215,6 +4241,8 @@ class AttendanceApp {
         this.currentDateRange.endDate
       );
 
+      console.log("ito ay daily attendance:", result);
+
       if (result.success) {
         this.summaryData = result.data;
         this.updateDailySummaryTable(result.data);
@@ -4779,6 +4807,15 @@ class AttendanceApp {
         emp.isOvertimeSession ||
         this.isOvertimeClockType(emp.last_clock_type);
       const sessionIcon = this.getSessionIcon(emp.last_clock_type);
+      
+      // Format clock in time
+      const clockInTime = emp.last_clock_time 
+        ? new Date(emp.last_clock_time).toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          })
+        : '--:--';
 
       return `
         <div class="employee-item ${isOvertime ? "overtime-employee" : ""}" style="background-color: #d1fae5; border: 1px solid #10b981; padding: 10px; border-radius: 8px; margin-bottom: 8px;">
@@ -4787,12 +4824,17 @@ class AttendanceApp {
                  src="${this.getDefaultImageDataURL()}"
                  alt="${emp.first_name} ${emp.last_name}"
                  style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
-            <div class="employee-details">
-                <div class="employee-name" style="font-weight: bold;">${emp.first_name} ${emp.last_name}</div>
-                <div class="employee-dept" style="font-size: 12px; color: #6b7280;">${emp.department || "No Department"}</div>
+            <div class="employee-details" style="flex: 1; margin-left: 12px;">
+                <div class="employee-name" style="font-weight: bold; font-size: 14px; color: #111827;">${emp.first_name} ${emp.last_name}</div>
+                <div class="employee-dept" style="font-size: 12px;">${emp.department || "No Department"}</div>
             </div>
-            <div class="clock-badge in" style="background-color: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px;">
-                ${sessionIcon} ${sessionType}
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                <div class="clock-badge in" style="background-color: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; white-space: nowrap;">
+                    ${sessionIcon} ${sessionType}
+                </div>
+                <div class="clock-in-time" style="font-size: 18px; color: #059669; font-weight: 600;">
+                    ⏰ ${clockInTime}
+                </div>
             </div>
         </div>
       `;
@@ -4812,7 +4854,7 @@ class AttendanceApp {
   }, 10);
 }
 
-updateTodayActivity(attendance) {
+async updateTodayActivity(attendance) {
   const container = document.getElementById("todayActivity");
 
   if (!attendance || attendance.length === 0) {
@@ -4820,8 +4862,10 @@ updateTodayActivity(attendance) {
     return;
   }
 
-  // Filter to show only clock OUT records from today
+  // Get today's date for filtering
   const today = new Date().toDateString();
+  
+  // Filter to show only clock OUT records from today
   const clockOutRecords = attendance.filter(record => {
     const recordDate = new Date(record.clock_time).toDateString();
     return recordDate === today && record.clock_type.includes('out');
@@ -4834,6 +4878,52 @@ updateTodayActivity(attendance) {
 
   const attendanceSlice = clockOutRecords.slice(0, 10);
   const imageIds = [];
+
+  // 🆕 Fetch daily summary data for ALL employees' total hours today
+  let employeeHoursMap = new Map();
+  try {
+    const todayDate = new Date().toISOString().split('T')[0];
+    const summaryResult = await this.electronAPI.getDailySummary(todayDate, todayDate);
+    
+    if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
+      // Create a map of employee_uid -> hours data
+      summaryResult.data.forEach(summary => {
+        employeeHoursMap.set(summary.employee_uid, {
+          regularHours: summary.regular_hours || 0,
+          overtimeHours: summary.overtime_hours || 0,
+          totalHours: summary.total_hours || 0
+        });
+      });
+      console.log(`Loaded daily summary for ${employeeHoursMap.size} employees`);
+    }
+  } catch (error) {
+    console.warn("Error fetching daily summary for activity:", error);
+    // Continue with empty map if fetch fails
+  }
+
+  // Helper function to find matching clock in time
+  const findClockInTime = (clockOutRecord, allAttendance) => {
+    const clockType = clockOutRecord.clock_type;
+    let correspondingInType = '';
+    
+    // Determine corresponding clock in type
+    if (clockType === 'morning_out') correspondingInType = 'morning_in';
+    else if (clockType === 'afternoon_out') correspondingInType = 'afternoon_in';
+    else if (clockType === 'evening_out') correspondingInType = 'evening_in';
+    else if (clockType === 'overtime_out') correspondingInType = 'overtime_in';
+    
+    if (!correspondingInType) return null;
+    
+    // Find the most recent clock in before this clock out
+    const clockInRecord = allAttendance.find(record => 
+      record.employee_uid === clockOutRecord.employee_uid &&
+      record.clock_type === correspondingInType &&
+      new Date(record.clock_time) <= new Date(clockOutRecord.clock_time) &&
+      new Date(record.clock_time).toDateString() === today
+    );
+    
+    return clockInRecord ? clockInRecord.clock_time : null;
+  };
 
   container.innerHTML = attendanceSlice
     .map((record, index) => {
@@ -4853,23 +4943,55 @@ updateTodayActivity(attendance) {
         record.isOvertimeSession ||
         this.isOvertimeClockType(record.clock_type);
       
+      // Find corresponding clock in time
+      const clockInTime = findClockInTime(record, attendance);
+      
+      // Format times
+      const clockOutTimeFormatted = new Date(record.clock_time).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      
+      const clockInTimeFormatted = clockInTime 
+        ? new Date(clockInTime).toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          })
+        : '--:--';
+      
+      // 🆕 Get total hours from daily summary
+      const employeeHours = employeeHoursMap.get(record.employee_uid);
+      const totalHoursToday = employeeHours ? employeeHours.totalHours : 0;
+      const totalHoursDisplay = totalHoursToday > 0 
+        ? `${totalHoursToday.toFixed(1)}h` 
+        : '';
+      
+      // Time range display
+      const timeRange = `${clockInTimeFormatted} - ${clockOutTimeFormatted}`;
+      
       // Use RED color for out badges
       const badgeClass = isOvertime ? "overtime" : "";
 
       return `
-        <div class="attendance-item ${isOvertime ? "overtime-record" : ""}">
+        <div class="attendance-item ${isOvertime ? "overtime-record" : ""}" style="padding: 12px; margin-bottom: 8px; border-radius: 8px;">
             <img class="attendance-avatar" 
                  id="${recordId}"
                  src="${this.getDefaultImageDataURL()}"
-                 alt="${record.first_name} ${record.last_name}">
-            <div class="attendance-details">
-                <div class="attendance-name">${record.first_name} ${record.last_name}</div>
-                <div class="attendance-time">${new Date(
-                  record.clock_time
-                ).toLocaleTimeString()}</div>
-                ${isOvertime ? '<div class="overtime-indicator">Overtime Session</div>' : ""}
+                 alt="${record.first_name} ${record.last_name}"
+                 style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
+            <div class="attendance-details" style="flex: 1; margin-left: 12px;">
+                <div class="attendance-name" style="font-weight: 600; font-size: 14px; color: #111827;">
+                  ${record.first_name} ${record.last_name}
+                </div>
+                <div class="attendance-time-range" style="font-size: 15px; color: #ff0000ff; margin-top: 2px;">
+                  ⏰ ${timeRange}
+                  ${totalHoursDisplay ? `<span style="margin-left: 8px; font-weight: 600; color: #ff0000ff;">${totalHoursDisplay}</span>` : ''}
+                </div>
+                ${isOvertime ? '<div class="overtime-indicator" style="font-size: 11px; color: #ff0000ff; margin-top: 2px;">🌙 Overtime Session</div>' : ""}
             </div>
-            <div class="clock-badge out ${badgeClass}" style="background-color: #ef4444; color: white;">
+            <div class="clock-badge out ${badgeClass}" style="background-color: #ef4444; color: white; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap;">
                 ${this.formatClockType(record.clock_type, sessionType)}
             </div>
         </div>
