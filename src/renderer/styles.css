@@ -21,43 +21,6 @@
   font-size: 0.9em;
 }
 
-/* .clock-badge {
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-weight: 600;
-      font-size: 14px;
-      display: inline-block;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .clock-badge.in {
-      background: #10b981;
-      color: white;
-    }
-
-    .clock-badge.out {
-      background: #ef4444;
-      color: white;
-    }
-
-    .clock-badge.overtime {
-      background: #f59e0b;
-      color: white;
-    } 
-    
-    .clock-time-large {
-      font-size: 18px;
-      font-weight: bold;
-      color: red;
-      background: rgba(255, 255, 255, 0.15);
-      padding: 6px 12px;
-      border-radius: 8px;
-    }
-    
-    */
-
 .sync-history-table th {
   background: #f3f4f6;
   padding: 10px 8px;

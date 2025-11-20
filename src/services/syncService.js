@@ -23,9 +23,15 @@ class SyncService {
         controller.abort()
       }, 30000) // 30 seconds timeout
 
+      // ✅ FIXED: Add query parameter to fetch ALL employees including Inactive
+      const syncUrl = new URL(serverUrl)
+      syncUrl.searchParams.set('includeAllStatuses', 'true')
+      
+      console.log("Fetching from URL:", syncUrl.toString())
+
       let response
       try {
-        response = await fetch(serverUrl, {
+        response = await fetch(syncUrl.toString(), {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -34,24 +40,9 @@ class SyncService {
           signal: controller.signal
         })
 
-        // Clear timeout if request succeeds
         clearTimeout(timeoutId)
       } catch (fetchError) {
         clearTimeout(timeoutId)
-
-        if (fetchError.name === 'AbortError') {
-          throw new Error("Request timed out after 30 seconds. Please check your network connection and server status.")
-        }
-
-        // Handle other network errors
-        if (fetchError.code === 'ENOTFOUND') {
-          throw new Error("Cannot reach server. Please check the server URL and your network connection.")
-        } else if (fetchError.code === 'ECONNREFUSED') {
-          throw new Error("Connection refused. Please check if the server is running.")
-        } else if (fetchError.code === 'ETIMEDOUT') {
-          throw new Error("Connection timed out. Please check your network connection.")
-        }
-
         throw fetchError
       }
 
@@ -66,57 +57,209 @@ class SyncService {
       let employees = []
       if (Array.isArray(data)) {
         employees = data
-      } else if (data.employees && Array.isArray(data.employees)) {  // ← Add this check
+      } else if (data.employees && Array.isArray(data.employees)) {
         employees = data.employees
       } else if (data.data && Array.isArray(data.data)) {
         employees = data.data
+      } else if (data.data && data.data.data && Array.isArray(data.data.data)) {
+        employees = data.data.data
       } else {
-        throw new Error("Invalid response format")
+        console.error("UNKNOWN API STRUCTURE:", data)
+        throw new Error("Invalid response format - cannot find employee array")
       }
 
       console.log(`Received ${employees.length} employee records`)
 
-      // Filter and map employee data
+      if (employees.length === 0) {
+        throw new Error("No employee data found in response")
+      }
+
+      // Map employee data with EXACT field names from API
       const mappedEmployees = employees
-        .map((emp) => ({
-          uid: emp.id,  // ← API uses 'id', not 'uid'
-          id_number: emp.idNumber,  // ← camelCase in API
-          id_barcode: emp.idBarcode,  // ← camelCase in API
-          first_name: emp.firstName,  // ← camelCase in API
-          middle_name: emp.middleName,  // ← camelCase in API
-          last_name: emp.lastName,  // ← camelCase in API
-          email: emp.email,
-          department: emp.department,
-          status: emp.status || "Active",
-          profile_picture: emp.profilePicture, // ← camelCase in API
-          face_descriptor: emp.faceDescriptor, // ← camelCase in API
-        }))
+        .map((emp) => {
+          const mapped = {
+            uid: emp.id,
+            id_number: emp.idNumber,
+            id_barcode: emp.idBarcode,
+            first_name: emp.firstName,
+            middle_name: emp.middleName,
+            last_name: emp.lastName,
+            email: emp.email,
+            department: emp.department,
+            status: emp.status || "Active",
+            profile_picture: emp.profilePicture,
+            face_descriptor: emp.faceDescriptor,
+          }
+          
+          // Log if any required field is missing
+          if (!mapped.uid || !mapped.first_name || !mapped.last_name) {
+            console.warn("⚠️  Missing required fields for employee:", {
+              hasUid: !!mapped.uid,
+              hasFirstName: !!mapped.first_name,
+              hasLastName: !!mapped.last_name,
+              original: emp
+            })
+          }
+          
+          return mapped
+        })
         .filter((emp) => emp.uid && emp.first_name && emp.last_name)
 
+      console.log(`=== MAPPING RESULTS ===`)
+      console.log(`Original count: ${employees.length}`)
+      console.log(`After mapping: ${mappedEmployees.length}`)
+      console.log(`Filtered out: ${employees.length - mappedEmployees.length}`)
+      
+      if (mappedEmployees.length > 0) {
+        console.log("Sample mapped employee:", JSON.stringify(mappedEmployees[0], null, 2))
+      }
+      console.log("======================")
+
       if (mappedEmployees.length === 0) {
-        throw new Error("No valid employee data found")
+        throw new Error("No valid employee data found after mapping")
       }
 
       console.log(`Processing ${mappedEmployees.length} valid employee records`)
 
-      // Insert employees into database
-      Employee.insertMany(mappedEmployees)
+      // ✅ FIXED: Update or insert employees instead of delete and reinsert
+      console.log("Syncing employees to database...")
+      
+      // Start a transaction for better reliability
+      const syncTransaction = db.transaction((employeeList) => {
+        let insertedCount = 0
+        let updatedCount = 0
+        let skippedCount = 0
 
-      // Update last sync timestamp
-      const updateStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
-      updateStmt.run("last_sync", Date.now().toString())
+        // Prepare statements
+        const checkStmt = db.prepare("SELECT uid, status FROM employees WHERE uid = ?")
+        
+        const updateStmt = db.prepare(`
+          UPDATE employees SET
+            id_number = ?,
+            id_barcode = ?,
+            first_name = ?,
+            middle_name = ?,
+            last_name = ?,
+            email = ?,
+            department = ?,
+            status = ?,
+            profile_picture = ?,
+            face_descriptor = ?
+          WHERE uid = ?
+        `)
+
+        const insertStmt = db.prepare(`
+          INSERT INTO employees (
+            uid, id_number, id_barcode, first_name, middle_name, last_name,
+            email, department, status, profile_picture, face_descriptor
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+
+        for (const employee of employeeList) {
+          try {
+            // Check if employee exists
+            const existingEmployee = checkStmt.get(employee.uid)
+
+            if (existingEmployee) {
+              // Log status change for debugging
+              if (existingEmployee.status !== employee.status) {
+                console.log(`📝 Status change for employee ${employee.uid} (${employee.first_name} ${employee.last_name}): "${existingEmployee.status}" → "${employee.status}"`)
+              }
+
+              // Update existing employee
+              const updateResult = updateStmt.run(
+                employee.id_number,
+                employee.id_barcode,
+                employee.first_name,
+                employee.middle_name,
+                employee.last_name,
+                employee.email,
+                employee.department,
+                employee.status,
+                employee.profile_picture,
+                employee.face_descriptor,
+                employee.uid
+              )
+              
+              if (updateResult.changes > 0) {
+                updatedCount++
+              } else {
+                skippedCount++
+              }
+            } else {
+              // Insert new employee
+              console.log(`➕ Inserting new employee ${employee.uid} (${employee.first_name} ${employee.last_name}) with status: "${employee.status}"`)
+              const insertResult = insertStmt.run(
+                employee.uid,
+                employee.id_number,
+                employee.id_barcode,
+                employee.first_name,
+                employee.middle_name,
+                employee.last_name,
+                employee.email,
+                employee.department,
+                employee.status,
+                employee.profile_picture,
+                employee.face_descriptor
+              )
+              insertedCount++
+            }
+          } catch (error) {
+            console.error(`❌ Failed to sync employee ${employee.uid} (${employee.first_name} ${employee.last_name}):`, error.message)
+          }
+        }
+
+        return { insertedCount, updatedCount, skippedCount }
+      })
+
+      // Execute the transaction
+      const { insertedCount, updatedCount, skippedCount } = syncTransaction(mappedEmployees)
+      console.log(`✓ Successfully inserted ${insertedCount} new employees`)
+      console.log(`✓ Successfully updated ${updatedCount} existing employees`)
+      console.log(`✓ Skipped ${skippedCount} employees (no changes)`)
+      
+      // IMPORTANT: Verify the update worked by checking a few records
+      console.log("\n=== VERIFICATION ===")
+      const sampleCheck = db.prepare("SELECT uid, first_name, last_name, status FROM employees LIMIT 50")
+      const samples = sampleCheck.all()
+      samples.forEach(emp => {
+        console.log(`Employee ${emp.uid} (${emp.first_name} ${emp.last_name}): status = "${emp.status}"`)
+      })
+      console.log("==================\n")
+
+      // Verify the sync worked
+    const verifyCount = db.prepare("SELECT COUNT(*) as count FROM employees").get()
+    console.log(`✓ Database verification: ${verifyCount.count} total employees in database`)
+
+    if (verifyCount.count === 0) {
+      throw new Error("Database sync verification failed - no employees found after sync")
+    }
+
+    // ✅ ADD THIS: Refresh the employee cache to include updated statuses
+    console.log('Refreshing employee cache...')
+    const employeeCache = require('../services/employeeCache')
+    await employeeCache.refresh(Employee)
+    console.log('✓ Employee cache refreshed')
+
+    // Update last sync timestamp
+    const updateSettingsStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+    updateSettingsStmt.run("last_sync", Date.now().toString())
 
       // Start profile sync in background using bulk download
       this.syncProfileImagesBulk(mappedEmployees).catch(error => {
         console.error("Profile sync background error:", error)
       })
 
-      console.log(`Successfully synced ${mappedEmployees.length} employees`)
+      const totalSynced = insertedCount + updatedCount
+      console.log(`Successfully synced ${totalSynced} employees (${insertedCount} new, ${updatedCount} updated, ${skippedCount} unchanged)`)
 
       return {
         success: true,
-        count: mappedEmployees.length,
-        message: `Synced ${mappedEmployees.length} employees successfully`,
+        count: totalSynced,
+        inserted: insertedCount,
+        updated: updatedCount,
+        skipped: skippedCount,
+        message: `Synced ${totalSynced} employees successfully (${insertedCount} new, ${updatedCount} updated)`,
       }
     } catch (error) {
       console.error("Sync error:", error)
@@ -330,25 +473,27 @@ class SyncService {
       // Retry mechanism for each record
       for (let attempt = 1; attempt <= maxRetries && !success; attempt++) {
         try {
-          const syncData = {
-            id: record.id,
-            employee_uid: record.employee_uid,
-            id_number: record.id_number,
-            id_barcode: record.id_barcode,
-            scanned_barcode: record.scanned_barcode,
-            clock_type: record.clock_type,
-            clock_time: record.clock_time,
-            regular_hours: record.regular_hours || 0,
-            overtime_hours: record.overtime_hours || 0,
-            date: record.date,
-            is_late: record.is_late || 0,
-            created_at: record.created_at,
-            employee_info: {
-              first_name: record.first_name,
-              last_name: record.last_name,
-              department: record.department
+          const syncData = [
+            {
+              id: record.id,
+              employee_uid: record.employee_uid,
+              id_number: record.id_number,
+              id_barcode: record.id_barcode,
+              scanned_barcode: record.scanned_barcode,
+              clock_type: record.clock_type,
+              clock_time: record.clock_time,
+              regular_hours: record.regular_hours || 0,
+              overtime_hours: record.overtime_hours || 0,
+              date: record.date,
+              is_late: record.is_late || 0,
+              created_at: record.created_at,
+              employee_info: {
+                first_name: record.first_name,
+                last_name: record.last_name,
+                department: record.department
+              }
             }
-          }
+          ]
 
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout

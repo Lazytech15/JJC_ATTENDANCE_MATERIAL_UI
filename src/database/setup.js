@@ -434,59 +434,67 @@ function runMigrations() {
     if (currentVersion < 2) {
       console.log('Running migration 2: Updating clock_type constraints...')
       
-      // Check if we need to recreate the table with new constraints
-      const tableInfo = db.prepare("PRAGMA table_info(attendance)").all()
-      const clockTypeColumn = tableInfo.find(col => col.name === 'clock_type')
-      
-      // Since SQLite doesn't allow modifying CHECK constraints directly,
-      // we'll create a new table and migrate data if needed
       try {
-        // Create temporary table with new constraints
-        db.exec(`
-          CREATE TABLE IF NOT EXISTS attendance_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_uid INTEGER,
-            id_number TEXT,
-            clock_type TEXT CHECK(clock_type IN (
-              'morning_in', 'morning_out', 
-              'afternoon_in', 'afternoon_out',
-              'evening_in', 'evening_out',
-              'overtime_in', 'overtime_out'
-            )),
-            clock_time DATETIME,
-            regular_hours REAL DEFAULT 0,
-            overtime_hours REAL DEFAULT 0,
-            date TEXT,
-            is_late INTEGER DEFAULT 0,
-            is_synced INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (employee_uid) REFERENCES employees (uid)
-          )
-        `)
-
-        // Check if we have any data that would conflict with new constraints
-        const conflictingData = db.prepare(`
-          SELECT COUNT(*) as count FROM attendance 
-          WHERE clock_type NOT IN (
-            'morning_in', 'morning_out', 
-            'afternoon_in', 'afternoon_out',
-            'evening_in', 'evening_out',
-            'overtime_in', 'overtime_out'
-          )
+        // Check current table structure
+        const currentTableCheck = db.prepare(`
+          SELECT sql FROM sqlite_master 
+          WHERE type='table' AND name='attendance'
         `).get()
 
-        if (conflictingData.count === 0) {
-          console.log('✓ No conflicting data found, constraints are compatible')
+        // Only migrate if the old constraint is still in place
+        if (currentTableCheck && !currentTableCheck.sql.includes('evening_in')) {
+          console.log('Old attendance table detected, recreating with new constraints...')
+
+          // Disable foreign key constraints temporarily
+          db.exec('PRAGMA foreign_keys=OFF')
+
+          // Create new table with updated constraints
+          db.exec(`
+            CREATE TABLE attendance_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              employee_uid INTEGER,
+              id_number TEXT,
+              scanned_barcode TEXT,
+              clock_type TEXT CHECK(clock_type IN (
+                'morning_in', 'morning_out', 
+                'afternoon_in', 'afternoon_out',
+                'evening_in', 'evening_out',
+                'overtime_in', 'overtime_out'
+              )),
+              clock_time DATETIME,
+              regular_hours REAL DEFAULT 0,
+              overtime_hours REAL DEFAULT 0,
+              date TEXT,
+              is_late INTEGER DEFAULT 0,
+              is_synced INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (employee_uid) REFERENCES employees (uid)
+            )
+          `)
+
+          // Copy all data from old table to new table
+          db.exec(`
+            INSERT INTO attendance_new 
+            SELECT id, employee_uid, id_number, scanned_barcode, clock_type, clock_time, 
+                   regular_hours, overtime_hours, date, is_late, is_synced, created_at 
+            FROM attendance
+          `)
+
+          // Drop old table and rename new one
+          db.exec('DROP TABLE attendance')
+          db.exec('ALTER TABLE attendance_new RENAME TO attendance')
+
+          // Re-enable foreign key constraints
+          db.exec('PRAGMA foreign_keys=ON')
+
+          console.log('✓ Migration 2: Attendance table successfully updated with new clock_type constraints')
         } else {
-          console.log(`⚠ Found ${conflictingData.count} records with old clock types, keeping them for compatibility`)
+          console.log('✓ Migration 2: Attendance table already has new constraints')
         }
 
-        // Drop the temporary table since main table already exists
-        db.exec('DROP TABLE IF EXISTS attendance_new')
-        
-        console.log('✓ Migration 2: Clock type constraints updated')
       } catch (error) {
-        console.log('- Migration 2: Clock type constraints already compatible')
+        console.log('⚠ Migration 2 error:', error.message)
+        db.exec('PRAGMA foreign_keys=ON') // Ensure foreign keys are re-enabled
       }
 
       const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")

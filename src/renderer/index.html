@@ -2418,7 +2418,108 @@
   z-index: 1;
 }
 
+.inactive-employee-alert-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.3s ease;
+}
 
+.inactive-employee-alert {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 500px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.4s ease;
+  color: white;
+}
+
+.inactive-employee-alert .alert-icon {
+  font-size: 80px;
+  margin-bottom: 20px;
+  animation: pulse 1s infinite;
+}
+
+.inactive-employee-alert h2 {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 15px;
+  color: white;
+}
+
+.inactive-employee-alert .employee-name {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: #fef2f2;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 10px 20px;
+  border-radius: 10px;
+  display: inline-block;
+}
+
+.inactive-employee-alert .alert-message {
+  font-size: 18px;
+  line-height: 1.6;
+  margin-bottom: 30px;
+  color: #fef2f2;
+}
+
+.inactive-employee-alert .alert-close-btn {
+  background: white;
+  color: #dc2626;
+  border: none;
+  padding: 15px 40px;
+  font-size: 18px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.inactive-employee-alert .alert-close-btn:hover {
+  background: #fef2f2;
+  transform: scale(1.05);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
   </style>
 </head>
 

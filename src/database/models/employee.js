@@ -21,39 +21,38 @@ class Employee {
       return employeeCache.getAll()
     }
 
-    // Otherwise, fetch from database (fallback)
-    const db = getDatabase()
-    const stmt = db.prepare("SELECT * FROM employees WHERE status = ? ORDER BY first_name, last_name")
-    return stmt.all("Active")
-  }
+  const db = getDatabase()
+  const stmt = db.prepare("SELECT * FROM employees ORDER BY last_name, first_name")
+  return stmt.all()
+}
 
   /**
    * Find by ID number (from cache)
    */
-  static findByIdNumber(idNumber) {
-    if (employeeCache.isLoaded()) {
-      return employeeCache.findByIdNumber(idNumber)
-    }
-
-    // Fallback to database
-    const db = getDatabase()
-    const stmt = db.prepare("SELECT * FROM employees WHERE id_number = ? AND status = ?")
-    return stmt.get(idNumber, "Active")
+static findByIdNumber(idNumber) {
+  if (employeeCache.isLoaded()) {
+    return employeeCache.findByIdNumber(idNumber)
   }
+
+  // Fallback to database - REMOVED status filter
+  const db = getDatabase()
+  const stmt = db.prepare("SELECT * FROM employees WHERE id_number = ?")
+  return stmt.get(idNumber)
+}
 
   /**
    * Find by barcode (from cache)
    */
-  static findByBarcode(barcode) {
-    if (employeeCache.isLoaded()) {
-      return employeeCache.findByBarcode(barcode)
-    }
-
-    // Fallback to database
-    const db = getDatabase()
-    const stmt = db.prepare("SELECT * FROM employees WHERE id_barcode = ? AND status = ?")
-    return stmt.get(barcode, "Active")
+static findByBarcode(barcode) {
+  if (employeeCache.isLoaded()) {
+    return employeeCache.findByBarcode(barcode)
   }
+
+  // Fallback to database - REMOVED status filter to allow checking inactive employees
+  const db = getDatabase()
+  const stmt = db.prepare("SELECT * FROM employees WHERE id_barcode = ?")
+  return stmt.get(barcode)
+}
 
   /**
    * Find by UID (from cache)
@@ -70,10 +69,10 @@ class Employee {
   }
 
   /**
-   * Insert or update many employees
-   * This also refreshes the cache
+   * ✅ FIXED: Insert or update many employees
+   * This also refreshes the cache ASYNCHRONOUSLY
    */
-  static insertMany(employees) {
+  static async insertMany(employees) {
     const db = getDatabase()
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO employees 
@@ -99,10 +98,13 @@ class Employee {
       }
     })
 
+    // Execute the transaction
     const result = transaction(employees)
 
-    // Refresh cache after insert
-    employeeCache.load(this)
+    // ✅ FIX: Wait for cache to actually refresh
+    console.log('Database updated, refreshing employee cache...')
+    await employeeCache.load(this)
+    console.log('✓ Employee cache refreshed successfully')
 
     return result
   }

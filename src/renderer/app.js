@@ -3815,7 +3815,16 @@ class AttendanceApp {
           this.hideLoadingScreen();
         }
 
-        this.showStatus(result.error || "Employee not found", "error");
+        // ✅ NEW: Handle inactive employee case with special alert
+        if (result.isInactive) {
+          // Show prominent alert for inactive employees
+          this.showInactiveEmployeeAlert(result.employeeName);
+          this.showStatus(`⛔ Account Disabled: ${result.employeeName}`, "error");
+        } else {
+          // Handle other errors normally
+          this.showStatus(result.error || "Employee not found", "error");
+        }
+        
         this.focusInput();
       }
     } catch (error) {
@@ -3842,6 +3851,42 @@ class AttendanceApp {
       setTimeout(() => this.focusInput(), 50);
     }
   }
+
+  showInactiveEmployeeAlert(employeeName) {
+  // Create modal/alert overlay
+  const alertOverlay = document.createElement('div');
+  alertOverlay.className = 'inactive-employee-alert-overlay';
+  alertOverlay.innerHTML = `
+    <div class="inactive-employee-alert">
+      <div class="alert-icon">⛔</div>
+      <h2>Account Disabled</h2>
+      <p class="employee-name">${employeeName}</p>
+      <p class="alert-message">
+        This employee's account has been disabled.<br>
+        Please proceed to the admin office to verify.
+      </p>
+      <button class="alert-close-btn" onclick="this.closest('.inactive-employee-alert-overlay').remove()">
+        Close
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(alertOverlay);
+  
+  // Auto-close after 8 seconds
+  setTimeout(() => {
+    if (alertOverlay.parentNode) {
+      alertOverlay.remove();
+    }
+  }, 8000);
+  
+  // Close on overlay click
+  alertOverlay.addEventListener('click', (e) => {
+    if (e.target === alertOverlay) {
+      alertOverlay.remove();
+    }
+  });
+}
 
   deferredOperations(data) {
     // Queue these operations to run after a short delay

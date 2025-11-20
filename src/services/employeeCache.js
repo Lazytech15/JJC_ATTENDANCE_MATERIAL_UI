@@ -32,7 +32,7 @@ class EmployeeCache {
       this.employeesByBarcode.clear()
       this.employeesByUid.clear()
 
-      // Build lookup maps for O(1) access
+      // ✅ UPDATED: Build lookup maps for ALL employees regardless of status
       employees.forEach(emp => {
         if (emp.id_number) {
           this.employeesByIdNumber.set(emp.id_number, emp)
@@ -46,7 +46,7 @@ class EmployeeCache {
       })
 
       this.lastUpdated = new Date()
-      console.log(`Cached ${employees.length} employees`)
+      console.log(`Cached ${employees.length} employees (all statuses included)`)
     } finally {
       this.isLoading = false
     }
@@ -61,16 +61,26 @@ class EmployeeCache {
 
   /**
    * Find employee by ID number (O(1) lookup)
+   * ✅ UPDATED: Returns employee regardless of status
    */
   findByIdNumber(idNumber) {
-    return this.employeesByIdNumber.get(idNumber) || null
+    const employee = this.employeesByIdNumber.get(idNumber) || null
+    if (employee) {
+      console.log(`Cache: Found employee ${employee.first_name} ${employee.last_name} with status: "${employee.status}"`)
+    }
+    return employee
   }
 
   /**
    * Find employee by barcode (O(1) lookup)
+   * ✅ UPDATED: Returns employee regardless of status
    */
   findByBarcode(barcode) {
-    return this.employeesByBarcode.get(barcode) || null
+    const employee = this.employeesByBarcode.get(barcode) || null
+    if (employee) {
+      console.log(`Cache: Found employee ${employee.first_name} ${employee.last_name} with status: "${employee.status}"`)
+    }
+    return employee
   }
 
   /**
@@ -81,11 +91,22 @@ class EmployeeCache {
   }
 
   /**
+   * ✅ NEW: Refresh cache (useful after employee status updates)
+   */
+  async refresh(Employee) {
+    console.log('Refreshing employee cache...')
+    this.clear()
+    await this.load(Employee)
+  }
+
+  /**
    * Get cache statistics
    */
   getStats() {
     return {
       totalEmployees: this.employees?.length || 0,
+      activeEmployees: this.employees?.filter(e => e.status === 'Active').length || 0,
+      inactiveEmployees: this.employees?.filter(e => e.status === 'Inactive').length || 0,
       lastUpdated: this.lastUpdated,
       cacheAge: this.lastUpdated 
         ? Math.floor((Date.now() - this.lastUpdated.getTime()) / 1000) 

@@ -17,7 +17,6 @@ const { broadcastUpdate } = require("../../services/websocket")
 const profileService = require("../../services/profileService")
 const dateService = require("../../services/dateService")
 
-// Enhanced clockAttendance function with daily summary updates and duplicate prevention
 async function clockAttendance(event, { input, inputType = "barcode" }) {
   try {
     // Find employee by barcode or ID number
@@ -28,6 +27,10 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
       employee = Employee.findByIdNumber(input)
     }
 
+    if (employee) {
+        console.log(`Found employee ${employee.first_name} ${employee.last_name} with status: "${employee.status}"`);
+      }
+
     if (!employee) {
       return {
         success: false,
@@ -36,6 +39,21 @@ async function clockAttendance(event, { input, inputType = "barcode" }) {
         inputType: inputType,
       }
     }
+
+
+
+    // ✅ NEW: Check if employee status is Inactive
+      if (employee.status === 'Inactive') {
+        console.log(`⛔ Inactive employee attempted to clock: ${employee.first_name} ${employee.last_name} (ID: ${employee.uid})`)
+        return {
+          success: false,
+          error: `Employee ${employee.first_name} ${employee.last_name} account has been disabled. Please proceed to the admin office to verify.`,
+          isInactive: true,
+          employeeName: `${employee.first_name} ${employee.last_name}`,
+          input: input,
+          inputType: inputType,
+        }
+      }
 
     const today = dateService.getCurrentDate()
     const currentDateTime = new Date(dateService.getCurrentDateTime())
