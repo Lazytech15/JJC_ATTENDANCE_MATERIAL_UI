@@ -2520,6 +2520,83 @@
     transform: scale(1.1);
   }
 }
+
+/* Updated styles for editable synced records */
+.synced-row {
+  background: #f0f9ff !important;
+  border-left: 4px solid #3b82f6 !important;
+}
+
+.synced-row:hover {
+  background: #e0f2fe !important;
+}
+
+.unsynced-row {
+  background: #fffbeb !important;
+  border-left: 4px solid #f59e0b !important;
+}
+
+.unsynced-row:hover {
+  background: #fef3c7 !important;
+}
+
+/* Info badge for synced but editable */
+.status-badge.info {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* Add visual feedback on edit */
+.editable-cell:focus {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.editable-select:focus {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+}
+
+/* Add to your styles.css or in a <style> tag */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+#twoFactorPin:focus {
+  outline: 3px solid #3b82f6;
+  border-color: #3b82f6;
+}
   </style>
 </head>
 
@@ -2723,6 +2800,7 @@
             📊 Daily Reports
           </button>
           <button class="settings-tab" data-tab="sync">🔄 Sync Status</button>
+          <button class="settings-tab" data-tab="editor">✏️ Data Editor</button>
           <button class="settings-tab" data-tab="performance">
             ⚡ Performance
           </button>
@@ -2775,6 +2853,23 @@
                 </label>
               </div>
 
+              <!-- Add to General Settings panel -->
+              <div class="form-group">
+                <label for="authPin">Authentication PIN</label>
+                <input 
+                  type="text" 
+                  id="authPin" 
+                  name="auth_pin" 
+                  placeholder="4-6 digit PIN (default: 1234)"
+                  maxlength="6"
+                  autocomplete="off"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
+                />
+                <div class="help-text">
+                  Used for authenticating edits and deletions. Keep this secure.
+                </div>
+              </div>
 
               <div class="button-group">
                 <button type="button" class="btn btn-success" id="syncNowBtn">
@@ -2844,6 +2939,8 @@
                   📥 Download Excel
                 </button>
               </div>
+
+              
 
               <!-- Summary Stats -->
               <div class="summary-stats" id="summaryStats">
@@ -2929,6 +3026,8 @@
               </div>
             </div>
           </div>
+
+          <div id="localDataEditor"></div>
 
           <!-- Performance Panel -->
           <div class="settings-panel" id="performancePanel">
@@ -3016,6 +3115,49 @@
     <!-- Download Toast -->
     <div class="download-toast" id="downloadToast"></div>
   </div>
+
+  <!-- 2FA Authentication Modal -->
+<div class="modal" id="twoFactorModal" style="display: none;">
+  <div class="modal-content" style="max-width: 400px;">
+    <div class="modal-header">
+      <h2>🔐 Authentication Required</h2>
+      <button class="close-btn" onclick="document.getElementById('twoFactorModal').style.display='none'">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom: 20px; color: #6b7280;">
+        <strong id="twoFactorAction">This action</strong> requires authentication.
+        <br>Enter your PIN code to continue.
+      </p>
+      
+      <div class="form-group">
+        <label for="twoFactorPin">PIN Code</label>
+          <input 
+            type="password" 
+            id="twoFactorPin" 
+            placeholder="Enter 4-6 digit PIN"
+            maxlength="6"
+            autocomplete="off"
+            style="text-align: center; font-size: 24px; letter-spacing: 8px;"
+          />
+        <div class="help-text">
+          Default PIN: 1234 (Change in Settings)
+        </div>
+      </div>
+      
+      <div id="twoFactorError" style="display: none; padding: 10px; background: #fee2e2; color: #991b1b; border-radius: 6px; margin: 10px 0;">
+      </div>
+      
+      <div class="button-group" style="margin-top: 20px;">
+        <button id="twoFactorSubmit" class="primary-button" style="width: 100%;">
+          ✓ Verify & Continue
+        </button>
+        <button id="twoFactorCancel" class="secondary-button" style="width: 100%;">
+          ✕ Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
   <script>
     // FIXED: Proper way to update header colors dynamically
     let testTime = null; // For testing different times

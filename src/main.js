@@ -4,7 +4,8 @@ const path = require("path")
 const fs = require("fs")
 const { autoUpdater } = require("electron-updater")
 const LRU = require('lru-cache')
-const { getDatabase  } = require("./database/setup");
+const { getDatabase, updateDailyAttendanceSummary  } = require("./database/setup");
+const { getSettings  } = require("./api/routes/settings");
 const { startWebSocketServer } = require('./services/websocket');
 const Employee = require('./database/models/employee');
 
@@ -1305,7 +1306,522 @@ function createSettingsWindow() {
   settingsWindow.on("closed", () => {
     settingsWindow = null
   })
+
+  // Add these new IPC handlers for local data editing
+
+
 }
+
+// Get attendance records for editing
+ipcMain.handle('get-attendance-for-editing', async (event, options) => {
+  try {
+    const { startDate, endDate, employeeUid } = options;
+    const db = getDatabase();
+    
+    let query = `
+      SELECT a.*, e.first_name, e.last_name, e.department
+      FROM attendance a
+      JOIN employees e ON a.employee_uid = e.uid
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (startDate) {
+      query += ' AND a.date >= ?';
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ' AND a.date <= ?';
+      params.push(endDate);
+    }
+    
+    if (employeeUid) {
+      query += ' AND a.employee_uid = ?';
+      params.push(employeeUid);
+    }
+    
+    query += ' ORDER BY a.date DESC, a.clock_time DESC LIMIT 500';
+    
+    const stmt = db.prepare(query);
+    const records = stmt.all(...params);
+    
+    return {
+      success: true,
+      data: records
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Get summaries for editing
+ipcMain.handle('get-summaries-for-editing', async (event, options) => {
+  try {
+    const { startDate, endDate, employeeUid } = options;
+    const db = getDatabase();
+    
+    let query = `
+      SELECT * FROM daily_attendance_summary
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (startDate) {
+      query += ' AND date >= ?';
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ' AND date <= ?';
+      params.push(endDate);
+    }
+    
+    if (employeeUid) {
+      query += ' AND employee_uid = ?';
+      params.push(employeeUid);
+    }
+    
+    query += ' ORDER BY date DESC, employee_name ASC LIMIT 500';
+    
+    const stmt = db.prepare(query);
+    const records = stmt.all(...params);
+    
+    return {
+      success: true,
+      data: records
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+ipcMain.handle('update-attendance-field', async (event, { id, field, value }) => {
+  try {
+    const db = getDatabase();
+    
+    // Get record info
+    const record = db.prepare('SELECT employee_uid, date, is_synced FROM attendance WHERE id = ?').get(id);
+    
+    if (!record) {
+      return { success: false, error: 'Record not found' };
+    }
+    
+    // Validate field
+    const allowedFields = ['date', 'clock_type', 'clock_time', 'regular_hours', 'overtime_hours', 'is_late'];
+    if (!allowedFields.includes(field)) {
+      return { success: false, error: 'Invalid field' };
+    }
+    
+    // ✅ Special handling for clock_time to ensure timezone-neutral format
+    if (field === 'clock_time') {
+      if (typeof value === 'string') {
+        value = value.replace('Z', '').replace(/[+-]\d{2}:\d{2}$/, '');
+        
+        if (!value.includes('.')) {
+          value += '.000';
+        } else if (!value.match(/\.\d{3}$/)) {
+          value = value.split('.')[0] + '.000';
+        }
+        
+        console.log(`✓ Formatted clock_time to timezone-neutral format: ${value}`);
+      }
+    }
+    
+    // ✅ NEW: Check if this is a manual hour edit
+const isManualHourEdit = (field === 'regular_hours' || field === 'overtime_hours');
+
+// Update the field AND mark as unsynced
+const updateQuery = db.prepare(`
+  UPDATE attendance 
+  SET ${field} = ?, is_synced = 0 
+  WHERE id = ?
+`);
+updateQuery.run(value, id);
+
+// ✅ IMPROVED: For manual hour edits, just update summary totals without recalculation
+if (isManualHourEdit) {
+  console.log(`✓ Manual hour edit detected for field ${field}, updating summary totals only`);
+  
+  // Get all attendance records for this employee-date
+  const allRecords = db.prepare(`
+    SELECT regular_hours, overtime_hours 
+    FROM attendance 
+    WHERE employee_uid = ? AND date = ?
+  `).all(record.employee_uid, record.date);
+  
+  // Calculate new totals
+  const totalRegular = allRecords.reduce((sum, r) => sum + (r.regular_hours || 0), 0);
+  const totalOvertime = allRecords.reduce((sum, r) => sum + (r.overtime_hours || 0), 0);
+  
+  // Update summary with new totals (don't recalculate from clock times)
+  db.prepare(`
+    UPDATE daily_attendance_summary 
+    SET regular_hours = ?,
+        overtime_hours = ?,
+        total_hours = ?,
+        last_updated = CURRENT_TIMESTAMP
+    WHERE employee_uid = ? AND date = ?
+  `).run(totalRegular, totalOvertime, totalRegular + totalOvertime, record.employee_uid, record.date);
+  
+} else {
+  // For other field edits, do full recalculation
+  updateDailyAttendanceSummary(record.employee_uid, record.date, db);
+}
+
+const wasAlreadySynced = record.is_synced ? ' (marked as unsynced for re-upload)' : '';
+console.log(`✓ Updated attendance field ${field} for record ${id}${wasAlreadySynced}`);
+
+return { 
+  success: true, 
+  markedUnsynced: record.is_synced === 1,
+  message: wasAlreadySynced ? 'Record updated and marked for re-sync' : 'Record updated',
+  manualEdit: isManualHourEdit
+};
+  } catch (error) {
+    console.error('Update attendance field error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete single attendance record (REAL FIX)
+ipcMain.handle('delete-attendance-record', async (event, id) => {
+  try {
+    const db = getDatabase();
+    
+    // Get record info before deleting
+    const record = db.prepare('SELECT is_synced, employee_uid, date FROM attendance WHERE id = ?').get(id);
+    
+    if (!record) {
+      return { success: false, error: 'Record not found' };
+    }
+    
+    const wasSynced = record.is_synced === 1;
+    
+    // ✅ STEP 1: Delete from attendance_statistics FIRST (this has FK to attendance)
+    console.log(`Deleting statistics for attendance record ${id}`);
+    db.prepare(`
+      DELETE FROM attendance_statistics 
+      WHERE attendance_id = ? OR clock_out_id = ?
+    `).run(id, id);
+    
+    // ✅ STEP 2: Delete from daily_attendance_summary
+    console.log(`Deleting summary for employee ${record.employee_uid} on ${record.date}`);
+    db.prepare(`
+      DELETE FROM daily_attendance_summary 
+      WHERE employee_uid = ? AND date = ?
+    `).run(record.employee_uid, record.date);
+    
+    // ✅ STEP 3: Now delete the attendance record
+    db.prepare('DELETE FROM attendance WHERE id = ?').run(id);
+    
+    updateDailyAttendanceSummary(record.employee_uid, record.date, db);
+    
+    console.log(`✓ Deleted attendance record ${id} (including related statistics and summary)`);
+    
+    return { 
+      success: true,
+      wasSynced: wasSynced,
+      message: 'Record deleted successfully'
+    };
+  } catch (error) {
+    console.error('Delete attendance record error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Bulk delete attendance records (REAL FIX)
+ipcMain.handle('bulk-delete-attendance', async (event, ids) => {
+  try {
+    const db = getDatabase();
+    
+    const placeholders = ids.map(() => '?').join(',');
+    
+    // Get affected employee-date combinations
+    const affectedRecords = db.prepare(`
+      SELECT DISTINCT employee_uid, date, MAX(is_synced) as had_synced 
+      FROM attendance 
+      WHERE id IN (${placeholders})
+      GROUP BY employee_uid, date
+    `).all(...ids);
+    
+    // ✅ STEP 1: Delete from attendance_statistics FIRST
+    console.log(`Deleting statistics for ${ids.length} attendance records`);
+    db.prepare(`
+      DELETE FROM attendance_statistics 
+      WHERE attendance_id IN (${placeholders}) OR clock_out_id IN (${placeholders})
+    `).run(...ids, ...ids);
+    
+    // ✅ STEP 2: Delete from daily_attendance_summary
+    console.log(`Deleting ${affectedRecords.length} summaries`);
+    affectedRecords.forEach(record => {
+      db.prepare(`
+        DELETE FROM daily_attendance_summary 
+        WHERE employee_uid = ? AND date = ?
+      `).run(record.employee_uid, record.date);
+    });
+    
+    // ✅ STEP 3: Delete all attendance records
+    db.prepare(`DELETE FROM attendance WHERE id IN (${placeholders})`).run(...ids);
+    
+    affectedRecords.forEach(record => {
+      updateDailyAttendanceSummary(record.employee_uid, record.date, db);
+    });
+    
+    const hadSynced = affectedRecords.some(r => r.had_synced);
+    
+    console.log(`✓ Bulk deleted ${ids.length} attendance records (including statistics and summaries)`);
+    
+    return { 
+      success: true,
+      hadSynced: hadSynced,
+      affectedSummaries: affectedRecords.length,
+      deleted: ids.length
+    };
+  } catch (error) {
+    console.error('Bulk delete attendance error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Update summary field
+ipcMain.handle('update-summary-field', async (event, { id, field, value }) => {
+  try {
+    const db = getDatabase();
+    const allowedFields = [
+      'regular_hours', 
+      'overtime_hours',
+      'is_incomplete',
+      'has_late_entry',
+      'has_overtime'
+    ];
+    
+    if (!allowedFields.includes(field)) {
+      throw new Error('Invalid field');
+    }
+    
+    // Update the field
+    if (field === 'regular_hours' || field === 'overtime_hours') {
+      const stmt = db.prepare(`
+        UPDATE daily_attendance_summary 
+        SET ${field} = ?, 
+            total_hours = (
+              CASE WHEN '${field}' = 'regular_hours' 
+              THEN ? + overtime_hours
+              ELSE regular_hours + ?
+              END
+            ),
+            last_updated = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      
+      stmt.run(value, value, value, id);
+    } else {
+      const stmt = db.prepare(`
+        UPDATE daily_attendance_summary 
+        SET ${field} = ?,
+            last_updated = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      
+      stmt.run(value, id);
+    }
+    
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete summary record
+ipcMain.handle('delete-summary-record', async (event, id) => {
+  try {
+    const db = getDatabase();
+    const stmt = db.prepare('DELETE FROM daily_attendance_summary WHERE id = ?');
+    stmt.run(id);
+    
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Bulk delete summaries
+ipcMain.handle('bulk-delete-summary', async (event, ids) => {
+  try {
+    const db = getDatabase();
+    const stmt = db.prepare(`
+      DELETE FROM daily_attendance_summary 
+      WHERE id IN (${ids.map(() => '?').join(',')})
+    `);
+    stmt.run(...ids);
+    
+    return { success: true, deleted: ids.length };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Recalculate summaries
+ipcMain.handle('recalculate-summaries', async (event, ids) => {
+  try {
+    const db = getDatabase();
+    const { rebuildDailyAttendanceSummary } = require('./database/setup');
+    
+    // Get employee-dates for selected summaries
+    const records = db.prepare(`
+      SELECT DISTINCT employee_uid, date 
+      FROM daily_attendance_summary 
+      WHERE id IN (${ids.map(() => '?').join(',')})
+    `).all(...ids);
+    
+    // Rebuild each summary
+    records.forEach(record => {
+      rebuildDailyAttendanceSummary(record.date, record.date, db);
+    });
+    
+    return { success: true, recalculated: records.length };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Get single attendance record info
+ipcMain.handle('get-attendance-record', async (event, id) => {
+  try {
+    const db = getDatabase();
+    const record = db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+    
+    return record ? { success: true, data: record } : { success: false, error: 'Not found' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Get multiple attendance records info
+ipcMain.handle('get-attendance-records-info', async (event, ids) => {
+  try {
+    const db = getDatabase();
+    const placeholders = ids.map(() => '?').join(',');
+    const records = db.prepare(`SELECT id, is_synced, employee_uid, date FROM attendance WHERE id IN (${placeholders})`).all(...ids);
+    
+    return { success: true, data: records };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete from server
+ipcMain.handle('delete-from-server', async (event, { type, id }) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.success) {
+      return { success: false, error: 'Settings not available' };
+    }
+
+    const serverUrl = settings.data.server_url.replace('/api/employees', '');
+    const endpoint = type === 'attendance' ? '/api/attendance' : '/api/daily-summary';
+    
+    const response = await fetch(`${serverUrl}${endpoint}/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return { success: false, error: `Server returned ${response.status}: ${error}` };
+    }
+
+    const result = await response.json();
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Bulk delete from server
+ipcMain.handle('bulk-delete-from-server', async (event, { type, ids }) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.success) {
+      return { success: false, error: 'Settings not available' };
+    }
+
+    const serverUrl = settings.data.server_url.replace('/api/employees', '');
+    const endpoint = type === 'attendance' ? '/api/attendance' : '/api/daily-summary';
+    
+    let deletedCount = 0;
+    const errors = [];
+
+    for (const id of ids) {
+      try {
+        const response = await fetch(`${serverUrl}${endpoint}/${id}`, {
+          method: 'DELETE',
+        });
+
+        if (response.ok) {
+          deletedCount++;
+        } else {
+          errors.push({ id, error: `Status ${response.status}` });
+        }
+      } catch (error) {
+        errors.push({ id, error: error.message });
+      }
+    }
+
+    return {
+      success: deletedCount > 0,
+      deletedCount,
+      totalRequested: ids.length,
+      errors: errors.length > 0 ? errors : null
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Update on server
+ipcMain.handle('update-on-server', async (event, { type, id, field, value }) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.success) {
+      return { success: false, error: 'Settings not available' };
+    }
+
+    const serverUrl = settings.data.server_url.replace('/api/employees', '');
+    const endpoint = type === 'attendance' ? '/api/attendance' : '/api/daily-summary';
+    
+    const updateData = { [field]: value };
+    
+    const response = await fetch(`${serverUrl}${endpoint}/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updateData),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return { success: false, error: `Server returned ${response.status}: ${error}` };
+    }
+
+    const result = await response.json();
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 // Face-Recognition IPC handlers
 

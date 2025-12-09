@@ -97,7 +97,18 @@ invoke: (channel, ...args) => {
     'compare-server-and-local',
     'apply-comparison-actions',
     'get-cached-comparison',
-    'clear-comparison-cache'
+    'clear-comparison-cache',
+    // new edit
+    'get-attendance-for-editing',
+    'get-summaries-for-editing',
+    'update-attendance-field',
+    'delete-attendance-record',
+    'bulk-delete-attendance',
+    'update-summary-field',
+    'delete-summary-record',
+    'bulk-delete-summary',
+    'recalculate-summaries'
+    
   ];
   if (validChannels.includes(channel)) {
     return ipcRenderer.invoke(channel, ...args);

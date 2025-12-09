@@ -794,16 +794,6 @@ async function generateAttendanceReportWithSummaries(event, { startDate, endDate
   }
 }
 
-// Keep existing helper functions and other functions...
-// async function getProfilesDirectory() {
-//   try {
-//     const settingsResult = await settingsRoutes.getSettings()
-//     return settingsResult.success ? settingsResult.data.serverUrl : "http://localhost:3000"
-//   } catch (error) {
-//     console.error("Error getting server URL:", error)
-//     return "http://localhost:3000"
-//   }
-// }
 
 function isValidClockOut(clockType) {
   return clockType.endsWith("_out")

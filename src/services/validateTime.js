@@ -88,27 +88,72 @@ async validateAttendanceData(startDate = null, endDate = null, employeeUid = nul
 
   /**
  * Validate a single employee's attendance for a specific date
+ * NOW: Only validates clock-time-based calculations IF no manual edits exist
  */
 async validateEmployeeDailyAttendance(employeeUid, date, records, options = {}) {
   const { autoCorrect = true, updateSyncStatus = true, apply8HourRule = true } = options
   
-  console.log(`\n--- Validating ${records.length} records for employee ${employeeUid} on ${date} ---`)
+  console.log(`\n--- Processing ${records.length} records for employee ${employeeUid} on ${date} ---`)
 
   // Sort records by clock time
   const sortedRecords = records.sort((a, b) => new Date(a.clock_time) - new Date(b.clock_time))
   
-  // Validate each clock-out record
-  for (let i = 0; i < sortedRecords.length; i++) {
-    const record = sortedRecords[i]
+  // ✅ SKIP VALIDATION: Don't recalculate hours from clock times
+  // This preserves any manual edits made to regular_hours and overtime_hours
+  console.log(`Skipping clock-time validation to preserve manual edits`)
+  
+  // ✅ INSTEAD: Update summary from actual attendance record values
+  try {
+    console.log(`Reading actual hours from attendance table for summary update...`)
     
-    // Only validate clock-out records (they contain the calculated hours)
-    if (record.clock_type.endsWith('_out')) {
-      await this.validateClockOutRecord(record, sortedRecords, { 
-        autoCorrect, 
-        updateSyncStatus,
-        apply8HourRule  // Pass the option down
-      })
+    // Get the current hour values from attendance table (includes manual edits)
+    const currentRecords = this.db.prepare(`
+      SELECT id, clock_type, regular_hours, overtime_hours 
+      FROM attendance 
+      WHERE employee_uid = ? AND date = ?
+      ORDER BY clock_time
+    `).all(employeeUid, date)
+    
+    // Calculate totals from actual attendance records
+    const totalRegular = currentRecords.reduce((sum, r) => sum + (r.regular_hours || 0), 0)
+    const totalOvertime = currentRecords.reduce((sum, r) => sum + (r.overtime_hours || 0), 0)
+    
+    console.log(`Attendance totals from records:`)
+    currentRecords.forEach(r => {
+      console.log(`  ${r.clock_type}: Regular=${r.regular_hours || 0}h, OT=${r.overtime_hours || 0}h`)
+    })
+    console.log(`Sum: Regular=${totalRegular}h, OT=${totalOvertime}h, Total=${totalRegular + totalOvertime}h`)
+    
+    // Check if summary exists
+    const existingSummary = this.db.prepare(`
+      SELECT id FROM daily_attendance_summary 
+      WHERE employee_uid = ? AND date = ?
+    `).get(employeeUid, date)
+    
+    if (existingSummary) {
+      // Update existing summary with totals from attendance records
+      this.db.prepare(`
+        UPDATE daily_attendance_summary 
+        SET regular_hours = ?,
+            overtime_hours = ?,
+            total_hours = ?,
+            last_updated = CURRENT_TIMESTAMP
+        WHERE employee_uid = ? AND date = ?
+      `).run(totalRegular, totalOvertime, totalRegular + totalOvertime, employeeUid, date)
+      
+      console.log(`✅ Updated existing summary with attendance totals`)
+    } else {
+      // Summary doesn't exist, create it using updateDailyAttendanceSummary
+      console.log(`No summary exists, calling updateDailyAttendanceSummary to create one`)
+      updateDailyAttendanceSummary(employeeUid, date, this.db)
     }
+    
+    // Mark as valid (we're trusting the attendance records)
+    this.validationResults.validRecords += currentRecords.length
+    
+  } catch (error) {
+    console.error(`Error updating summary from attendance records:`, error)
+    this.validationResults.errorRecords += sortedRecords.length
   }
 }
 

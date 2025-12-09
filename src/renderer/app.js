@@ -112,6 +112,9 @@ class AttendanceApp {
 
     // PERFORMANCE: Add cache-related properties
     this.profileCache = new Map();
+
+    // Initialize 2FA
+    this.twoFactorAuth = new TwoFactorAuth(this.electronAPI);
   }
 
   // SCHEDULED SYNC: Start scheduled attendance sync
@@ -349,7 +352,8 @@ class AttendanceApp {
 
     // Check if face recognition is enabled in settings
     try {
-      const settingsResult = await this.electronAPI.getSettings();
+
+      const settingsResult = await this.electronAPI.invoke('get-settings');
       if (settingsResult.success) {
         const faceRecognitionEnabled = settingsResult.data.face_detection_enabled === "true" ||
           settingsResult.data.face_detection_enabled === true;
@@ -1143,6 +1147,1024 @@ class AttendanceApp {
     this.loadServerEditSyncInfo();
 
     console.log('✓ Server edit sync UI setup complete (Manual mode)');
+  }
+
+  /**
+   * NEW: Load local attendance data editor
+   */
+  async loadLocalDataEditor() {
+    const editorContainer = document.getElementById('localDataEditor');
+
+    if (!editorContainer) {
+      console.warn('localDataEditor element not found');
+      return;
+    }
+
+    try {
+      // Get date range for filtering (default: last 7 days)
+      const endDate = new Date().toISOString().split('T')[0];
+      const startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      editorContainer.innerHTML = `
+  <div class="data-editor-controls" style="background: #f9fafb; padding: 20px; border-radius: 8px;">
+    <h3>🗂️ Local Database Editor</h3>
+    <p style="color: #6b7280;">
+      Directly edit attendance records and daily summaries in your local database. 
+      Changes are saved immediately. Use with caution.
+    </p>
+    
+    <div class="filter-row" style="display: grid; grid-template-columns: 1fr 1fr 1.5fr auto; gap: 10px;">
+      <div class="filter-group">
+        <label>Start Date:</label>
+        <input type="date" id="editorStartDate" value="${startDate}" />
+      </div>
+      <div class="filter-group">
+        <label>End Date:</label>
+        <input type="date" id="editorEndDate" value="${endDate}" />
+      </div>
+      <div class="filter-group">
+        <label>Employee UID (optional):</label>
+        <input type="text" id="editorEmployeeFilter" placeholder="e.g., 1001 or leave blank for all" />
+      </div>
+      <div style="display: flex; align-items: flex-end;">
+        <button id="loadEditorDataBtn" class="primary-button">
+          🔍 Load Data
+        </button>
+      </div>
+    </div>
+    
+    <div class="editor-tabs" style="display: flex; gap: 5px; border-bottom: 2px solid #e5e7eb;">
+      <button class="editor-tab active" data-tab="attendance">
+        📋 Attendance Records
+      </button>
+      <button class="editor-tab" data-tab="summary">
+        📊 Daily Summaries
+      </button>
+    </div>
+  </div>
+
+  <div id="editorContent" class="editor-content">
+    <div class="loading">Click "Load Data" to view and edit records</div>
+  </div>
+`;
+
+      // Setup event listeners
+      document.getElementById('loadEditorDataBtn')?.addEventListener('click', () => {
+        this.loadEditorData();
+      });
+
+      // Tab switching
+      document.querySelectorAll('.editor-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+          document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
+          e.target.classList.add('active');
+          this.loadEditorData();
+        });
+      });
+
+    } catch (error) {
+      console.error('Error loading local data editor:', error);
+      editorContainer.innerHTML = `
+        <div class="error">Failed to load data editor: ${error.message}</div>
+      `;
+    }
+  }
+
+  /**
+   * NEW: Load data for editor based on current tab and filters
+   */
+  async loadEditorData() {
+    const activeTab = document.querySelector('.editor-tab.active')?.dataset.tab || 'attendance';
+    const startDate = document.getElementById('editorStartDate')?.value;
+    const endDate = document.getElementById('editorEndDate')?.value;
+    const employeeFilter = document.getElementById('editorEmployeeFilter')?.value?.trim();
+    const contentDiv = document.getElementById('editorContent');
+
+    if (!contentDiv) return;
+
+    contentDiv.innerHTML = '<div class="loading">Loading data...</div>';
+
+    try {
+      if (activeTab === 'attendance') {
+        await this.loadAttendanceEditor(startDate, endDate, employeeFilter);
+      } else {
+        await this.loadSummaryEditor(startDate, endDate, employeeFilter);
+      }
+    } catch (error) {
+      console.error('Error loading editor data:', error);
+      contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+    }
+  }
+
+  async loadAttendanceEditor(startDate, endDate, employeeFilter) {
+    const contentDiv = document.getElementById('editorContent');
+
+    // Get attendance data
+    const result = await this.electronAPI.invoke('get-attendance-for-editing', {
+      startDate,
+      endDate,
+      employeeUid: employeeFilter
+    });
+
+    if (!result.success) {
+      contentDiv.innerHTML = `<div class="error">Failed to load: ${result.error}</div>`;
+      return;
+    }
+
+    const records = result.data || [];
+
+    if (records.length === 0) {
+      contentDiv.innerHTML = '<div class="empty-state">No attendance records found for selected filters</div>';
+      return;
+    }
+
+    // ✅ NEW: Separate synced and unsynced records
+    const unsyncedRecords = records.filter(r => !r.is_synced);
+    const syncedRecords = records.filter(r => r.is_synced);
+
+    contentDiv.innerHTML = `
+    <div class="editor-stats">
+      <span>📊 <strong>${records.length}</strong> attendance records found</span>
+      <span style="margin-left: 20px;">
+        <span class="status-badge warning">${unsyncedRecords.length} Unsynced</span>
+        <span class="status-badge success" style="margin-left: 5px;">${syncedRecords.length} Synced</span>
+      </span>
+      
+      <!-- ✅ NEW: Filter toggle -->
+      <label style="margin-left: 20px;">
+        <input type="checkbox" id="showUnsyncedOnly" style="margin-right: 5px;">
+        Show Unsynced Only
+      </label>
+      
+      <button id="bulkDeleteAttendanceBtn" class="danger-button">
+        🗑️ Delete Selected
+      </button>
+      
+      <!-- ✅ NEW: Delete all unsynced button -->
+      <button id="deleteAllUnsyncedBtn" class="danger-button" style="background: #dc2626;">
+        🗑️ Delete All Unsynced (${unsyncedRecords.length})
+      </button>
+    </div>
+    
+    <div class="editor-table-container" style="overflow-x: auto;">
+      <table class="editor-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="selectAllAttendance" /></th>
+            <th>ID</th>
+            <th>Employee</th>
+            <th>Date</th>
+            <th>Clock Type</th>
+            <th>Clock Time</th>
+            <th>Regular Hours</th>
+            <th>OT Hours</th>
+            <th>Synced</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="attendanceTableBody">
+          ${this.renderAttendanceRows(records)}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+    this.setupAttendanceEditorListeners();
+
+    // ✅ NEW: Add filter functionality
+    document.getElementById('showUnsyncedOnly')?.addEventListener('change', (e) => {
+      const tbody = document.getElementById('attendanceTableBody');
+      const showUnsyncedOnly = e.target.checked;
+
+      const filteredRecords = showUnsyncedOnly ? unsyncedRecords : records;
+      tbody.innerHTML = this.renderAttendanceRows(filteredRecords);
+    });
+
+    // ✅ NEW: Delete all unsynced button handler
+    document.getElementById('deleteAllUnsyncedBtn')?.addEventListener('click', async () => {
+      if (unsyncedRecords.length === 0) {
+        alert('No unsynced records to delete');
+        return;
+      }
+
+      const confirmMsg = `⚠️ WARNING: This will delete ${unsyncedRecords.length} UNSYNCED records!\n\n` +
+        `These records have NOT been uploaded to the server yet.\n` +
+        `This action CANNOT be undone.\n\n` +
+        `Are you sure you want to proceed?`;
+
+      if (confirm(confirmMsg)) {
+        const ids = unsyncedRecords.map(r => r.id);
+        await this.bulkDeleteAttendance(ids);
+      }
+    });
+  }
+
+  renderAttendanceRows(records) {
+  return records.map(record => {
+    const isSynced = record.is_synced || 0;
+    const rowClass = isSynced ? 'synced-row' : 'unsynced-row';
+
+    // ✅ Store the raw ISO datetime for editing
+    const rawClockTime = record.clock_time; // Keep the original ISO format
+    
+    // ✅ Format for datetime-local input (YYYY-MM-DDTHH:MM)
+    const datetimeLocalValue = rawClockTime ? 
+      rawClockTime.replace('.000', '').replace('Z', '').substring(0, 16) : '';
+    
+    // ✅ Format for display
+    const displayTime = this.formatClockTime(record.clock_time, record.date);
+
+    return `
+      <tr data-record-id="${record.id}" class="${rowClass}" style="border-bottom: 1px solid #e5e7eb;">
+        <td><input type="checkbox" class="record-checkbox" data-id="${record.id}" /></td>
+        <td>${record.id}</td>
+        <td style="font-weight: 600;">${record.first_name} ${record.last_name}</td>
+        <td>${record.date}</td>
+        <td>
+          <select class="editable-select" 
+                  data-field="clock_type" data-id="${record.id}"
+                  data-is-synced="${isSynced}"
+                  style="background: ${isSynced ? '#e0f2fe' : '#dbeafe'}; padding: 6px; border-radius: 4px; width: 100%;">
+            <option value="morning_in" ${record.clock_type === 'morning_in' ? 'selected' : ''}>Morning In</option>
+            <option value="morning_out" ${record.clock_type === 'morning_out' ? 'selected' : ''}>Morning Out</option>
+            <option value="afternoon_in" ${record.clock_type === 'afternoon_in' ? 'selected' : ''}>Afternoon In</option>
+            <option value="afternoon_out" ${record.clock_type === 'afternoon_out' ? 'selected' : ''}>Afternoon Out</option>
+            <option value="evening_in" ${record.clock_type === 'evening_in' ? 'selected' : ''}>Evening In</option>
+            <option value="evening_out" ${record.clock_type === 'evening_out' ? 'selected' : ''}>Evening Out</option>
+            <option value="overtime_in" ${record.clock_type === 'overtime_in' ? 'selected' : ''}>Overtime In</option>
+            <option value="overtime_out" ${record.clock_type === 'overtime_out' ? 'selected' : ''}>Overtime Out</option>
+          </select>
+        </td>
+        <td style="padding: 8px;">
+          <div class="datetime-picker-wrapper" style="position: relative;">
+            <input type="datetime-local" 
+                   class="datetime-picker" 
+                   data-field="clock_time" 
+                   data-id="${record.id}"
+                   data-is-synced="${isSynced}"
+                   data-raw-value="${rawClockTime}"
+                   value="${datetimeLocalValue}"
+                   style="background: ${isSynced ? '#e0f2fe' : '#dbeafe'}; 
+                          padding: 6px; 
+                          border: 1px solid #cbd5e1; 
+                          border-radius: 4px; 
+                          width: 100%;
+                          font-size: 13px;
+                          cursor: pointer;"
+                   title="Click to edit date and time" />
+          </div>
+        </td>
+        <td contenteditable="true" class="editable-cell" 
+            data-field="regular_hours" data-id="${record.id}"
+            data-is-synced="${isSynced}"
+            style="background: ${isSynced ? '#e0f2fe' : '#dbeafe'}; cursor: text;">
+          ${(record.regular_hours || 0).toFixed(1)}
+        </td>
+        <td contenteditable="true" class="editable-cell" 
+            data-field="overtime_hours" data-id="${record.id}"
+            data-is-synced="${isSynced}"
+            style="background: ${isSynced ? '#e0f2fe' : '#dbeafe'}; cursor: text;">
+          ${(record.overtime_hours || 0).toFixed(1)}
+        </td>
+        <td style="text-align: center;">
+          <span class="status-badge ${isSynced ? 'info' : 'warning'}" 
+                title="${isSynced ? 'This record was synced. Editing will mark it for re-sync.' : 'This record needs to be synced.'}">
+            ${isSynced ? '🔄 Synced (Editable)' : '⏳ Pending'}
+          </span>
+        </td>
+        <td>
+          <button class="delete-btn" data-id="${record.id}"
+                  data-is-synced="${isSynced}"
+                  style="padding: 6px 12px; border-radius: 4px; cursor: pointer; background: #ef4444; color: white; border: none;"
+                  title="${isSynced ? 'Delete and mark summary for re-sync' : 'Delete record'}">
+            🗑️
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+  /**
+   * NEW: Load daily summaries for editing
+   */
+  async loadSummaryEditor(startDate, endDate, employeeFilter) {
+    const contentDiv = document.getElementById('editorContent');
+
+    const result = await this.electronAPI.invoke('get-summaries-for-editing', {
+      startDate,
+      endDate,
+      employeeUid: employeeFilter
+    });
+
+    if (!result.success) {
+      contentDiv.innerHTML = `<div class="error">Failed to load: ${result.error}</div>`;
+      return;
+    }
+
+    const records = result.data || [];
+
+    if (records.length === 0) {
+      contentDiv.innerHTML = '<div class="empty-state">No summary records found</div>';
+      return;
+    }
+
+    contentDiv.innerHTML = `
+      <div class="editor-stats">
+        <span>📊 ${records.length} summaries found</span>
+        <button id="bulkDeleteSummaryBtn" class="danger-button">🗑️ Delete Selected</button>
+        <button id="recalculateSummaryBtn" class="secondary-button">🔄 Recalculate Selected</button>
+      </div>
+      <div class="editor-table-container">
+        <table class="editor-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selectAllSummary" /></th>
+              <th>Employee</th>
+              <th>Date</th>
+              <th>First In</th>
+              <th>Last Out</th>
+              <th>Regular Hours</th>
+              <th>OT Hours</th>
+              <th>Total Hours</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${records.map(record => `
+              <tr data-record-id="${record.id}">
+                <td><input type="checkbox" class="record-checkbox" data-id="${record.id}" /></td>
+                <td>${record.employee_name}</td>
+                <td>${record.date}</td>
+                <td>${this.formatDateTime(record.first_clock_in)}</td>
+                <td>${this.formatDateTime(record.last_clock_out)}</td>
+                <td contenteditable="true" class="editable-cell" data-field="regular_hours" data-id="${record.id}">
+                  ${record.regular_hours || 0}
+                </td>
+                <td contenteditable="true" class="editable-cell" data-field="overtime_hours" data-id="${record.id}">
+                  ${record.overtime_hours || 0}
+                </td>
+                <td>${(record.total_hours || 0).toFixed(2)}</td>
+                <td>
+                  ${record.is_incomplete ?
+        '<span class="status-badge warning">Incomplete</span>' :
+        '<span class="status-badge success">Complete</span>'}
+                </td>
+                <td>
+                  <button class="icon-button delete-btn" data-id="${record.id}" title="Delete">
+                    🗑️
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    this.setupSummaryEditorListeners();
+  }
+
+  setupAttendanceEditorListeners() {
+  // Select all checkbox
+  document.getElementById('selectAllAttendance')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.record-checkbox').forEach(cb => {
+      cb.checked = e.target.checked;
+    });
+  });
+
+  // ✅ NEW: Handle datetime picker changes
+  document.querySelectorAll('.datetime-picker').forEach(picker => {
+    picker.addEventListener('change', async (e) => {
+      const id = e.target.dataset.id;
+      const field = e.target.dataset.field;
+      const wasSynced = e.target.dataset.isSynced === '1';
+      const newValue = e.target.value; // Format: YYYY-MM-DDTHH:MM
+      
+      if (!newValue) {
+        this.showStatus('Please select a valid date and time', 'error');
+        return;
+      }
+      
+      try {
+        // Convert datetime-local value to our storage format
+        // Input: "2025-12-08T12:02"
+        // Output: "2025-12-08T12:02:00.000"
+        const formattedDateTime = `${newValue}:00.000`;
+        
+        console.log(`Updating clock_time from picker: ${newValue} -> ${formattedDateTime}`);
+        
+        // Update the record
+        const result = await this.updateAttendanceField(id, field, formattedDateTime);
+        
+        if (result && result.success) {
+          // Update the raw value data attribute
+          e.target.dataset.rawValue = formattedDateTime;
+          
+          // Show feedback
+          if (result.markedUnsynced) {
+            this.showStatus('✓ Time updated and marked for re-sync', 'success');
+            
+            // Update the status badge
+            const row = e.target.closest('tr');
+            const badge = row.querySelector('.status-badge');
+            if (badge) {
+              badge.className = 'status-badge warning';
+              badge.textContent = '⏳ Pending Re-sync';
+            }
+          } else {
+            this.showStatus('✓ Time updated successfully', 'success');
+          }
+        } else {
+          this.showStatus(`❌ Update failed: ${result?.error || 'Unknown error'}`, 'error');
+          
+          // Restore original value
+          const rawValue = e.target.dataset.rawValue;
+          if (rawValue) {
+            const originalValue = rawValue.replace('.000', '').replace('Z', '').substring(0, 16);
+            e.target.value = originalValue;
+          }
+        }
+      } catch (error) {
+        console.error('Error updating datetime:', error);
+        this.showStatus(`❌ Error: ${error.message}`, 'error');
+      }
+    });
+  });
+
+  // ✅ Handle regular hours and overtime hours editable cells
+  document.querySelectorAll('.editable-cell').forEach(cell => {
+    cell.addEventListener('focus', (e) => {
+      e.target.dataset.originalValue = e.target.textContent.trim();
+    });
+
+    cell.addEventListener('blur', async (e) => {
+      const id = e.target.dataset.id;
+      const field = e.target.dataset.field;
+      const wasSynced = e.target.dataset.isSynced === '1';
+      const originalValue = e.target.dataset.originalValue;
+      const newValue = e.target.textContent.trim();
+
+      // Check if value actually changed
+      if (originalValue === newValue) {
+        return;
+      }
+
+      let value;
+
+      if (field === 'regular_hours' || field === 'overtime_hours') {
+        value = parseFloat(newValue) || 0;
+      } else {
+        value = newValue;
+      }
+
+      // Update the record
+      const result = await this.updateAttendanceField(id, field, value);
+
+      if (result && result.success) {
+        if (result.markedUnsynced) {
+          this.showStatus('✓ Updated and marked for re-sync', 'success');
+          
+          const row = e.target.closest('tr');
+          const badge = row.querySelector('.status-badge');
+          if (badge) {
+            badge.className = 'status-badge warning';
+            badge.textContent = '⏳ Pending Re-sync';
+          }
+        } else {
+          this.showStatus('✓ Updated successfully', 'success');
+        }
+      } else {
+        // Restore original value on error
+        e.target.textContent = originalValue;
+        this.showStatus(`❌ Update failed: ${result?.error || 'Unknown error'}`, 'error');
+      }
+    });
+  });
+
+  // Clock type select dropdowns
+  document.querySelectorAll('.editable-select').forEach(select => {
+    select.addEventListener('change', async (e) => {
+      const id = e.target.dataset.id;
+      const field = e.target.dataset.field;
+      const value = e.target.value;
+      const wasSynced = e.target.dataset.isSynced === '1';
+
+      const result = await this.updateAttendanceField(id, field, value);
+
+      if (result && result.markedUnsynced) {
+        this.showStatus('✓ Updated and marked for re-sync', 'success');
+        const row = e.target.closest('tr');
+        const badge = row.querySelector('.status-badge');
+        if (badge) {
+          badge.className = 'status-badge warning';
+          badge.textContent = '⏳ Pending Re-sync';
+        }
+      }
+    });
+  });
+
+  // Delete buttons
+  document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      const wasSynced = e.target.dataset.isSynced === '1';
+
+      const message = wasSynced
+        ? 'Delete this synced record?\n\nThe daily summary will be updated and marked for re-sync to the server.'
+        : 'Delete this attendance record?\n\nThe daily summary will be automatically updated.';
+
+      if (confirm(message)) {
+        await this.deleteAttendanceRecord(id);
+      }
+    });
+  });
+
+  // Bulk delete
+  document.getElementById('bulkDeleteAttendanceBtn')?.addEventListener('click', async () => {
+    const selected = Array.from(document.querySelectorAll('.record-checkbox:checked'))
+      .map(cb => cb.dataset.id);
+
+    if (selected.length === 0) {
+      alert('No records selected');
+      return;
+    }
+
+    const message = `Delete ${selected.length} attendance records?\n\n` +
+      `Daily summaries will be updated.\n` +
+      `Any synced records will be marked for re-sync to the server.`;
+
+    if (confirm(message)) {
+      await this.bulkDeleteAttendance(selected);
+    }
+  });
+}
+
+  /**
+   * NEW: Setup event listeners for summary editor
+   */
+  setupSummaryEditorListeners() {
+    // Similar setup to attendance editor
+    document.getElementById('selectAllSummary')?.addEventListener('change', (e) => {
+      document.querySelectorAll('.record-checkbox').forEach(cb => {
+        cb.checked = e.target.checked;
+      });
+    });
+
+    document.querySelectorAll('.editable-cell').forEach(cell => {
+      cell.addEventListener('blur', async (e) => {
+        const id = e.target.dataset.id;
+        const field = e.target.dataset.field;
+        const value = parseFloat(e.target.textContent) || 0;
+
+        await this.updateSummaryField(id, field, value);
+      });
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.target.dataset.id;
+        if (confirm('Delete this summary record?')) {
+          await this.deleteSummaryRecord(id);
+        }
+      });
+    });
+
+    document.getElementById('bulkDeleteSummaryBtn')?.addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('.record-checkbox:checked'))
+        .map(cb => cb.dataset.id);
+
+      if (selected.length > 0 && confirm(`Delete ${selected.length} summary records?`)) {
+        await this.bulkDeleteSummary(selected);
+      }
+    });
+
+    document.getElementById('recalculateSummaryBtn')?.addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('.record-checkbox:checked'))
+        .map(cb => cb.dataset.id);
+
+      if (selected.length > 0) {
+        await this.recalculateSummaries(selected);
+      }
+    });
+  }
+
+  // renderer.js - updateAttendanceField method
+
+  async updateAttendanceField(id, field, value) {
+    try {
+      // Step 1: 2FA Authentication
+      const authenticated = await this.twoFactorAuth.show('Updating attendance record');
+      if (!authenticated) {
+        return { success: false, message: 'Authentication cancelled' };
+      }
+
+      // Step 2: Get record info
+      const record = await this.electronAPI.invoke('get-attendance-record', parseInt(id));
+
+      if (!record.success) {
+        this.showStatus('Record not found', 'error');
+        return { success: false };
+      }
+
+      const recordData = record.data;
+
+      // ✅ Step 2.5: Convert clock_time to timezone-neutral format
+      if (field === 'clock_time') {
+        const dateStr = value.trim();
+        let formattedDateTime;
+
+        try {
+          let year, month, day, hours, minutes, seconds;
+
+          // Handle various input formats
+          if (/^\d{2}:\d{2}:\d{2}$/.test(dateStr)) {
+            // Time only format (HH:MM:SS) - combine with record date
+            const [h, m, s] = dateStr.split(':');
+            const [y, mo, d] = recordData.date.split('-');
+
+            year = y;
+            month = mo;
+            day = d;
+            hours = h;
+            minutes = m;
+            seconds = s;
+
+          } else if (dateStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(:\d{2})?(\s*(AM|PM))?$/i)) {
+            // Format: MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM AM/PM
+            const dateTimeParts = dateStr.split(' ');
+            const datePart = dateTimeParts[0];
+            const timePart = dateTimeParts[1];
+            const ampm = dateTimeParts[2];
+
+            const [m, d, y] = datePart.split('/');
+            let [h, min, sec = '00'] = timePart.split(':');
+
+            // Handle AM/PM
+            if (ampm) {
+              h = parseInt(h);
+              if (ampm.toUpperCase() === 'PM' && h !== 12) {
+                h += 12;
+              } else if (ampm.toUpperCase() === 'AM' && h === 12) {
+                h = 0;
+              }
+              h = String(h).padStart(2, '0');
+            }
+
+            year = y;
+            month = String(m).padStart(2, '0');
+            day = String(d).padStart(2, '0');
+            hours = String(h).padStart(2, '0');
+            minutes = String(min).padStart(2, '0');
+            seconds = String(sec).padStart(2, '0');
+
+          } else if (dateStr.includes('T')) {
+            // Already in datetime format
+            // Remove Z if present and clean up
+            let cleaned = dateStr.replace('Z', '').replace(/[+-]\d{2}:\d{2}$/, '');
+
+            // Parse the parts
+            const [datePart, timePart] = cleaned.split('T');
+            [year, month, day] = datePart.split('-');
+
+            const timeOnly = timePart.split('.')[0]; // Remove milliseconds if present
+            [hours, minutes, seconds = '00'] = timeOnly.split(':');
+
+          } else {
+            // Try parsing and extracting components
+            const parsed = new Date(dateStr);
+            if (isNaN(parsed.getTime())) {
+              this.showStatus('Invalid date/time format. Use: HH:MM:SS or MM/DD/YYYY HH:MM:SS', 'error');
+              return { success: false };
+            }
+
+            year = parsed.getFullYear();
+            month = String(parsed.getMonth() + 1).padStart(2, '0');
+            day = String(parsed.getDate()).padStart(2, '0');
+            hours = String(parsed.getHours()).padStart(2, '0');
+            minutes = String(parsed.getMinutes()).padStart(2, '0');
+            seconds = String(parsed.getSeconds()).padStart(2, '0');
+          }
+
+          // ✅ Create timezone-neutral datetime string: YYYY-MM-DDTHH:MM:SS.000
+          formattedDateTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000`;
+          value = formattedDateTime;
+
+          console.log(`✓ Formatted clock_time from "${dateStr}" to: "${formattedDateTime}"`);
+          console.log(`  This represents: ${year}-${month}-${day} at ${hours}:${minutes}:${seconds} (no timezone conversion)`);
+
+        } catch (parseError) {
+          console.error('Date parsing error:', parseError);
+          this.showStatus('Invalid date/time format', 'error');
+          return { success: false };
+        }
+      }
+
+      // Step 3: Update on server FIRST if it's synced
+      if (recordData.is_synced) {
+        this.showStatus('🌐 Updating on server...', 'info');
+
+        try {
+          const serverUpdate = await this.electronAPI.invoke('update-on-server', {
+            type: 'attendance',
+            id: recordData.id,
+            field: field,
+            value: value
+          });
+
+          if (!serverUpdate.success) {
+            const confirmLocal = confirm(
+              `⚠️ Server update failed: ${serverUpdate.error}\n\n` +
+              `Do you want to update locally anyway?\n` +
+              `(Record will be marked as unsynced)`
+            );
+
+            if (!confirmLocal) {
+              this.showStatus('Update cancelled', 'warning');
+              return { success: false };
+            }
+          } else {
+            this.showStatus('✓ Updated on server', 'success');
+          }
+        } catch (serverError) {
+          console.error('Server update error:', serverError);
+        }
+      }
+
+      // Step 4: Update local database
+      const result = await this.electronAPI.invoke('update-attendance-field', {
+        id: parseInt(id),
+        field,
+        value
+      });
+
+      if (result.success) {
+        if (result.markedUnsynced) {
+          this.showStatus('✓ Updated and marked for re-sync', 'success');
+        } else {
+          this.showStatus('✓ Updated successfully', 'success');
+        }
+
+        // ✅ Reload the editor to show the properly formatted time
+        setTimeout(() => {
+          this.loadEditorData();
+        }, 500);
+      } else {
+        this.showStatus(`✗ Update failed: ${result.error}`, 'error');
+      }
+
+      return result;
+    } catch (error) {
+      if (error.message === 'Authentication cancelled') {
+        this.showStatus('Operation cancelled', 'warning');
+        return { success: false };
+      }
+      this.showStatus(`✗ Error: ${error.message}`, 'error');
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+ * UPDATED: Delete single attendance record with 2FA and server sync
+ */
+  async deleteAttendanceRecord(id) {
+    try {
+      // Step 1: 2FA Authentication
+      const authenticated = await this.twoFactorAuth.show('Deleting attendance record');
+      if (!authenticated) {
+        this.showStatus('Authentication cancelled', 'warning');
+        return;
+      }
+
+      // Step 2: Get record info
+      const record = await this.electronAPI.invoke('get-attendance-record', parseInt(id));
+
+      if (!record.success) {
+        this.showStatus('Record not found', 'error');
+        return;
+      }
+
+      const recordData = record.data;
+
+      // Step 3: Delete from server FIRST if it's synced
+      if (recordData.is_synced) {
+        this.showStatus('🌐 Deleting from server...', 'info');
+
+        try {
+          const serverDelete = await this.electronAPI.invoke('delete-from-server', {
+            type: 'attendance',
+            id: recordData.id
+          });
+
+          if (!serverDelete.success) {
+            const confirmLocal = confirm(
+              `⚠️ Server deletion failed: ${serverDelete.error}\n\n` +
+              `Do you want to delete locally anyway?\n` +
+              `(Record will remain on server)`
+            );
+
+            if (!confirmLocal) {
+              this.showStatus('Deletion cancelled', 'warning');
+              return;
+            }
+          } else {
+            this.showStatus('✓ Deleted from server', 'success');
+          }
+        } catch (serverError) {
+          console.error('Server delete error:', serverError);
+          const confirmLocal = confirm(
+            `⚠️ Cannot reach server\n\n` +
+            `Do you want to delete locally anyway?\n` +
+            `(Record will remain on server)`
+          );
+
+          if (!confirmLocal) {
+            this.showStatus('Deletion cancelled', 'warning');
+            return;
+          }
+        }
+      }
+
+      // Step 4: Delete from local database
+      const result = await this.electronAPI.invoke('delete-attendance-record', parseInt(id));
+
+      if (result.success) {
+        document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
+        this.showStatus('✓ Record deleted successfully', 'success');
+
+        // Reload the editor to show updated data
+        setTimeout(() => {
+          this.loadEditorData();
+        }, 500);
+      } else {
+        this.showStatus(`✗ Delete failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      if (error.message === 'Authentication cancelled') {
+        this.showStatus('Operation cancelled', 'warning');
+      } else {
+        this.showStatus(`✗ Error: ${error.message}`, 'error');
+      }
+    }
+  }
+
+
+  /**
+ * UPDATED: Bulk delete with 2FA and server sync
+ */
+  async bulkDeleteAttendance(ids) {
+    try {
+      // Step 1: 2FA Authentication
+      const authenticated = await this.twoFactorAuth.show(`Deleting ${ids.length} attendance records`);
+      if (!authenticated) {
+        this.showStatus('Authentication cancelled', 'warning');
+        return;
+      }
+
+      // Step 2: Get records info
+      const recordsInfo = await this.electronAPI.invoke('get-attendance-records-info', ids.map(id => parseInt(id)));
+
+      if (!recordsInfo.success) {
+        this.showStatus('Failed to get records info', 'error');
+        return;
+      }
+
+      const syncedRecords = recordsInfo.data.filter(r => r.is_synced);
+
+      // Step 3: Delete synced records from server FIRST
+      if (syncedRecords.length > 0) {
+        this.showStatus(`🌐 Deleting ${syncedRecords.length} records from server...`, 'info');
+
+        const serverDeleteResults = await this.electronAPI.invoke('bulk-delete-from-server', {
+          type: 'attendance',
+          ids: syncedRecords.map(r => r.id)
+        });
+
+        if (!serverDeleteResults.success) {
+          const confirmLocal = confirm(
+            `⚠️ Server deletion failed: ${serverDeleteResults.error}\n\n` +
+            `${syncedRecords.length} synced records couldn't be deleted from server.\n\n` +
+            `Do you want to delete locally anyway?`
+          );
+
+          if (!confirmLocal) {
+            this.showStatus('Deletion cancelled', 'warning');
+            return;
+          }
+        } else {
+          this.showStatus(`✓ Deleted ${serverDeleteResults.deletedCount} from server`, 'success');
+        }
+      }
+
+      // Step 4: Delete from local database
+      const result = await this.electronAPI.invoke('bulk-delete-attendance', ids.map(id => parseInt(id)));
+
+      if (result.success) {
+        ids.forEach(id => {
+          document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
+        });
+        this.showStatus(`✓ Deleted ${ids.length} records successfully`, 'success');
+
+        // Reload the editor
+        setTimeout(() => {
+          this.loadEditorData();
+        }, 500);
+      } else {
+        this.showStatus(`✗ Bulk delete failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      if (error.message === 'Authentication cancelled') {
+        this.showStatus('Operation cancelled', 'warning');
+      } else {
+        this.showStatus(`✗ Error: ${error.message}`, 'error');
+      }
+    }
+  }
+
+  /**
+   * NEW: Update summary field
+   */
+  async updateSummaryField(id, field, value) {
+    try {
+      const result = await this.electronAPI.invoke('update-summary-field', {
+        id: parseInt(id),
+        field,
+        value
+      });
+
+      if (result.success) {
+        this.showStatus(`✓ Updated ${field}`, 'success');
+        // Reload to show recalculated total
+        this.loadEditorData();
+      } else {
+        this.showStatus(`✗ Update failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      this.showStatus(`✗ Error: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * NEW: Delete summary record
+   */
+  async deleteSummaryRecord(id) {
+    try {
+      const result = await this.electronAPI.invoke('delete-summary-record', parseInt(id));
+
+      if (result.success) {
+        document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
+        this.showStatus('✓ Summary deleted', 'success');
+      } else {
+        this.showStatus(`✗ Delete failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      this.showStatus(`✗ Error: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * NEW: Bulk delete summaries
+   */
+  async bulkDeleteSummary(ids) {
+    try {
+      const result = await this.electronAPI.invoke('bulk-delete-summary',
+        ids.map(id => parseInt(id))
+      );
+
+      if (result.success) {
+        ids.forEach(id => {
+          document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
+        });
+        this.showStatus(`✓ Deleted ${ids.length} summaries`, 'success');
+      } else {
+        this.showStatus(`✗ Bulk delete failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      this.showStatus(`✗ Error: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * NEW: Recalculate selected summaries
+   */
+  async recalculateSummaries(ids) {
+    try {
+      this.showStatus('🔄 Recalculating summaries...', 'info');
+
+      const result = await this.electronAPI.invoke('recalculate-summaries',
+        ids.map(id => parseInt(id))
+      );
+
+      if (result.success) {
+        this.showStatus(`✓ Recalculated ${ids.length} summaries`, 'success');
+        this.loadEditorData(); // Reload to show updated values
+      } else {
+        this.showStatus(`✗ Recalculation failed: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      this.showStatus(`✗ Error: ${error.message}`, 'error');
+    }
   }
 
   /**
@@ -1965,7 +2987,8 @@ class AttendanceApp {
     if (!this.electronAPI) return;
 
     try {
-      const result = await this.electronAPI.getSettings();
+
+      const result = await this.electronAPI.invoke('get-settings');
       if (result.success && result.data) {
         // Update sync interval from settings
         const syncInterval =
@@ -2081,11 +3104,7 @@ class AttendanceApp {
     }
   }
 
-  async performAttendanceSync(
-    silent = false,
-    retryCount = 0,
-    showDownloadToast = false
-  ) {
+  async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
     if (!this.electronAPI) {
       if (!silent) {
         this.showStatus("Demo mode: Sync simulated successfully!", "success");
@@ -2094,96 +3113,69 @@ class AttendanceApp {
     }
 
     try {
+      // ✅ Check if auto-sync is enabled before syncing
+      if (silent && !this.syncSettings.enabled) {
+        console.log('Auto-sync is disabled, skipping scheduled sync');
+        return { success: false, message: "Auto-sync disabled" };
+      }
+
       // First validate unsynced records before syncing
       if (retryCount === 0) {
-        // Only validate on first attempt, not retries
         try {
           if (!silent) {
-            this.showStatus(
-              "Validating attendance data before sync...",
-              "info"
-            );
+            this.showStatus("Validating attendance data before sync...", "info");
           }
 
-          const validationResult =
-            await this.electronAPI.validateAndCorrectUnsyncedRecords({
-              autoCorrect: true,
-              updateSyncStatus: false, // Don't change sync status during validation
-            });
+          const validationResult = await this.electronAPI.validateAndCorrectUnsyncedRecords({
+            autoCorrect: true,
+            updateSyncStatus: false,
+          });
 
-          if (
-            validationResult.success &&
-            validationResult.data.summary.correctedRecords > 0
-          ) {
+          if (validationResult.success && validationResult.data.summary.correctedRecords > 0) {
             const corrected = validationResult.data.summary.correctedRecords;
             console.log(`Pre-sync validation: ${corrected} records corrected`);
 
             if (!silent) {
-              this.showStatus(
-                `Validated and corrected ${corrected} records before sync`,
-                "success"
-              );
+              this.showStatus(`Validated and corrected ${corrected} records before sync`, "success");
             }
           }
         } catch (validationError) {
-          console.warn(
-            "Pre-sync validation failed, continuing with sync:",
-            validationError
-          );
+          console.warn("Pre-sync validation failed, continuing with sync:", validationError);
         }
       }
 
-      // First check if there are attendance records to sync
       const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
 
       if (!countResult.success || countResult.count === 0) {
         if (!silent) {
           this.showStatus("No attendance records to sync", "info");
         }
-
-        // Even if no attendance records, check for summary records
-        return await this.performSummarySync(
-          silent,
-          retryCount,
-          showDownloadToast
-        );
+        return await this.performSummarySync(silent, retryCount, showDownloadToast);
       }
 
-      // Show download toast for initial sync or when explicitly requested
       if (showDownloadToast || (!silent && retryCount === 0)) {
         this.showDownloadToast(
           `📤 Uploading ${countResult.count} attendance records to server...`,
           "info"
         );
       } else if (!silent) {
-        this.showStatus(
-          `Syncing ${countResult.count} attendance records...`,
-          "info"
-        );
+        this.showStatus(`Syncing ${countResult.count} attendance records...`, "info");
       }
 
-      // Perform the attendance sync
       const syncResult = await this.electronAPI.syncAttendanceToServer();
 
       if (syncResult.success) {
         if (showDownloadToast || !silent) {
-          this.showDownloadToast(
-            "✅ Attendance data uploaded successfully!",
-            "success"
-          );
+          this.showDownloadToast("✅ Attendance data uploaded successfully!", "success");
         }
         console.log("Attendance sync successful:", syncResult.message);
 
-        // Update sync info display if settings modal is open
-        if (
-          document.getElementById("settingsModal").classList.contains("show")
-        ) {
+        if (document.getElementById("settingsModal").classList.contains("show")) {
           await this.loadSyncInfo();
         }
 
-        // After successful attendance sync, perform summary sync
         console.log("Triggering summary sync after attendance sync");
-        const summaryResult = await this.performSummarySync(true, 0, false); // Silent summary sync
+        const summaryResult = await this.performSummarySync(true, 0, false);
 
         return {
           success: true,
@@ -2197,15 +3189,12 @@ class AttendanceApp {
     } catch (error) {
       console.error("Attendance sync error:", error);
 
-      // REMOVED RETRY LOGIC - Let scheduled sync handle retries
-      // If this is a scheduled sync, it will retry at the next scheduled time
-      // If this is a manual sync, user can click "Sync Now" again
-
-      if (showDownloadToast || !silent) {
-        this.showDownloadToast(
-          `❌ Upload failed: ${error.message}`,
-          "error"
-        );
+      // ✅ Only show error toast if not silent (i.e., user-initiated)
+      if (!silent) {
+        this.showDownloadToast(`❌ Upload failed: ${error.message}`, "error");
+      } else {
+        // For silent/scheduled syncs, just log the error
+        console.log('Scheduled sync failed (will retry at next interval):', error.message);
       }
 
       return {
@@ -2584,6 +3573,11 @@ class AttendanceApp {
 
       const faceRecognitionEnabled = document.getElementById("faceRecognitionToggle")?.checked || false;
 
+      // Get auth PIN value
+      const authPinInput = formData.get("auth_pin") ||
+        document.getElementById("authPin")?.value ||
+        "1234"; // Default PIN
+
       const settings = {
         server_url: fullServerUrl,
         sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
@@ -2591,7 +3585,8 @@ class AttendanceApp {
           Number.parseInt(summarySyncIntervalInput) * 60000
         ).toString(),
         grace_period: gracePeriodInput,
-        face_detection_enabled: faceRecognitionEnabled.toString(), // ADD THIS LINE
+        face_detection_enabled: faceRecognitionEnabled.toString(),
+        auth_pin: authPinInput, // Add auth PIN to settings
       };
 
       console.log("Saving settings:", settings); // Debug log
@@ -2856,7 +3851,16 @@ class AttendanceApp {
       }
     });
 
-    manualSubmit.addEventListener("click", () => { });
+    manualSubmit.addEventListener("click", () => {
+      if (!scanCooldown) {
+        scanCooldown = true;
+        this.handleScan();
+
+        setTimeout(() => {
+          scanCooldown = false;
+        }, SCAN_COOLDOWN_MS);
+      }
+    });
 
     // Settings event listeners
     settingsBtn.addEventListener("click", () => {
@@ -2977,156 +3981,156 @@ class AttendanceApp {
   }
 
   async showEmployeeDisplay(data) {
-  const {
-    employee,
-    clockType,
-    sessionType,
-    clockTime,
-    isOvertimeSession,
-  } = data;
+    const {
+      employee,
+      clockType,
+      sessionType,
+      clockTime,
+      isOvertimeSession,
+    } = data;
 
-  console.log("Displaying employee data on dashboard");
+    console.log("Displaying employee data on dashboard");
 
-  const dashboardEmployeeCard = document.getElementById('dashboardEmployeeCard');
-  if (!dashboardEmployeeCard) {
-    console.warn("Dashboard employee card not found");
-    return;
-  }
-
-  // ⭐ Store the currently displayed employee UID
-  dashboardEmployeeCard.dataset.employeeUid = employee.uid;
-
-  // Show immediately without delay
-  dashboardEmployeeCard.classList.add("show");
-
-  // Update employee photo
-  const photo = document.getElementById("dashboardEmployeePhoto");
-  if (photo) {
-    photo.src = this.getDefaultImageDataURL();
-    this.setupImageWithFallback(
-      photo,
-      employee.uid,
-      `${employee.first_name} ${employee.last_name}`
-    ).catch((error) => {
-      console.warn(`Employee photo setup failed:`, error);
-    });
-  }
-
-  // Update employee name
-  const nameElement = document.getElementById("dashboardEmployeeName");
-  if (nameElement) {
-    nameElement.textContent = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
-  }
-
-  // Update department
-  const deptElement = document.getElementById("dashboardEmployeeDept");
-  if (deptElement) {
-    deptElement.textContent = employee.department || "No Department";
-  }
-
-  // Update ID number
-  const idElement = document.getElementById("dashboardEmployeeId");
-  if (idElement) {
-    idElement.textContent = `ID: ${employee.id_number}`;
-  }
-
-  // Determine if this is a clock IN or clock OUT
-  const isClockIn = clockType.includes("_in");
-  const isClockOut = clockType.includes("_out");
-
-  // Update clock type badge with appropriate color
-  const clockTypeElement = document.getElementById("dashboardClockType");
-  if (clockTypeElement) {
-    clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
-    
-    // Apply inline styles based on clock type
-    if (isClockIn) {
-      // GREEN for clock in
-      clockTypeElement.style.backgroundColor = "#10b981";
-      clockTypeElement.style.color = "white";
-      clockTypeElement.style.padding = "8px 16px";
-      clockTypeElement.style.borderRadius = "8px";
-      clockTypeElement.style.fontWeight = "bold";
-      clockTypeElement.style.fontSize = "14px";
-      clockTypeElement.style.display = "inline-block";
-    } else if (isClockOut) {
-      // RED for clock out
-      clockTypeElement.style.backgroundColor = "#ef4444";
-      clockTypeElement.style.color = "white";
-      clockTypeElement.style.padding = "8px 16px";
-      clockTypeElement.style.borderRadius = "8px";
-      clockTypeElement.style.fontWeight = "bold";
-      clockTypeElement.style.fontSize = "14px";
-      clockTypeElement.style.display = "inline-block";
+    const dashboardEmployeeCard = document.getElementById('dashboardEmployeeCard');
+    if (!dashboardEmployeeCard) {
+      console.warn("Dashboard employee card not found");
+      return;
     }
 
-    // Add overtime indicator if applicable
-    if (isOvertimeSession) {
-      clockTypeElement.style.border = "2px solid #f59e0b";
+    // ⭐ Store the currently displayed employee UID
+    dashboardEmployeeCard.dataset.employeeUid = employee.uid;
+
+    // Show immediately without delay
+    dashboardEmployeeCard.classList.add("show");
+
+    // Update employee photo
+    const photo = document.getElementById("dashboardEmployeePhoto");
+    if (photo) {
+      photo.src = this.getDefaultImageDataURL();
+      this.setupImageWithFallback(
+        photo,
+        employee.uid,
+        `${employee.first_name} ${employee.last_name}`
+      ).catch((error) => {
+        console.warn(`Employee photo setup failed:`, error);
+      });
     }
-  }
 
-  // Update clock time with background color
-  const clockTimeElement = document.getElementById("dashboardClockTime");
-  if (clockTimeElement) {
-    clockTimeElement.textContent = new Date(clockTime).toLocaleTimeString();
-    
-    // Apply background color based on clock type
-    if (isClockIn) {
-      // Light green for clock in
-      clockTimeElement.style.backgroundColor = "#d1fae5";
-      clockTimeElement.style.color = "#065f46";
-    } else if (isClockOut) {
-      // Light red for clock out
-      clockTimeElement.style.backgroundColor = "#fee2e2";
-      clockTimeElement.style.color = "#991b1b";
+    // Update employee name
+    const nameElement = document.getElementById("dashboardEmployeeName");
+    if (nameElement) {
+      nameElement.textContent = `${employee.first_name} ${employee.middle_name || ""} ${employee.last_name}`.trim();
     }
-    
-    // Add padding and styling
-    clockTimeElement.style.padding = "8px 16px";
-    clockTimeElement.style.borderRadius = "8px";
-    clockTimeElement.style.fontWeight = "bold";
-    clockTimeElement.style.fontSize = "18px";
-    clockTimeElement.style.display = "inline-block";
-    clockTimeElement.style.marginLeft = "10px";
-  }
 
-  // 🆕 Fetch daily summary data for this employee's total hours today
-  let regularHours = 0;
-  let overtimeHours = 0;
-  let totalHours = 0;
+    // Update department
+    const deptElement = document.getElementById("dashboardEmployeeDept");
+    if (deptElement) {
+      deptElement.textContent = employee.department || "No Department";
+    }
 
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const summaryResult = await this.electronAPI.getDailySummary(today, today);
-    
-    if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
-      // Find the summary record for this specific employee
-      const employeeSummary = summaryResult.data.find(
-        record => record.employee_uid === employee.uid
-      );
-      
-      if (employeeSummary) {
-        regularHours = employeeSummary.regular_hours || 0;
-        overtimeHours = employeeSummary.overtime_hours || 0;
-        totalHours = employeeSummary.total_hours || 0;
-        
-        console.log(`Daily summary for ${employee.first_name}: Regular=${regularHours}h, OT=${overtimeHours}h, Total=${totalHours}h`);
-      } else {
-        console.log(`No daily summary found for employee ${employee.uid}, using zero values`);
+    // Update ID number
+    const idElement = document.getElementById("dashboardEmployeeId");
+    if (idElement) {
+      idElement.textContent = `ID: ${employee.id_number}`;
+    }
+
+    // Determine if this is a clock IN or clock OUT
+    const isClockIn = clockType.includes("_in");
+    const isClockOut = clockType.includes("_out");
+
+    // Update clock type badge with appropriate color
+    const clockTypeElement = document.getElementById("dashboardClockType");
+    if (clockTypeElement) {
+      clockTypeElement.textContent = this.formatClockType(clockType, sessionType);
+
+      // Apply inline styles based on clock type
+      if (isClockIn) {
+        // GREEN for clock in
+        clockTypeElement.style.backgroundColor = "#10b981";
+        clockTypeElement.style.color = "white";
+        clockTypeElement.style.padding = "8px 16px";
+        clockTypeElement.style.borderRadius = "8px";
+        clockTypeElement.style.fontWeight = "bold";
+        clockTypeElement.style.fontSize = "14px";
+        clockTypeElement.style.display = "inline-block";
+      } else if (isClockOut) {
+        // RED for clock out
+        clockTypeElement.style.backgroundColor = "#ef4444";
+        clockTypeElement.style.color = "white";
+        clockTypeElement.style.padding = "8px 16px";
+        clockTypeElement.style.borderRadius = "8px";
+        clockTypeElement.style.fontWeight = "bold";
+        clockTypeElement.style.fontSize = "14px";
+        clockTypeElement.style.display = "inline-block";
+      }
+
+      // Add overtime indicator if applicable
+      if (isOvertimeSession) {
+        clockTypeElement.style.border = "2px solid #f59e0b";
       }
     }
-  } catch (error) {
-    console.warn("Error fetching daily summary:", error);
-    // Continue with zero values if fetch fails
-  }
 
-  // Update hours breakdown with daily summary data
-  const hoursElement = document.getElementById("dashboardHours");
+    // Update clock time with background color
+    const clockTimeElement = document.getElementById("dashboardClockTime");
+    if (clockTimeElement) {
+      clockTimeElement.textContent = new Date(clockTime).toLocaleTimeString();
 
-  if (hoursElement) {
-    if (isOvertimeSession) {
-      hoursElement.innerHTML = `
+      // Apply background color based on clock type
+      if (isClockIn) {
+        // Light green for clock in
+        clockTimeElement.style.backgroundColor = "#d1fae5";
+        clockTimeElement.style.color = "#065f46";
+      } else if (isClockOut) {
+        // Light red for clock out
+        clockTimeElement.style.backgroundColor = "#fee2e2";
+        clockTimeElement.style.color = "#991b1b";
+      }
+
+      // Add padding and styling
+      clockTimeElement.style.padding = "8px 16px";
+      clockTimeElement.style.borderRadius = "8px";
+      clockTimeElement.style.fontWeight = "bold";
+      clockTimeElement.style.fontSize = "18px";
+      clockTimeElement.style.display = "inline-block";
+      clockTimeElement.style.marginLeft = "10px";
+    }
+
+    // 🆕 Fetch daily summary data for this employee's total hours today
+    let regularHours = 0;
+    let overtimeHours = 0;
+    let totalHours = 0;
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const summaryResult = await this.electronAPI.getDailySummary(today, today);
+
+      if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
+        // Find the summary record for this specific employee
+        const employeeSummary = summaryResult.data.find(
+          record => record.employee_uid === employee.uid
+        );
+
+        if (employeeSummary) {
+          regularHours = employeeSummary.regular_hours || 0;
+          overtimeHours = employeeSummary.overtime_hours || 0;
+          totalHours = employeeSummary.total_hours || 0;
+
+          console.log(`Daily summary for ${employee.first_name}: Regular=${regularHours}h, OT=${overtimeHours}h, Total=${totalHours}h`);
+        } else {
+          console.log(`No daily summary found for employee ${employee.uid}, using zero values`);
+        }
+      }
+    } catch (error) {
+      console.warn("Error fetching daily summary:", error);
+      // Continue with zero values if fetch fails
+    }
+
+    // Update hours breakdown with daily summary data
+    const hoursElement = document.getElementById("dashboardHours");
+
+    if (hoursElement) {
+      if (isOvertimeSession) {
+        hoursElement.innerHTML = `
         <div class="hours-row">
           <span class="hours-label">Regular:</span>
           <span class="hours-value">${regularHours.toFixed(1)}h</span>
@@ -3141,8 +4145,8 @@ class AttendanceApp {
         </div>
         <div class="session-indicator overtime">🌙 ${sessionType || "Overtime Session"}</div>
       `;
-    } else {
-      hoursElement.innerHTML = `
+      } else {
+        hoursElement.innerHTML = `
         <div class="hours-row">
           <span class="hours-label">Regular:</span>
           <span class="hours-value">${regularHours.toFixed(1)}h</span>
@@ -3156,46 +4160,46 @@ class AttendanceApp {
           <span class="hours-value">${totalHours.toFixed(1)}h</span>
         </div>
       `;
+      }
+    }
+
+    // Update the card background color based on clock type
+    if (isClockIn) {
+      dashboardEmployeeCard.style.border = "6px solid #10b981";
+      dashboardEmployeeCard.style.backgroundColor = "#f0fdf4";
+    } else if (isClockOut) {
+      dashboardEmployeeCard.style.border = "6px solid #ef4444";
+      dashboardEmployeeCard.style.backgroundColor = "#fef2f2";
+    }
+
+    // Show success status with appropriate message
+    if (isClockIn) {
+      this.showStatus("✓ Clocked In Successfully", "success");
+    } else if (isClockOut) {
+      this.showStatus("✓ Clocked Out Successfully", "success");
+    }
+
+    // Focus input immediately for next scan
+    this.focusInput();
+
+    // Handle input type changes
+    const inputTypeRadios = document.querySelectorAll('input[name="inputType"]');
+    inputTypeRadios.forEach((radio) => {
+      radio.addEventListener("change", () => {
+        this.focusInput();
+        if (this.barcodeTimeout) {
+          clearTimeout(this.barcodeTimeout);
+        }
+      });
+    });
+
+    // Listen for IPC events from main process using the exposed API
+    if (this.electronAPI) {
+      this.electronAPI.onSyncAttendanceToServer(() => {
+        this.performAttendanceSync(false, 0, true);
+      });
     }
   }
-
-  // Update the card background color based on clock type
-  if (isClockIn) {
-    dashboardEmployeeCard.style.border = "6px solid #10b981";
-    dashboardEmployeeCard.style.backgroundColor = "#f0fdf4";
-  } else if (isClockOut) {
-    dashboardEmployeeCard.style.border = "6px solid #ef4444";
-    dashboardEmployeeCard.style.backgroundColor = "#fef2f2";
-  }
-
-  // Show success status with appropriate message
-  if (isClockIn) {
-    this.showStatus("✓ Clocked In Successfully", "success");
-  } else if (isClockOut) {
-    this.showStatus("✓ Clocked Out Successfully", "success");
-  }
-
-  // Focus input immediately for next scan
-  this.focusInput();
-
-  // Handle input type changes
-  const inputTypeRadios = document.querySelectorAll('input[name="inputType"]');
-  inputTypeRadios.forEach((radio) => {
-    radio.addEventListener("change", () => {
-      this.focusInput();
-      if (this.barcodeTimeout) {
-        clearTimeout(this.barcodeTimeout);
-      }
-    });
-  });
-
-  // Listen for IPC events from main process using the exposed API
-  if (this.electronAPI) {
-    this.electronAPI.onSyncAttendanceToServer(() => {
-      this.performAttendanceSync(false, 0, true);
-    });
-  }
-}
 
   // Enhanced sync employees with download toast
   async syncEmployees() {
@@ -3236,7 +4240,7 @@ class AttendanceApp {
     this.loadSyncInfo();
     this.loadSummaryInfo();
     this.loadAttendanceSyncInfo();
-    this.loadServerEditSyncInfo(); // ADD THIS LINE
+    this.loadServerEditSyncInfo();
     this.loadDailySummary();
     this.initializeSettingsTabs();
 
@@ -3294,8 +4298,11 @@ class AttendanceApp {
           this.loadDailySummary();
         } else if (tab.dataset.tab === "sync") {
           this.loadSyncInfo();
-          this.loadSummaryInfo(); // NEW: Load summary info when sync tab is opened
+          this.loadSummaryInfo();
           this.loadAttendanceSyncInfo();
+        } else if (tab.dataset.tab === "editor") {
+          // ✅ NEW: Load data editor when tab is opened
+          this.loadLocalDataEditor();
         }
       });
     });
@@ -3313,7 +4320,7 @@ class AttendanceApp {
     }
 
     try {
-      const result = await this.electronAPI.getSettings();
+      const result = await this.electronAPI.invoke('get-settings');
 
       if (result.success) {
         const settings = result.data;
@@ -3332,7 +4339,26 @@ class AttendanceApp {
         const faceRecognitionEnabled = settings.face_detection_enabled === "true" || settings.face_detection_enabled === true;
         document.getElementById("faceRecognitionToggle").checked = faceRecognitionEnabled;
         console.log("Face Recognition loaded:", faceRecognitionEnabled);
+
+        // Load auth PIN setting
+        const authPin = settings.auth_pin || "1234";
+        const authPinInput = document.getElementById("authPin");
+        if (authPinInput) {
+          authPinInput.value = authPin;
+        }
+        console.log("Auth PIN loaded");
       }
+
+      // Make sure auth PIN input is not disabled
+      setTimeout(() => {
+        const authPinInput = document.getElementById("authPin");
+        if (authPinInput) {
+          authPinInput.disabled = false;
+          authPinInput.readOnly = false;
+          console.log("Auth PIN input enabled");
+        }
+      }, 100);
+
     } catch (error) {
       console.error("Error loading settings:", error);
       this.showSettingsStatus("Error loading settings", "error");
@@ -3360,7 +4386,7 @@ class AttendanceApp {
           "employeeCount"
         ).textContent = `Employees in database: ${employeesResult.data.length}`;
 
-        const settingsResult = await this.electronAPI.getSettings();
+        const settingsResult = await this.electronAPI.invoke('get-settings');
         if (settingsResult.success && settingsResult.data.last_sync) {
           const lastSync = new Date(
             Number.parseInt(settingsResult.data.last_sync)
@@ -3824,7 +4850,7 @@ class AttendanceApp {
           // Handle other errors normally
           this.showStatus(result.error || "Employee not found", "error");
         }
-        
+
         this.focusInput();
       }
     } catch (error) {
@@ -3853,10 +4879,10 @@ class AttendanceApp {
   }
 
   showInactiveEmployeeAlert(employeeName) {
-  // Create modal/alert overlay
-  const alertOverlay = document.createElement('div');
-  alertOverlay.className = 'inactive-employee-alert-overlay';
-  alertOverlay.innerHTML = `
+    // Create modal/alert overlay
+    const alertOverlay = document.createElement('div');
+    alertOverlay.className = 'inactive-employee-alert-overlay';
+    alertOverlay.innerHTML = `
     <div class="inactive-employee-alert">
       <div class="alert-icon">⛔</div>
       <h2>Account Disabled</h2>
@@ -3870,23 +4896,23 @@ class AttendanceApp {
       </button>
     </div>
   `;
-  
-  document.body.appendChild(alertOverlay);
-  
-  // Auto-close after 8 seconds
-  setTimeout(() => {
-    if (alertOverlay.parentNode) {
-      alertOverlay.remove();
-    }
-  }, 8000);
-  
-  // Close on overlay click
-  alertOverlay.addEventListener('click', (e) => {
-    if (e.target === alertOverlay) {
-      alertOverlay.remove();
-    }
-  });
-}
+
+    document.body.appendChild(alertOverlay);
+
+    // Auto-close after 8 seconds
+    setTimeout(() => {
+      if (alertOverlay.parentNode) {
+        alertOverlay.remove();
+      }
+    }, 8000);
+
+    // Close on overlay click
+    alertOverlay.addEventListener('click', (e) => {
+      if (e.target === alertOverlay) {
+        alertOverlay.remove();
+      }
+    });
+  }
 
   deferredOperations(data) {
     // Queue these operations to run after a short delay
@@ -4405,6 +5431,86 @@ class AttendanceApp {
     }
   }
 
+  /**
+ * Format clock time for editing
+ * Extracts time portion from timezone-neutral datetime
+ */
+  formatClockTimeForEdit(clockTime, date) {
+    if (!clockTime) return '';
+
+    try {
+      // If already in HH:MM:SS format
+      if (/^\d{2}:\d{2}:\d{2}$/.test(clockTime)) {
+        return clockTime;
+      }
+
+      // Extract time from datetime string
+      if (clockTime.includes('T')) {
+        const timePart = clockTime.split('T')[1];
+        const timeOnly = timePart.split('.')[0]; // Remove milliseconds
+        return timeOnly;
+      }
+
+      // Parse and format
+      const datetime = new Date(clockTime.replace('Z', ''));
+      if (isNaN(datetime.getTime())) return clockTime;
+
+      const hours = String(datetime.getHours()).padStart(2, '0');
+      const minutes = String(datetime.getMinutes()).padStart(2, '0');
+      const seconds = String(datetime.getSeconds()).padStart(2, '0');
+
+      return `${hours}:${minutes}:${seconds}`;
+    } catch (error) {
+      console.error('Error formatting for edit:', error);
+      return clockTime;
+    }
+  }
+
+  /**
+   * Format clock time for display
+   * Shows in user-friendly format without timezone conversion
+   */
+  formatClockTime(clockTime, date = null) {
+    if (!clockTime) return 'N/A';
+
+    try {
+      let datetime;
+
+      // Handle time-only format
+      if (/^\d{2}:\d{2}:\d{2}$/.test(clockTime)) {
+        if (date) {
+          datetime = new Date(`${date}T${clockTime}`);
+        } else {
+          return clockTime;
+        }
+      } else if (clockTime.includes('T')) {
+        // Parse datetime without timezone conversion
+        const timeStr = clockTime.replace('Z', '').split('.')[0]; // Remove Z and milliseconds
+        datetime = new Date(timeStr);
+      } else {
+        datetime = new Date(clockTime);
+      }
+
+      if (isNaN(datetime.getTime())) {
+        return clockTime;
+      }
+
+      // Format for display
+      return datetime.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      console.error('Error formatting clock time:', error);
+      return clockTime;
+    }
+  }
+
   getEmployeeStatus(record) {
     if (record.has_overtime) {
       return { class: "overtime", text: "Overtime" };
@@ -4826,43 +5932,43 @@ class AttendanceApp {
   }
 
   updateCurrentlyClocked(employees) {
-  const container = document.getElementById("currentlyClocked");
+    const container = document.getElementById("currentlyClocked");
 
-  if (!employees || employees.length === 0) {
-    container.innerHTML =
-      '<div class="loading">No employees currently clocked in</div>';
-    return;
-  }
+    if (!employees || employees.length === 0) {
+      container.innerHTML =
+        '<div class="loading">No employees currently clocked in</div>';
+      return;
+    }
 
-  const imageIds = [];
+    const imageIds = [];
 
-  container.innerHTML = employees
-    .map((emp) => {
-      const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
-      imageIds.push({
-        id: empId,
-        uid: emp.employee_uid,
-        name: `${emp.first_name} ${emp.last_name}`,
-      });
+    container.innerHTML = employees
+      .map((emp) => {
+        const empId = this.generateUniqueId(`clocked-${emp.employee_uid}`);
+        imageIds.push({
+          id: empId,
+          uid: emp.employee_uid,
+          name: `${emp.first_name} ${emp.last_name}`,
+        });
 
-      const sessionType =
-        emp.sessionType ||
-        this.getSessionTypeFromClockType(emp.last_clock_type);
-      const isOvertime =
-        emp.isOvertimeSession ||
-        this.isOvertimeClockType(emp.last_clock_type);
-      const sessionIcon = this.getSessionIcon(emp.last_clock_type);
-      
-      // Format clock in time
-      const clockInTime = emp.last_clock_time 
-        ? new Date(emp.last_clock_time).toLocaleTimeString('en-US', {
+        const sessionType =
+          emp.sessionType ||
+          this.getSessionTypeFromClockType(emp.last_clock_type);
+        const isOvertime =
+          emp.isOvertimeSession ||
+          this.isOvertimeClockType(emp.last_clock_type);
+        const sessionIcon = this.getSessionIcon(emp.last_clock_type);
+
+        // Format clock in time
+        const clockInTime = emp.last_clock_time
+          ? new Date(emp.last_clock_time).toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
           })
-        : '--:--';
+          : '--:--';
 
-      return `
+        return `
         <div class="employee-item ${isOvertime ? "overtime-employee" : ""}" style="background-color: #d1fae5; border: 1px solid #10b981; padding: 10px; border-radius: 8px; margin-bottom: 8px;">
             <img class="employee-avatar" 
                  id="${empId}"
@@ -4878,148 +5984,148 @@ class AttendanceApp {
                     ${sessionIcon} ${sessionType}
                 </div>
                 <div class="clock-in-time" style="font-size: 18px; color: #059669; font-weight: 600;">
-                    ⏰ ${clockInTime}
+                    ⏰ ${(clockInTime)}
                 </div>
             </div>
         </div>
       `;
-    })
-    .join("");
+      })
+      .join("");
 
-  // Load images asynchronously after DOM is updated
-  setTimeout(() => {
-    imageIds.forEach(({ id, uid, name }) => {
-      const imgElement = document.getElementById(id);
-      if (imgElement) {
-        this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
-          console.warn(`Image setup failed for ${uid}:`, error);
-        });
-      }
-    });
-  }, 10);
-}
-
-async updateTodayActivity(attendance) {
-  const container = document.getElementById("todayActivity");
-
-  if (!attendance || attendance.length === 0) {
-    container.innerHTML = '<div class="loading">No activity today</div>';
-    return;
-  }
-
-  // Get today's date for filtering
-  const today = new Date().toDateString();
-  
-  // Filter to show only clock OUT records from today
-  const clockOutRecords = attendance.filter(record => {
-    const recordDate = new Date(record.clock_time).toDateString();
-    return recordDate === today && record.clock_type.includes('out');
-  });
-
-  if (clockOutRecords.length === 0) {
-    container.innerHTML = '<div class="loading">No clock out activity today</div>';
-    return;
-  }
-
-  const attendanceSlice = clockOutRecords.slice(0, 10);
-  const imageIds = [];
-
-  // 🆕 Fetch daily summary data for ALL employees' total hours today
-  let employeeHoursMap = new Map();
-  try {
-    const todayDate = new Date().toISOString().split('T')[0];
-    const summaryResult = await this.electronAPI.getDailySummary(todayDate, todayDate);
-    
-    if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
-      // Create a map of employee_uid -> hours data
-      summaryResult.data.forEach(summary => {
-        employeeHoursMap.set(summary.employee_uid, {
-          regularHours: summary.regular_hours || 0,
-          overtimeHours: summary.overtime_hours || 0,
-          totalHours: summary.total_hours || 0
-        });
+    // Load images asynchronously after DOM is updated
+    setTimeout(() => {
+      imageIds.forEach(({ id, uid, name }) => {
+        const imgElement = document.getElementById(id);
+        if (imgElement) {
+          this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
+            console.warn(`Image setup failed for ${uid}:`, error);
+          });
+        }
       });
-      console.log(`Loaded daily summary for ${employeeHoursMap.size} employees`);
+    }, 10);
+  }
+
+  async updateTodayActivity(attendance) {
+    const container = document.getElementById("todayActivity");
+
+    if (!attendance || attendance.length === 0) {
+      container.innerHTML = '<div class="loading">No activity today</div>';
+      return;
     }
-  } catch (error) {
-    console.warn("Error fetching daily summary for activity:", error);
-    // Continue with empty map if fetch fails
-  }
 
-  // Helper function to find matching clock in time
-  const findClockInTime = (clockOutRecord, allAttendance) => {
-    const clockType = clockOutRecord.clock_type;
-    let correspondingInType = '';
-    
-    // Determine corresponding clock in type
-    if (clockType === 'morning_out') correspondingInType = 'morning_in';
-    else if (clockType === 'afternoon_out') correspondingInType = 'afternoon_in';
-    else if (clockType === 'evening_out') correspondingInType = 'evening_in';
-    else if (clockType === 'overtime_out') correspondingInType = 'overtime_in';
-    
-    if (!correspondingInType) return null;
-    
-    // Find the most recent clock in before this clock out
-    const clockInRecord = allAttendance.find(record => 
-      record.employee_uid === clockOutRecord.employee_uid &&
-      record.clock_type === correspondingInType &&
-      new Date(record.clock_time) <= new Date(clockOutRecord.clock_time) &&
-      new Date(record.clock_time).toDateString() === today
-    );
-    
-    return clockInRecord ? clockInRecord.clock_time : null;
-  };
+    // Get today's date for filtering
+    const today = new Date().toDateString();
 
-  container.innerHTML = attendanceSlice
-    .map((record, index) => {
-      const recordId = this.generateUniqueId(
-        `activity-${record.employee_uid}-${index}`
+    // Filter to show only clock OUT records from today
+    const clockOutRecords = attendance.filter(record => {
+      const recordDate = new Date(record.clock_time).toDateString();
+      return recordDate === today && record.clock_type.includes('out');
+    });
+
+    if (clockOutRecords.length === 0) {
+      container.innerHTML = '<div class="loading">No clock out activity today</div>';
+      return;
+    }
+
+    const attendanceSlice = clockOutRecords.slice(0, 10);
+    const imageIds = [];
+
+    // 🆕 Fetch daily summary data for ALL employees' total hours today
+    let employeeHoursMap = new Map();
+    try {
+      const todayDate = new Date().toISOString().split('T')[0];
+      const summaryResult = await this.electronAPI.getDailySummary(todayDate, todayDate);
+
+      if (summaryResult.success && summaryResult.data && summaryResult.data.length > 0) {
+        // Create a map of employee_uid -> hours data
+        summaryResult.data.forEach(summary => {
+          employeeHoursMap.set(summary.employee_uid, {
+            regularHours: summary.regular_hours || 0,
+            overtimeHours: summary.overtime_hours || 0,
+            totalHours: summary.total_hours || 0
+          });
+        });
+        console.log(`Loaded daily summary for ${employeeHoursMap.size} employees`);
+      }
+    } catch (error) {
+      console.warn("Error fetching daily summary for activity:", error);
+      // Continue with empty map if fetch fails
+    }
+
+    // Helper function to find matching clock in time
+    const findClockInTime = (clockOutRecord, allAttendance) => {
+      const clockType = clockOutRecord.clock_type;
+      let correspondingInType = '';
+
+      // Determine corresponding clock in type
+      if (clockType === 'morning_out') correspondingInType = 'morning_in';
+      else if (clockType === 'afternoon_out') correspondingInType = 'afternoon_in';
+      else if (clockType === 'evening_out') correspondingInType = 'evening_in';
+      else if (clockType === 'overtime_out') correspondingInType = 'overtime_in';
+
+      if (!correspondingInType) return null;
+
+      // Find the most recent clock in before this clock out
+      const clockInRecord = allAttendance.find(record =>
+        record.employee_uid === clockOutRecord.employee_uid &&
+        record.clock_type === correspondingInType &&
+        new Date(record.clock_time) <= new Date(clockOutRecord.clock_time) &&
+        new Date(record.clock_time).toDateString() === today
       );
-      imageIds.push({
-        id: recordId,
-        uid: record.employee_uid,
-        name: `${record.first_name} ${record.last_name}`,
-      });
 
-      const sessionType =
-        record.sessionType ||
-        this.getSessionTypeFromClockType(record.clock_type);
-      const isOvertime =
-        record.isOvertimeSession ||
-        this.isOvertimeClockType(record.clock_type);
-      
-      // Find corresponding clock in time
-      const clockInTime = findClockInTime(record, attendance);
-      
-      // Format times
-      const clockOutTimeFormatted = new Date(record.clock_time).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      
-      const clockInTimeFormatted = clockInTime 
-        ? new Date(clockInTime).toLocaleTimeString('en-US', {
+      return clockInRecord ? clockInRecord.clock_time : null;
+    };
+
+    container.innerHTML = attendanceSlice
+      .map((record, index) => {
+        const recordId = this.generateUniqueId(
+          `activity-${record.employee_uid}-${index}`
+        );
+        imageIds.push({
+          id: recordId,
+          uid: record.employee_uid,
+          name: `${record.first_name} ${record.last_name}`,
+        });
+
+        const sessionType =
+          record.sessionType ||
+          this.getSessionTypeFromClockType(record.clock_type);
+        const isOvertime =
+          record.isOvertimeSession ||
+          this.isOvertimeClockType(record.clock_type);
+
+        // Find corresponding clock in time
+        const clockInTime = findClockInTime(record, attendance);
+
+        // Format times
+        const clockOutTimeFormatted = new Date(record.clock_time).toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+
+        const clockInTimeFormatted = clockInTime
+          ? new Date(clockInTime).toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
           })
-        : '--:--';
-      
-      // 🆕 Get total hours from daily summary
-      const employeeHours = employeeHoursMap.get(record.employee_uid);
-      const totalHoursToday = employeeHours ? employeeHours.totalHours : 0;
-      const totalHoursDisplay = totalHoursToday > 0 
-        ? `${totalHoursToday.toFixed(1)}h` 
-        : '';
-      
-      // Time range display
-      const timeRange = `${clockInTimeFormatted} - ${clockOutTimeFormatted}`;
-      
-      // Use RED color for out badges
-      const badgeClass = isOvertime ? "overtime" : "";
+          : '--:--';
 
-      return `
+        // 🆕 Get total hours from daily summary
+        const employeeHours = employeeHoursMap.get(record.employee_uid);
+        const totalHoursToday = employeeHours ? employeeHours.totalHours : 0;
+        const totalHoursDisplay = totalHoursToday > 0
+          ? `${totalHoursToday.toFixed(1)}h`
+          : '';
+
+        // Time range display
+        const timeRange = `${clockInTimeFormatted} - ${clockOutTimeFormatted}`;
+
+        // Use RED color for out badges
+        const badgeClass = isOvertime ? "overtime" : "";
+
+        return `
         <div class="attendance-item ${isOvertime ? "overtime-record" : ""}" style="padding: 12px; margin-bottom: 8px; border-radius: 8px;">
             <img class="attendance-avatar" 
                  id="${recordId}"
@@ -5041,21 +6147,21 @@ async updateTodayActivity(attendance) {
             </div>
         </div>
       `;
-    })
-    .join("");
+      })
+      .join("");
 
-  // Load images asynchronously after DOM is updated
-  setTimeout(() => {
-    imageIds.forEach(({ id, uid, name }) => {
-      const imgElement = document.getElementById(id);
-      if (imgElement) {
-        this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
-          console.warn(`Image setup failed for ${uid}:`, error);
-        });
-      }
-    });
-  }, 10);
-}
+    // Load images asynchronously after DOM is updated
+    setTimeout(() => {
+      imageIds.forEach(({ id, uid, name }) => {
+        const imgElement = document.getElementById(id);
+        if (imgElement) {
+          this.setupImageWithFallback(imgElement, uid, name).catch((error) => {
+            console.warn(`Image setup failed for ${uid}:`, error);
+          });
+        }
+      });
+    }, 10);
+  }
 
   // Helper function to determine if clock type is overtime
   isOvertimeClockType(clockType) {
@@ -5467,7 +6573,11 @@ async updateTodayActivity(attendance) {
    * NEW: Render server-only records
    */
   renderServerOnlyRecords(records) {
-    return records.map(record => `
+    return records.map(record => {
+      // Format time for display
+      const displayTime = this.formatClockTime(record.clock_time, record.date);
+
+      return `
     <div class="record-card" style="background: #eff6ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
       <div style="display: flex; justify-content: space-between; align-items: start;">
         <div style="flex: 1;">
@@ -5477,7 +6587,7 @@ async updateTodayActivity(attendance) {
           <div style="font-size: 12px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
             <div><strong>Date:</strong> ${record.date}</div>
             <div><strong>Type:</strong> ${record.clock_type}</div>
-            <div><strong>Time:</strong> ${new Date(record.clock_time).toLocaleString()}</div>
+            <div><strong>Time:</strong> ${displayTime}</div>
             <div><strong>Hours:</strong> ${record.regular_hours || 0}h reg, ${record.overtime_hours || 0}h OT</div>
           </div>
           <div style="margin-top: 5px; font-size: 11px; color: #6b7280;">
@@ -5494,7 +6604,7 @@ async updateTodayActivity(attendance) {
         </div>
       </div>
     </div>
-  `).join('');
+  `}).join('');
   }
 
   /**
@@ -6271,6 +7381,152 @@ class OptimizedAttendanceApp extends AttendanceApp {
     }
 
     console.log("OptimizedAttendanceApp destroyed with cache cleanup");
+  }
+}
+
+/**
+ * 2FA Authentication Manager
+ */
+class TwoFactorAuth {
+  constructor(electronAPI) {
+    this.electronAPI = electronAPI;
+    this.defaultPin = '1234'; // Default PIN
+    this.isVerified = false;
+    this.verificationTimeout = null;
+    this.setupModal();
+  }
+
+  setupModal() {
+    const submitBtn = document.getElementById('twoFactorSubmit');
+    const cancelBtn = document.getElementById('twoFactorCancel');
+    const pinInput = document.getElementById('twoFactorPin');
+
+    submitBtn?.addEventListener('click', () => this.handleSubmit());
+    cancelBtn?.addEventListener('click', () => this.hide());
+
+    // Submit on Enter key
+    pinInput?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        this.handleSubmit();
+      }
+    });
+  }
+
+  async handleSubmit() {
+    const pinInput = document.getElementById('twoFactorPin');
+    const errorDiv = document.getElementById('twoFactorError');
+    const submitBtn = document.getElementById('twoFactorSubmit');
+
+    const enteredPin = pinInput.value.trim();
+
+    if (!enteredPin) {
+      this.showError('Please enter your PIN code');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verifying...';
+
+    try {
+      // Get stored PIN from settings
+      const settings = await this.electronAPI.invoke('get-settings');
+      const storedPin = settings.success ? settings.data.auth_pin || this.defaultPin : this.defaultPin;
+
+      if (enteredPin === storedPin) {
+        this.isVerified = true;
+        this.hide();
+
+        // Auto-expire verification after 5 minutes
+        if (this.verificationTimeout) clearTimeout(this.verificationTimeout);
+        this.verificationTimeout = setTimeout(() => {
+          this.isVerified = false;
+          console.log('2FA verification expired');
+        }, 5 * 60 * 1000);
+
+        // Resolve the promise
+        if (this.resolveCallback) {
+          this.resolveCallback(true);
+        }
+      } else {
+        this.showError('Incorrect PIN code. Please try again.');
+        pinInput.value = '';
+        pinInput.focus();
+      }
+    } catch (error) {
+      this.showError('Verification error: ' + error.message);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✓ Verify & Continue';
+    }
+  }
+
+  showError(message) {
+    const errorDiv = document.getElementById('twoFactorError');
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+
+    setTimeout(() => {
+      errorDiv.style.display = 'none';
+    }, 3000);
+  }
+
+  show(actionDescription) {
+    return new Promise((resolve, reject) => {
+      // If already verified within timeout, skip
+      if (this.isVerified) {
+        resolve(true);
+        return;
+      }
+
+      const modal = document.getElementById('twoFactorModal');
+      const actionText = document.getElementById('twoFactorAction');
+      const pinInput = document.getElementById('twoFactorPin');
+      const errorDiv = document.getElementById('twoFactorError');
+
+      actionText.textContent = actionDescription;
+      pinInput.value = '';
+      errorDiv.style.display = 'none';
+
+      // Make sure input is enabled and not readonly
+      pinInput.disabled = false;
+      pinInput.readOnly = false;
+
+      modal.style.display = 'flex';
+
+      // Force focus with multiple attempts
+      setTimeout(() => {
+        pinInput.focus();
+        pinInput.select();
+      }, 50);
+
+      setTimeout(() => {
+        pinInput.focus();
+        pinInput.click();
+      }, 150);
+
+      setTimeout(() => {
+        pinInput.focus();
+      }, 300);
+
+      this.resolveCallback = resolve;
+      this.rejectCallback = reject;
+    });
+  }
+
+  hide() {
+    const modal = document.getElementById('twoFactorModal');
+    modal.style.display = 'none';
+
+    if (this.rejectCallback && !this.isVerified) {
+      this.rejectCallback(new Error('Authentication cancelled'));
+    }
+  }
+
+  reset() {
+    this.isVerified = false;
+    if (this.verificationTimeout) {
+      clearTimeout(this.verificationTimeout);
+    }
   }
 }
 

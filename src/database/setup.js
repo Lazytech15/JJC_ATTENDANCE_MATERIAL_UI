@@ -7,7 +7,7 @@ let db
 
 function getProductionSafeDatabasePath() {
   const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev')
-  
+
   if (isDev) {
     // Development: Use relative path from setup.js location
     return path.join(__dirname, "../../data/attendance.db")
@@ -21,14 +21,14 @@ function getProductionSafeDatabasePath() {
 function setupDatabase() {
   try {
     console.log('Setting up database...')
-    
+
     const dbPath = getProductionSafeDatabasePath()
     console.log('Database path:', dbPath)
 
     // Ensure data directory exists
     const dataDir = path.dirname(dbPath)
     console.log('Data directory:', dataDir)
-    
+
     if (!fs.existsSync(dataDir)) {
       console.log('Creating data directory...')
       fs.mkdirSync(dataDir, { recursive: true })
@@ -79,13 +79,13 @@ function setupDatabase() {
 
   } catch (error) {
     console.error('✗ Database setup failed:', error)
-    
+
     // Try fallback location if main location fails
     if (!error.message.includes('fallback')) {
       console.log('Trying fallback database location...')
       return setupFallbackDatabase()
     }
-    
+
     throw error
   }
 }
@@ -95,9 +95,9 @@ function setupFallbackDatabase() {
     // Fallback: Use temp directory
     const tempDir = require('os').tmpdir()
     const fallbackDbPath = path.join(tempDir, 'electron-attendance', 'attendance.db')
-    
+
     console.log('Fallback database path:', fallbackDbPath)
-    
+
     const fallbackDataDir = path.dirname(fallbackDbPath)
     if (!fs.existsSync(fallbackDataDir)) {
       fs.mkdirSync(fallbackDataDir, { recursive: true })
@@ -105,14 +105,14 @@ function setupFallbackDatabase() {
 
     db = new Database(fallbackDbPath)
     db.pragma("foreign_keys = ON")
-    
+
     createTables()
     createIndexes()
     runMigrations()
-    
+
     console.log("✓ Fallback database initialized at:", fallbackDbPath)
     return db
-    
+
   } catch (fallbackError) {
     console.error('✗ Fallback database setup also failed:', fallbackError)
     throw new Error(`Database setup failed: ${fallbackError.message} (fallback)`)
@@ -306,7 +306,7 @@ function createTables() {
     // Insert default settings
     console.log('Inserting default settings...')
     const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)")
-    
+
     const defaultSettings = [
       ["server_url", "http://192.168.1.71:3001/api/tables/emp_list/data"],
       ["sync_interval", "300000"], // 5 minutes
@@ -348,7 +348,7 @@ function createIndexes() {
   try {
     const indexes = [
       "CREATE INDEX IF NOT EXISTS idx_employees_id_number ON employees (id_number)",
-      "CREATE INDEX IF NOT EXISTS idx_employees_id_barcode ON employees (id_barcode)", 
+      "CREATE INDEX IF NOT EXISTS idx_employees_id_barcode ON employees (id_barcode)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_employee_uid ON attendance (employee_uid)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance (date)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_clock_time ON attendance (clock_time)",
@@ -358,7 +358,7 @@ function createIndexes() {
       // "CREATE INDEX IF NOT EXISTS idx_attendance_overtime ON attendance (clock_type) WHERE clock_type LIKE '%overtime%' OR clock_type LIKE '%evening%'",
       "CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (scanned_barcode)",
       "CREATE INDEX IF NOT EXISTS idx_attendance_id_number ON attendance (id_number)",
-      
+
       // Indexes for statistics table
       "CREATE INDEX IF NOT EXISTS idx_stats_employee_uid ON attendance_statistics (employee_uid)",
       "CREATE INDEX IF NOT EXISTS idx_stats_date ON attendance_statistics (date)",
@@ -369,7 +369,7 @@ function createIndexes() {
       // REMOVED: Problematic partial index
       // "CREATE INDEX IF NOT EXISTS idx_stats_special_rules ON attendance_statistics (early_morning_rule_applied, overnight_shift)",
       "CREATE INDEX IF NOT EXISTS idx_stats_calculation_method ON attendance_statistics (calculation_method)",
-      
+
       // NEW: Indexes for daily attendance summary table
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_uid ON daily_attendance_summary (employee_uid)",
       "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_attendance_summary (date)",
@@ -403,7 +403,7 @@ function createIndexes() {
 function runMigrations() {
   try {
     console.log('Checking database version...')
-    
+
     // Check current version
     let currentVersion = 0
     try {
@@ -425,7 +425,7 @@ function runMigrations() {
       } catch (error) {
         console.log('- Migration 1: is_late column already exists')
       }
-      
+
       const insertVersion = db.prepare("INSERT INTO database_version (version, description) VALUES (?, ?)")
       insertVersion.run(1, "Added is_late column to attendance table")
     }
@@ -433,7 +433,7 @@ function runMigrations() {
     // Migration 2: Update clock_type constraints for new types
     if (currentVersion < 2) {
       console.log('Running migration 2: Updating clock_type constraints...')
-      
+
       try {
         // Check current table structure
         const currentTableCheck = db.prepare(`
@@ -504,9 +504,9 @@ function runMigrations() {
     // Migration 3: Add new settings for overtime configuration
     if (currentVersion < 3) {
       console.log('Running migration 3: Adding overtime settings...')
-      
+
       const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)")
-      
+
       const newSettings = [
         ["overtime_start", "17:10"],
         ["overtime_grace", "5"],
@@ -525,14 +525,14 @@ function runMigrations() {
 
       const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
       insertVersion.run(3, "Added overtime configuration settings")
-      
+
       console.log('✓ Migration 3: Overtime settings added')
     }
 
     // Migration 4: Create attendance_statistics table
     if (currentVersion < 4) {
       console.log('Running migration 4: Creating attendance_statistics table...')
-      
+
       // The table creation is handled in createTables(), but we need to ensure indexes
       try {
         // Add new indexes for statistics table
@@ -571,11 +571,11 @@ function runMigrations() {
         // Check if column already exists
         const tableInfo = db.prepare("PRAGMA table_info(attendance)").all()
         const barcodeColumn = tableInfo.find(col => col.name === 'id_barcode')
-        
+
         if (!barcodeColumn) {
           db.exec(`ALTER TABLE attendance ADD COLUMN id_barcode TEXT`)
           console.log('✓ Migration 5: id_barcode column added to attendance table')
-          
+
           // Add index for the new column
           db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_id_barcode ON attendance (id_barcode)")
           console.log('✓ Migration 5: Index created for id_barcode column')
@@ -586,10 +586,10 @@ function runMigrations() {
         console.error('Error in migration 5:', error)
         console.log('- Migration 5: Failed to add id_barcode column')
       }
-      
+
       const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
       insertVersion.run(5, "Added id_barcode column to attendance table for storing scanned barcode data")
-      
+
       console.log('✓ Migration 5: id_barcode column migration completed')
     }
 
@@ -600,11 +600,11 @@ function runMigrations() {
         // Check if column already exists
         const tableInfo = db.prepare("PRAGMA table_info(attendance_statistics)").all()
         const barcodeColumn = tableInfo.find(col => col.name === 'id_barcode')
-        
+
         if (!barcodeColumn) {
           db.exec(`ALTER TABLE attendance_statistics ADD COLUMN id_barcode TEXT`)
           console.log('✓ Migration 6: id_barcode column added to attendance_statistics table')
-          
+
           // Add index for the new column
           db.exec("CREATE INDEX IF NOT EXISTS idx_stats_id_barcode ON attendance_statistics (id_barcode)")
           console.log('✓ Migration 6: Index created for id_barcode column in statistics table')
@@ -615,17 +615,17 @@ function runMigrations() {
         console.error('Error in migration 6:', error)
         console.log('- Migration 6: Failed to add id_barcode column to attendance_statistics')
       }
-      
+
       const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
       insertVersion.run(6, "Added id_barcode column to attendance_statistics table for tracking barcode data in statistics")
-      
+
       console.log('✓ Migration 6: id_barcode column migration for statistics completed')
     }
 
     // NEW: Migration 7: Create daily_attendance_summary table
     if (currentVersion < 7) {
       console.log('Running migration 7: Creating daily_attendance_summary table...')
-      
+
       try {
         // The table creation is handled in createTables(), but we need to ensure indexes
         const summaryIndexes = [
@@ -657,9 +657,123 @@ function runMigrations() {
 
       const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
       insertVersion.run(7, "Added daily_attendance_summary table for readable attendance data")
-      
+
       console.log('✓ Migration 7: Daily attendance summary table migration completed')
     }
+
+    // Migration 8: Add is_synced column to daily_attendance_summary
+    if (currentVersion < 8) {
+      console.log('Running migration 8: Adding is_synced column to daily_attendance_summary...')
+      try {
+        const tableInfo = db.prepare("PRAGMA table_info(daily_attendance_summary)").all()
+        const isSyncedColumn = tableInfo.find(col => col.name === 'is_synced')
+
+        if (!isSyncedColumn) {
+          db.exec(`ALTER TABLE daily_attendance_summary ADD COLUMN is_synced INTEGER DEFAULT 0`)
+          console.log('✓ Migration 8: is_synced column added to daily_attendance_summary')
+
+          // Add index for the new column
+          db.exec("CREATE INDEX IF NOT EXISTS idx_daily_summary_sync_status ON daily_attendance_summary (is_synced)")
+          console.log('✓ Migration 8: Index created for is_synced column')
+        } else {
+          console.log('- Migration 8: is_synced column already exists')
+        }
+      } catch (error) {
+        console.error('Error in migration 8:', error)
+        console.log('- Migration 8: Failed to add is_synced column')
+      }
+
+      const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+      insertVersion.run(8, "Added is_synced column to daily_attendance_summary for tracking sync status")
+
+      console.log('✓ Migration 8: is_synced column migration completed')
+    }
+
+    // Migration 9: Update foreign key to use CASCADE DELETE
+if (currentVersion < 9) {
+  console.log('Running migration 9: Updating foreign key constraints...')
+  
+  try {
+    // Disable foreign keys
+    db.exec('PRAGMA foreign_keys=OFF');
+    
+    // Create new summary table with CASCADE
+    db.exec(`
+      CREATE TABLE daily_attendance_summary_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_uid INTEGER,
+        id_number TEXT,
+        id_barcode TEXT,
+        employee_name TEXT NOT NULL,
+        first_name TEXT,
+        last_name TEXT,
+        department TEXT,
+        date TEXT NOT NULL,
+        first_clock_in DATETIME,
+        last_clock_out DATETIME,
+        morning_in DATETIME,
+        morning_out DATETIME,
+        afternoon_in DATETIME,
+        afternoon_out DATETIME,
+        evening_in DATETIME,
+        evening_out DATETIME,
+        overtime_in DATETIME,
+        overtime_out DATETIME,
+        regular_hours REAL DEFAULT 0,
+        overtime_hours REAL DEFAULT 0,
+        total_hours REAL DEFAULT 0,
+        morning_hours REAL DEFAULT 0,
+        afternoon_hours REAL DEFAULT 0,
+        evening_hours REAL DEFAULT 0,
+        overtime_session_hours REAL DEFAULT 0,
+        is_incomplete INTEGER DEFAULT 0,
+        has_late_entry INTEGER DEFAULT 0,
+        has_overtime INTEGER DEFAULT 0,
+        has_evening_session INTEGER DEFAULT 0,
+        total_sessions INTEGER DEFAULT 0,
+        completed_sessions INTEGER DEFAULT 0,
+        pending_sessions INTEGER DEFAULT 0,
+        total_minutes_worked INTEGER DEFAULT 0,
+        break_time_minutes INTEGER DEFAULT 0,
+        is_synced INTEGER DEFAULT 0,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_uid) REFERENCES employees (uid) ON DELETE CASCADE,
+        UNIQUE(employee_uid, date)
+      )
+    `);
+    
+    // Copy data
+    db.exec(`
+      INSERT INTO daily_attendance_summary_new 
+      SELECT * FROM daily_attendance_summary
+    `);
+    
+    // Drop old and rename
+    db.exec('DROP TABLE daily_attendance_summary');
+    db.exec('ALTER TABLE daily_attendance_summary_new RENAME TO daily_attendance_summary');
+    
+    // Recreate indexes
+    const summaryIndexes = [
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_uid ON daily_attendance_summary (employee_uid)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_attendance_summary (date)",
+      "CREATE INDEX IF NOT EXISTS idx_daily_summary_employee_date ON daily_attendance_summary (employee_uid, date)"
+    ];
+    
+    summaryIndexes.forEach(idx => db.exec(idx));
+    
+    // Re-enable foreign keys
+    db.exec('PRAGMA foreign_keys=ON');
+    
+    console.log('✓ Migration 9: Foreign key constraints updated with CASCADE');
+  } catch (error) {
+    console.error('Migration 9 error:', error);
+    db.exec('PRAGMA foreign_keys=ON');
+  }
+  
+  const insertVersion = db.prepare("INSERT OR IGNORE INTO database_version (version, description) VALUES (?, ?)")
+  insertVersion.run(9, "Updated foreign key constraints to use CASCADE DELETE")
+}
 
     console.log('✓ All migrations completed successfully')
 
@@ -669,39 +783,44 @@ function runMigrations() {
   }
 }
 
-// NEW: Function to update daily attendance summary
+// UPDATED: Function to update daily attendance summary
 function updateDailyAttendanceSummary(employeeUid, date, db = null) {
   if (!db) {
     db = getDatabase()
   }
-  
+
   try {
-    // console.log(`Updating daily attendance summary for employee ${employeeUid} on ${date}`)
-    
+    console.log(`Updating daily attendance summary for employee ${employeeUid} on ${date}`)
+
     // Get employee information
     const employee = db.prepare(`
       SELECT uid, id_number, id_barcode, first_name, last_name, department
       FROM employees 
       WHERE uid = ?
     `).get(employeeUid)
-    
+
     if (!employee) {
       console.log(`Employee ${employeeUid} not found`)
       return false
     }
-    
+
     // Get all attendance records for this employee and date
     const attendanceRecords = db.prepare(`
       SELECT * FROM attendance 
       WHERE employee_uid = ? AND date = ?
       ORDER BY clock_time ASC
     `).all(employeeUid, date)
-    
+
+    // ✅ NEW: If no attendance records, DELETE the summary instead of keeping old data
     if (attendanceRecords.length === 0) {
-      console.log(`No attendance records found for employee ${employeeUid} on ${date}`)
-      return false
+      console.log(`No attendance records found for employee ${employeeUid} on ${date}, deleting summary`)
+      db.prepare(`
+        DELETE FROM daily_attendance_summary 
+        WHERE employee_uid = ? AND date = ?
+      `).run(employeeUid, date)
+      return true
     }
-    
+
     // Process attendance records to extract session times and calculate totals
     const sessionTimes = {
       morning_in: null, morning_out: null,
@@ -709,7 +828,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       evening_in: null, evening_out: null,
       overtime_in: null, overtime_out: null
     }
-    
+
     let totalRegularHours = 0
     let totalOvertimeHours = 0
     let totalSessions = 0
@@ -718,20 +837,20 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
     let hasLateEntry = false
     let hasOvertime = false
     let hasEveningSession = false
-    
+
     // Process each attendance record
     attendanceRecords.forEach(record => {
       const clockType = record.clock_type
-      
+
       // Store session times
       if (sessionTimes.hasOwnProperty(clockType)) {
         sessionTimes[clockType] = record.clock_time
       }
-      
+
       // Accumulate hours
       totalRegularHours += record.regular_hours || 0
       totalOvertimeHours += record.overtime_hours || 0
-      
+
       // Track session counts and flags
       if (clockType.endsWith('_in')) {
         totalSessions++
@@ -744,7 +863,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
           pendingSessions++
         }
       }
-      
+
       // Set flags
       if (record.is_late) hasLateEntry = true
       if (clockType.startsWith('overtime') || clockType.startsWith('evening')) {
@@ -752,53 +871,51 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
         if (clockType.startsWith('evening')) hasEveningSession = true
       }
     })
-    
-    // Calculate session-specific hours (approximation based on session types)
+
+    // ✅ IMPROVED: Calculate session-specific hours based on actual records
     const sessionHours = {
       morning_hours: 0,
       afternoon_hours: 0,
       evening_hours: 0,
       overtime_session_hours: 0
     }
-    
-    // Simple approximation - distribute total hours based on sessions present
-    const morningSession = sessionTimes.morning_in && sessionTimes.morning_out
-    const afternoonSession = sessionTimes.afternoon_in && sessionTimes.afternoon_out
-    const eveningSession = sessionTimes.evening_in && sessionTimes.evening_out
-    const overtimeSession = sessionTimes.overtime_in && sessionTimes.overtime_out
-    
-    if (morningSession || afternoonSession) {
-      // Regular sessions get regular hours
-      const regularSessionCount = (morningSession ? 1 : 0) + (afternoonSession ? 1 : 0)
-      if (morningSession) sessionHours.morning_hours = totalRegularHours / regularSessionCount
-      if (afternoonSession) sessionHours.afternoon_hours = totalRegularHours / regularSessionCount
+
+    // Calculate hours for each session type based on actual records
+    const calculateSessionHours = (inType, outType) => {
+      const inRecord = attendanceRecords.find(r => r.clock_type === inType)
+      const outRecord = attendanceRecords.find(r => r.clock_type === outType &&
+        (!inRecord || new Date(r.clock_time) > new Date(inRecord.clock_time)))
+
+      if (inRecord && outRecord) {
+        return (inRecord.regular_hours || 0) + (inRecord.overtime_hours || 0)
+      }
+      return 0
     }
-    
-    if (eveningSession) {
-      sessionHours.evening_hours = totalOvertimeHours * 0.7 // Approximate evening hours
-    }
-    
-    if (overtimeSession) {
-      sessionHours.overtime_session_hours = totalOvertimeHours * 0.3 // Approximate overtime hours
-    }
-    
+
+    sessionHours.morning_hours = calculateSessionHours('morning_in', 'morning_out')
+    sessionHours.afternoon_hours = calculateSessionHours('afternoon_in', 'afternoon_out')
+    sessionHours.evening_hours = calculateSessionHours('evening_in', 'evening_out')
+    sessionHours.overtime_session_hours = calculateSessionHours('overtime_in', 'overtime_out')
+
     // Get first and last times
     const firstClockIn = attendanceRecords.find(r => r.clock_type.endsWith('_in'))?.clock_time
     const lastClockOut = [...attendanceRecords].reverse().find(r => r.clock_type.endsWith('_out'))?.clock_time
-    
-    // Calculate total minutes worked (approximation)
+
+    // Calculate total minutes worked
     let totalMinutesWorked = 0
     if (firstClockIn && lastClockOut) {
       const firstTime = new Date(firstClockIn)
       const lastTime = new Date(lastClockOut)
-      totalMinutesWorked = Math.round((lastTime - firstTime) / 60000) // Convert to minutes
-      
-      // Subtract lunch break time (approximate 1 hour if both morning and afternoon sessions exist)
+      totalMinutesWorked = Math.round((lastTime - firstTime) / 60000)
+
+      // Subtract lunch break if both morning and afternoon sessions exist
+      const morningSession = sessionTimes.morning_in && sessionTimes.morning_out
+      const afternoonSession = sessionTimes.afternoon_in && sessionTimes.afternoon_out
       if (morningSession && afternoonSession) {
         totalMinutesWorked = Math.max(0, totalMinutesWorked - 60)
       }
     }
-    
+
     // Prepare data for insert/update
     const summaryData = {
       employee_uid: employee.uid,
@@ -824,10 +941,11 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       completed_sessions: completedSessions,
       pending_sessions: pendingSessions,
       total_minutes_worked: totalMinutesWorked,
-      break_time_minutes: (morningSession && afternoonSession) ? 60 : 0,
+      break_time_minutes: (sessionTimes.morning_in && sessionTimes.morning_out &&
+        sessionTimes.afternoon_in && sessionTimes.afternoon_out) ? 60 : 0,
       last_updated: new Date().toISOString()
     }
-    
+
     // Insert or update the summary record
     const upsertQuery = db.prepare(`
       INSERT INTO daily_attendance_summary (
@@ -886,7 +1004,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
         break_time_minutes = excluded.break_time_minutes,
         last_updated = excluded.last_updated
     `)
-    
+
     upsertQuery.run(
       summaryData.employee_uid, summaryData.id_number, summaryData.id_barcode,
       summaryData.employee_name, summaryData.first_name, summaryData.last_name, summaryData.department,
@@ -899,10 +1017,10 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       summaryData.total_sessions, summaryData.completed_sessions, summaryData.pending_sessions,
       summaryData.total_minutes_worked, summaryData.break_time_minutes, summaryData.last_updated
     )
-    
-    // console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
+
+    console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
     return true
-    
+
   } catch (error) {
     console.error(`Error updating daily attendance summary for employee ${employeeUid} on ${date}:`, error)
     return false
@@ -914,32 +1032,32 @@ function getDailyAttendanceSummary(startDate = null, endDate = null, employeeUid
   if (!db) {
     db = getDatabase()
   }
-  
+
   try {
     let query = 'SELECT * FROM daily_attendance_summary WHERE 1=1'
     const params = []
-    
+
     if (startDate) {
       query += ' AND date >= ?'
       params.push(startDate)
     }
-    
+
     if (endDate) {
       query += ' AND date <= ?'
       params.push(endDate)
     }
-    
+
     if (employeeUid) {
       query += ' AND employee_uid = ?'
       params.push(employeeUid)
     }
-    
+
     query += ' ORDER BY date DESC, employee_name ASC'
-    
+
     const summaryData = db.prepare(query).all(...params)
-    
+
     return summaryData
-    
+
   } catch (error) {
     console.error('Error getting daily attendance summary:', error)
     return []
@@ -951,10 +1069,10 @@ function rebuildDailyAttendanceSummary(startDate, endDate, db = null) {
   if (!db) {
     db = getDatabase()
   }
-  
+
   try {
     console.log(`Rebuilding daily attendance summary from ${startDate} to ${endDate}`)
-    
+
     // Get all unique employee-date combinations in the range
     const employeeDateQuery = db.prepare(`
       SELECT DISTINCT employee_uid, date
@@ -962,12 +1080,12 @@ function rebuildDailyAttendanceSummary(startDate, endDate, db = null) {
       WHERE date BETWEEN ? AND ?
       ORDER BY employee_uid, date
     `)
-    
+
     const employeeDateCombinations = employeeDateQuery.all(startDate, endDate)
-    
+
     let successCount = 0
     let failCount = 0
-    
+
     employeeDateCombinations.forEach(({ employee_uid, date }) => {
       const success = updateDailyAttendanceSummary(employee_uid, date, db)
       if (success) {
@@ -976,11 +1094,11 @@ function rebuildDailyAttendanceSummary(startDate, endDate, db = null) {
         failCount++
       }
     })
-    
+
     console.log(`✓ Daily attendance summary rebuild completed: ${successCount} successful, ${failCount} failed`)
-    
+
     return { successCount, failCount, totalProcessed: employeeDateCombinations.length }
-    
+
   } catch (error) {
     console.error('Error rebuilding daily attendance summary:', error)
     return { successCount: 0, failCount: 0, totalProcessed: 0 }

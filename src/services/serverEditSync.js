@@ -13,6 +13,108 @@ class ServerEditSyncService {
     this.comparisonCache = null; // Cache comparison results
   }
 
+// services/serverEditSync.js
+
+/**
+ * Format clock time for display
+ * Handles timezone-neutral format (no Z suffix)
+ */
+formatClockTime(clockTime, date = null) {
+  if (!clockTime) return 'N/A';
+  
+  try {
+    let datetime;
+    
+    // Check if it's a time-only format (HH:MM:SS)
+    if (/^\d{2}:\d{2}:\d{2}$/.test(clockTime)) {
+      if (date) {
+        // Combine date and time without timezone conversion
+        datetime = new Date(`${date}T${clockTime}`);
+      } else {
+        return clockTime;
+      }
+    } else if (clockTime.includes('T')) {
+      // Parse as datetime
+      // Remove Z if present to treat as local time
+      const timeStr = clockTime.replace('Z', '');
+      datetime = new Date(timeStr);
+    } else {
+      datetime = new Date(clockTime);
+    }
+    
+    if (isNaN(datetime.getTime())) {
+      return clockTime;
+    }
+    
+    return datetime.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  } catch (error) {
+    console.error('Error formatting clock time:', error);
+    return clockTime;
+  }
+}
+
+/**
+ * NEW: Convert clock_time to ISO-like format WITHOUT timezone conversion
+ * Stores as: 2025-11-28T06:00:00.000 (no Z suffix)
+ * This preserves the exact time entered without UTC conversion
+ */
+parseClockTimeToISO(clockTimeString, dateString) {
+  if (!clockTimeString) return null;
+  
+  try {
+    // If already in the correct format (with or without Z), clean it
+    if (clockTimeString.includes('T')) {
+      // Remove timezone indicators to get local time
+      let cleaned = clockTimeString.replace('Z', '').replace(/[+-]\d{2}:\d{2}$/, '');
+      // Ensure .000 milliseconds
+      if (!cleaned.includes('.')) {
+        cleaned += '.000';
+      }
+      return cleaned;
+    }
+    
+    // If it's a time-only format (HH:MM:SS)
+    if (/^\d{2}:\d{2}:\d{2}$/.test(clockTimeString)) {
+      // Must have a date to combine with
+      if (!dateString) {
+        throw new Error('Date required for time-only format');
+      }
+      
+      // ✅ CRITICAL FIX: Create timezone-neutral datetime string
+      // Format: YYYY-MM-DDTHH:MM:SS.000 (no Z)
+      return `${dateString}T${clockTimeString}.000`;
+    }
+    
+    // Try parsing as date/time and format without timezone
+    const parsed = new Date(clockTimeString);
+    if (isNaN(parsed.getTime())) {
+      throw new Error('Unable to parse date/time string');
+    }
+    
+    // Format as YYYY-MM-DDTHH:MM:SS.000 (no timezone)
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    const hours = String(parsed.getHours()).padStart(2, '0');
+    const minutes = String(parsed.getMinutes()).padStart(2, '0');
+    const seconds = String(parsed.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.000`;
+    
+  } catch (error) {
+    console.error('Error parsing clock time:', error);
+    throw error;
+  }
+}
+
   async initialize() {
     try {
       this.db = getDatabase();
@@ -454,7 +556,7 @@ renderLocalOnlyRecordsForUpload(records) {
           <div style="font-size: 12px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
             <div><strong>Date:</strong> ${record.date}</div>
             <div><strong>Type:</strong> ${record.clock_type}</div>
-            <div><strong>Time:</strong> ${new Date(record.clock_time).toLocaleString()}</div>
+            <div><strong>Time:</strong> ${this.formatClockTime(record.clock_time, record.date)}</div>
             <div><strong>Hours:</strong> ${record.regular_hours || 0}h reg, ${record.overtime_hours || 0}h OT</div>
           </div>
           <div style="margin-top: 5px; font-size: 11px; color: #6b7280;">
@@ -500,7 +602,7 @@ renderDeletedFromServerRecords(records) {
           <div style="font-size: 12px; color: #374151; display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
             <div><strong>Date:</strong> ${record.date}</div>
             <div><strong>Type:</strong> ${record.clock_type}</div>
-            <div><strong>Time:</strong> ${new Date(record.clock_time).toLocaleString()}</div>
+            <div><strong>Time:</strong> ${this.formatClockTime(record.clock_time, record.date)}</div>
             <div><strong>Hours:</strong> ${record.regular_hours || 0}h reg, ${record.overtime_hours || 0}h OT</div>
           </div>
           <div style="margin-top: 8px; padding: 8px; background: #fef2f2; border-left: 3px solid #dc2626; font-size: 11px;">
@@ -728,14 +830,25 @@ renderDeletedFromServerRecords(records) {
     }
   }
 
- /**
+ // services/serverEditSync.js
+
+/**
  * Add record to local database
- * FIXED: Handle ID conflicts and match local database schema
+ * FIXED: Ensure clock_time is in ISO format
  */
 addRecordLocally(record) {
   try {
     // First, check if a record with this ID already exists
     const existingRecord = this.db.prepare('SELECT id FROM attendance WHERE id = ?').get(record.id);
+    
+    // ✅ CRITICAL: Ensure clock_time is in ISO format
+    let clockTimeISO = record.clock_time;
+    
+    // If clock_time is not in ISO format, convert it
+    if (clockTimeISO && !clockTimeISO.includes('T')) {
+      clockTimeISO = this.parseClockTimeToISO(clockTimeISO, record.date);
+      console.log(`Converted clock_time from "${record.clock_time}" to "${clockTimeISO}"`);
+    }
     
     if (existingRecord) {
       console.log(`Record ID ${record.id} already exists locally - updating instead of inserting`);
@@ -762,7 +875,7 @@ addRecordLocally(record) {
         record.id_number || null,
         record.scanned_barcode || null,
         record.clock_type,
-        record.clock_time,
+        clockTimeISO,  // ✅ Use ISO format
         record.date,
         record.regular_hours || 0,
         record.overtime_hours || 0,
@@ -788,7 +901,7 @@ addRecordLocally(record) {
         record.id_number || null,
         record.scanned_barcode || null,
         record.clock_type,
-        record.clock_time,
+        clockTimeISO,  // ✅ Use ISO format
         record.date,
         record.regular_hours || 0,
         record.overtime_hours || 0,
@@ -797,7 +910,7 @@ addRecordLocally(record) {
         record.created_at || new Date().toISOString()
       );
       
-      console.log(`✓ Inserted new record #${record.id}`);
+      console.log(`✓ Inserted new record #${record.id} with ISO clock_time`);
     }
   } catch (error) {
     console.error(`Error adding/updating record ${record.id}:`, error);
@@ -805,10 +918,22 @@ addRecordLocally(record) {
   }
 }
 
-  /**
-   * Update record in local database
-   */
-  updateRecordLocally(record) {
+  // services/serverEditSync.js
+
+/**
+ * Update record in local database
+ * FIXED: Ensure clock_time is in ISO format
+ */
+updateRecordLocally(record) {
+  try {
+    // ✅ CRITICAL: Ensure clock_time is in ISO format
+    let clockTimeISO = record.clock_time;
+    
+    if (clockTimeISO && !clockTimeISO.includes('T')) {
+      clockTimeISO = this.parseClockTimeToISO(clockTimeISO, record.date);
+      console.log(`Converted clock_time from "${record.clock_time}" to "${clockTimeISO}"`);
+    }
+    
     const stmt = this.db.prepare(`
       UPDATE attendance SET
         employee_uid = ?,
@@ -827,14 +952,20 @@ addRecordLocally(record) {
       record.employee_uid,
       record.id_number,
       record.clock_type,
-      record.clock_time,
+      clockTimeISO,  // ✅ Use ISO format
       record.date,
       record.regular_hours || 0,
       record.overtime_hours || 0,
       record.is_late || 0,
       record.id
     );
+    
+    console.log(`✓ Updated record #${record.id} with ISO clock_time`);
+  } catch (error) {
+    console.error(`Error updating record ${record.id}:`, error);
+    throw error;
   }
+}
 
   /**
    * Delete record from local database
