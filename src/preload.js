@@ -115,6 +115,23 @@ invoke: (channel, ...args) => {
   }
 },
 
+polling: {
+  initialize: () => ipcRenderer.invoke('initialize-polling'),
+  start: (options) => ipcRenderer.invoke('start-polling', options),
+  stop: () => ipcRenderer.invoke('stop-polling'),
+  getStatus: () => ipcRenderer.invoke('get-polling-status'),
+  updateEvents: (events) => ipcRenderer.invoke('update-subscribed-events', events),
+  
+  // Event listeners
+  onEvent: (callback) => ipcRenderer.on('polling-event', (event, data) => callback(data)),
+  onStats: (callback) => ipcRenderer.on('polling-stats', (event, stats) => callback(stats)),
+  onError: (callback) => ipcRenderer.on('polling-error', (event, error) => callback(error)),
+  onFailed: (callback) => ipcRenderer.on('polling-failed', (event, data) => callback(data)),
+  
+  // Remove listeners
+  removeEventListener: (channel) => ipcRenderer.removeAllListeners(channel)
+},
+
 // Also add this listener for comparison results
 onComparisonActionsApplied: (callback) => {
   ipcRenderer.on('comparison-actions-applied', (event, data) => callback(data));

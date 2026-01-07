@@ -942,7 +942,7 @@ async function loadModules() {
 function loadRoutes() {
   const routes = {}
 
-  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb", "summary-sync", "validateTime"]
+  const routeModules = ["employees", "attendance", "settings", "export", "attendance-sync", "getDailySummary", "attendancedb", "summary-sync", "validateTime", "polling"];
 
   routeModules.forEach((moduleName) => {
     try {
@@ -2418,6 +2418,57 @@ app.whenReady().then(async () => {
 
     console.log("✓ ALL IPC HANDLERS REGISTERED");
 
+    try {
+  console.log("=== INITIALIZING POLLING MANAGER ===");
+  const pollingRoutes = routes.polling;
+  
+  if (pollingRoutes && pollingRoutes.initializePolling) {
+    const initResult = await pollingRoutes.initializePolling();
+    
+    if (initResult.success) {
+      console.log("✓ Polling manager initialized");
+      
+      // Start polling with default options
+      const startResult = await pollingRoutes.startPolling({
+        pollInterval: 5000, // 5 seconds
+        subscribedEvents: [
+          // Employee events
+          'employee_created',
+          'employee_updated',
+          'employee_deleted',
+          'employee_status_changed',
+          'employee_bulk_deleted',
+          'employee_password_changed',
+          'employee_fcm_token_registered',
+          'employee_fcm_token_unregistered',
+          // Attendance events
+          'attendance_created',
+          'attendance_updated',
+          'attendance_deleted',
+          'attendance_synced',
+          'attendance_update',
+          // Daily summary events
+          'daily_summary_synced',
+          'daily_summary_deleted',
+          'daily_summary_rebuilt',
+          'daily_summary_created',
+          'daily_summary_updated'
+        ]
+      });
+      
+      if (startResult.success) {
+        console.log("✓ Polling started successfully");
+      } else {
+        console.error("Failed to start polling:", startResult.error);
+      }
+    } else {
+      console.error("Failed to initialize polling:", initResult.error);
+    }
+  }
+} catch (error) {
+  console.error("Polling initialization error:", error);
+}
+
     // === STEP 5: Create Main Window ===
     createMainWindow();
     createApplicationMenu();
@@ -2902,6 +2953,127 @@ ipcMain.handle("get-profile-fast", async (event, barcode) => {
   safelyRegisterHandler("validate-employee-today-attendance", validateTimeRoutes.validateEmployeeTodayAttendance, validateTimeRoutes, "validateEmployeeTodayAttendance")
   safelyRegisterHandler("validate-and-correct-unsynced-records", validateTimeRoutes.validateAndCorrectUnsyncedRecords, validateTimeRoutes, "validateAndCorrectUnsyncedRecords")
   safelyRegisterHandler("validate-single-record", validateTimeRoutes.validateSingleRecord, validateTimeRoutes, "validateSingleRecord")
+
+const pollingRoutes = routes.polling || {};
+console.log("Polling routes available:", Object.keys(pollingRoutes));
+
+safelyRegisterHandler("initialize-polling", pollingRoutes.initializePolling, pollingRoutes, "initializePolling");
+safelyRegisterHandler("start-polling", pollingRoutes.startPolling, pollingRoutes, "startPolling");
+safelyRegisterHandler("stop-polling", pollingRoutes.stopPolling, pollingRoutes, "stopPolling");
+safelyRegisterHandler("get-polling-status", pollingRoutes.getPollingStatus, pollingRoutes, "getPollingStatus");
+safelyRegisterHandler("update-subscribed-events", pollingRoutes.updateSubscribedEvents, pollingRoutes, "updateSubscribedEvents");
+
+// Setup polling event listeners to forward to renderer
+if (pollingRoutes.pollingManager) {
+  const pollingManager = pollingRoutes.pollingManager;
+
+  pollingManager.on('attendance-downloaded', (data) => {
+    console.log('📥 Main: attendance-downloaded event received', data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'attendance-downloaded',
+        data: data
+      });
+    }
+  });
+  
+  // Forward all polling events to renderer
+  pollingManager.on('employee-created', (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'employee-created',
+        data: data
+      });
+    }
+  });
+  
+  pollingManager.on('employee-updated', (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'employee-updated',
+        data: data
+      });
+    }
+  });
+  
+  pollingManager.on('employee-deleted', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'employee-deleted',
+        data: data
+      });
+    }
+  });
+  
+  pollingManager.on('attendance-changed', (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'attendance-changed',
+        data: data
+      });
+    }
+  });
+  
+  pollingManager.on('attendance-deleted', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'attendance-deleted',
+        data: data
+      });
+    }
+  });
+  
+  pollingManager.on('events-processed', (stats) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-stats', stats);
+    }
+  });
+  
+  pollingManager.on('polling-error', (error) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-error', error);
+    }
+  });
+  
+  pollingManager.on('polling-failed', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('polling-failed', data);
+    }
+  });
+
+    pollingManager.on('reupload-completed', (data) => {
+    console.log('📤 Main: reupload-completed event', data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'reupload-completed',
+        data: data
+      });
+    }
+  });
+
+  pollingManager.on('validation-completed', (data) => {
+    console.log('✅ Main: validation-completed event', data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('polling-event', {
+        type: 'validation-completed',
+        data: data
+      });
+    }
+  });
+
+pollingManager.on('reupload-completed', (data) => {
+  console.log('Validated data uploaded back to server:', data);
+  
+  if (mainWindow) {
+    mainWindow.webContents.send('toast-notification', {
+      message: `Uploaded validated data for ${data.employeeUid}`,
+      type: 'success'
+    });
+  }
+});
+  
+  console.log('✓ Polling event listeners setup');
+}
   
 // Profile service handlers
 const profileServices = routes.profileServices || {}

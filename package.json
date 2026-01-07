@@ -1,7 +1,7 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.3.0",
-  "description": "Fixing edit data of attendance record",
+  "version": "1.4.0",
+  "description": "Adding polling to automatically update attendance and employee data from server.",
   "main": "src/main.js",
   "type": "commonjs",
   "scripts": {

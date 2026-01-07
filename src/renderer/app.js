@@ -87,13 +87,6 @@ class AttendanceApp {
     this.autoSyncInterval = null; // Auto-sync interval
     this.summaryAutoSyncInterval = null; // Summary auto-sync interval
 
-    // SCHEDULED SYNC: Define sync schedule (military time)
-    this.attendanceSyncSchedule = [
-      { hour: 8, minute: 30, second: 0 },   // 08:30:00 AM
-      { hour: 12, minute: 30, second: 0 },  // 12:30:00 PM
-      { hour: 13, minute: 30, second: 0 },  // 01:30:00 PM
-      { hour: 17, minute: 30, second: 0 }   // 05:30:00 PM
-    ];
     this.scheduledSyncCheckInterval = null;
     this.lastScheduledSyncTime = null;
     this.pendingAttendanceSync = false; // Track if sync is needed
@@ -115,122 +108,8 @@ class AttendanceApp {
 
     // Initialize 2FA
     this.twoFactorAuth = new TwoFactorAuth(this.electronAPI);
-  }
 
-  // SCHEDULED SYNC: Start scheduled attendance sync
-  startScheduledAttendanceSync() {
-    console.log('Starting scheduled attendance sync...');
-    console.log('Sync schedule:', this.attendanceSyncSchedule.map(s =>
-      `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}:${String(s.second).padStart(2, '0')}`
-    ).join(', '));
-
-    // Check every second for scheduled sync times
-    this.scheduledSyncCheckInterval = setInterval(() => {
-      this.checkScheduledSyncTime();
-    }, 1000);
-
-    // Also check immediately after 2 seconds
-    setTimeout(() => this.checkScheduledSyncTime(), 2000);
-  }
-
-  // SCHEDULED SYNC: Check if current time matches sync schedule
-  checkScheduledSyncTime() {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentSecond = now.getSeconds();
-
-    const matchedSchedule = this.attendanceSyncSchedule.find(
-      schedule => schedule.hour === currentHour &&
-        schedule.minute === currentMinute &&
-        schedule.second === currentSecond
-    );
-
-    if (matchedSchedule) {
-      const timeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}:${String(currentSecond).padStart(2, '0')}`;
-      console.log(`⏰ Scheduled sync triggered at ${timeStr}`);
-
-      // Prevent duplicate syncs within the same minute
-      const lastSyncKey = `${currentHour}-${currentMinute}`;
-      if (this.lastScheduledSyncTime !== lastSyncKey) {
-        this.lastScheduledSyncTime = lastSyncKey;
-        this.performScheduledSync();
-      }
-    }
-  }
-
-  // SCHEDULED SYNC: Perform the actual sync
-  async performScheduledSync() {
-    try {
-      console.log('🔄 Executing scheduled sync (Attendance + Summary)...');
-
-      // STEP 1: Sync Attendance
-      const attendanceCount = await this.electronAPI.getUnsyncedAttendanceCount();
-
-      let attendanceSynced = 0;
-      let summarySynced = 0;
-
-      if (attendanceCount && attendanceCount.success && attendanceCount.count > 0) {
-        this.showDownloadToast(
-          `⏰ Scheduled Sync: Uploading ${attendanceCount.count} attendance records...`,
-          'info'
-        );
-
-        const attendanceSync = await this.performAttendanceSync(false, 0, true);
-
-        if (attendanceSync && attendanceSync.success) {
-          this.pendingAttendanceSync = false;
-          attendanceSynced = attendanceCount.count;
-          console.log(`✓ Attendance sync: ${attendanceSynced} records uploaded`);
-        } else {
-          console.error('✗ Attendance sync failed:', attendanceSync?.error || 'Unknown error');
-        }
-      } else {
-        console.log('✓ No attendance records to sync');
-      }
-
-      // STEP 2: Sync Summary (wait a moment for attendance to process)
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-
-      const summaryCount = await this.electronAPI.getUnsyncedDailySummaryCount();
-
-      if (summaryCount && summaryCount.success && summaryCount.count > 0) {
-        this.showDownloadToast(
-          `⏰ Scheduled Sync: Uploading ${summaryCount.count} summary records...`,
-          'info'
-        );
-
-        const summarySync = await this.performSummarySync(false, 0, true);
-
-        if (summarySync && summarySync.success) {
-          this.pendingSummarySync = false;
-          summarySynced = summaryCount.count;
-          console.log(`✓ Summary sync: ${summarySynced} records uploaded`);
-        } else {
-          console.error('✗ Summary sync failed:', summarySync?.error || 'Unknown error');
-        }
-      } else {
-        console.log('✓ No summary records to sync');
-      }
-
-      // STEP 3: Final success message
-      const totalRecords = attendanceSynced + summarySynced;
-
-      if (totalRecords > 0) {
-        this.showDownloadToast(
-          `✅ Scheduled Sync Complete!\n` +
-          `Attendance: ${attendanceSynced} | Summary: ${summarySynced}`,
-          'success'
-        );
-      }
-
-    } catch (error) {
-      console.error('Scheduled sync error:', error);
-      this.showDownloadToast(
-        `❌ Scheduled Sync Error: ${error.message}`,
-        'error'
-      );
-    }
+    this.pollingListenersSetup = false;
   }
 
   // SCHEDULED SYNC: Stop scheduled sync
@@ -279,37 +158,434 @@ class AttendanceApp {
     });
   }
 
-  /**
-   * Update init() method to include server edit sync
-   */
-  async init() {
-    this.setupEventListeners();
-    this.startClock();
-    this.connectWebSocket();
 
-    // PERFORMANCE: Initialize caches and preload data FIRST
-    await this.initializePerformanceCaches();
-    await this.loadInitialData();
+ async init() {
+  this.setupEventListeners();
+  this.startClock();
+  this.connectWebSocket();
 
-    await this.loadSyncSettings();
-    this.startScheduledAttendanceSync();
-    this.startAutoSync();
-    // this.startSummaryAutoSync();
+  await this.initializePerformanceCaches();
+  await this.loadInitialData();
+  await this.loadSyncSettings();
+  
+  this.focusInput();
+  this.startCacheMonitoring();
 
-    this.focusInput();
-    this.startCacheMonitoring();
+  // Initialize polling
+  await this.initializePolling();
 
-    // Face recognition initialization
-    if (typeof FaceRecognitionManager !== 'undefined') {
-      this.faceRecognitionManager = new FaceRecognitionManager(this);
-      console.log('Face recognition manager created (lazy init)');
-      this.startFaceRecognitionScheduler();
-    } else {
-      console.warn('FaceRecognitionManager not available');
+  // ✅ CRITICAL: Setup polling event listeners AFTER initialization
+  this.setupPollingEventListeners();
+
+  // Face recognition initialization
+  if (typeof FaceRecognitionManager !== 'undefined') {
+    this.faceRecognitionManager = new FaceRecognitionManager(this);
+    console.log('Face recognition manager created');
+    this.startFaceRecognitionScheduler();
+  }
+}
+
+  async initializePolling() {
+    if (!this.electronAPI || !this.electronAPI.polling) {
+      console.warn('Polling API not available');
+      return;
+    }
+    
+    try {
+      // Initialize
+      const initResult = await this.electronAPI.polling.initialize();
+      
+      if (initResult.success) {
+        console.log('✓ Polling initialized');
+        
+        // ✅ Setup event listeners with CORRECT event type mapping
+        this.electronAPI.polling.onEvent((event) => {
+          // Map the event.type to the format handlePollingEvent expects
+          const mappedEvent = {
+            type: event.type.replace(/_/g, '-'), // employee_updated -> employee-updated
+            data: event.data
+          };
+          this.handlePollingEvent(mappedEvent);
+        });
+        
+        this.electronAPI.polling.onStats((stats) => {
+          console.log('📊 Polling stats:', stats);
+          this.updatePollingStatsUI(stats);
+        });
+        
+        this.electronAPI.polling.onError((error) => {
+          console.error('🚨 Polling error:', error);
+          this.showDownloadToast('⚠️ Polling connection issue', 'warning');
+        });
+        
+        // Start polling
+        const startResult = await this.electronAPI.polling.start({
+          pollInterval: 5000
+        });
+        
+        if (startResult.success) {
+          console.log('✓ Real-time updates enabled');
+          this.showDownloadToast('🔄 Real-time updates enabled', 'success');
+        }
+      }
+    } catch (error) {
+      console.error('Polling initialization error:', error);
     }
   }
 
-  // Add this new method for when user updates a profile image
+  setupPollingEventListeners() {
+  if (this.pollingListenersSetup || !this.electronAPI || !this.electronAPI.polling) {
+    return;
+  }
+
+  console.log('📡 Setting up polling event listeners...');
+
+  // ✅ FIXED: Listen for attendance-downloaded event specifically
+  this.electronAPI.polling.onEvent((event) => {
+    console.log('Polling event received:', event.type, event.data);
+    
+    switch(event.type) {
+      case 'attendance-downloaded':
+        this.handleAttendanceDownloaded(event.data);
+        break;
+        
+      case 'validation-completed':
+        this.handleValidationCompleted(event.data);
+        break;
+        
+      case 'validation-error':
+        this.handleValidationError(event.data);
+        break;
+        
+      case 'reupload-completed':
+        this.handleReuploadCompleted(event.data);
+        break;
+        
+      case 'reupload-error':
+        this.handleReuploadError(event.data);
+        break;
+        
+      case 'download-error':
+        this.handleDownloadError(event.data);
+        break;
+    }
+  });
+
+  this.pollingListenersSetup = true;
+  console.log('✓ Polling event listeners setup complete');
+}
+
+  // ✅ NEW: Handle attendance downloaded from server
+async handleAttendanceDownloaded(data) {
+  try {
+    console.log(`📥 Processing downloaded attendance for employee ${data.employee_uid}`);
+    
+    // Show notification
+    this.showDownloadToast(
+      `📥 New attendance synced: ${data.clock_type}`,
+      'info'
+    );
+
+    // ✅ STEP 1: Refresh UI to show new attendance record
+    await Promise.all([
+      this.loadTodayAttendance(),
+      this.loadDailySummary()
+    ]);
+    
+    // Update statistics
+    const statsResult = await this.electronAPI.getTodayStatistics();
+    if (statsResult.success) {
+      this.updateStatistics(statsResult.data);
+    }
+
+    console.log('✓ UI refreshed after attendance download');
+    
+    // ✅ STEP 2: Wait for validation/regeneration to complete (polling does this automatically)
+    // The polling manager queues validation after insertion, so we need to wait
+    console.log('⏳ Waiting for validation and summary regeneration...');
+    await new Promise(resolve => setTimeout(resolve, 4000)); // Wait 4 seconds
+    
+    // ✅ STEP 3: Fetch fresh summary data AFTER regeneration
+    console.log('📊 Fetching fresh summary data after regeneration...');
+    const today = new Date().toISOString().split('T')[0];
+    const freshSummary = await this.electronAPI.getDailySummary(today, today);
+    
+    let regularHours = 0;
+    let overtimeHours = 0;
+    let totalHours = 0;
+    
+    if (freshSummary.success && freshSummary.data && freshSummary.data.length > 0) {
+      const employeeSummary = freshSummary.data.find(
+        record => record.employee_uid === data.employee_uid
+      );
+      
+      if (employeeSummary) {
+        regularHours = parseFloat(employeeSummary.regular_hours) || 0;
+        overtimeHours = parseFloat(employeeSummary.overtime_hours) || 0;
+        totalHours = parseFloat(employeeSummary.total_hours) || 0;
+        
+        console.log(`✅ Fresh summary retrieved: Regular=${regularHours}h, OT=${overtimeHours}h, Total=${totalHours}h`);
+      } else {
+        console.warn(`⚠️ No summary found for employee ${data.employee_uid} after waiting`);
+      }
+    }
+    
+    // ✅ STEP 4: Display on dashboard with fresh data
+    try {
+      const employeesResult = await this.electronAPI.getEmployees();
+      
+      if (employeesResult.success && employeesResult.data) {
+        const employee = employeesResult.data.find(emp => emp.uid === data.employee_uid);
+        
+        if (employee) {
+          // Construct the full data object with fresh hours
+          const displayData = {
+            employee: {
+              uid: employee.uid,
+              first_name: employee.first_name,
+              middle_name: employee.middle_name || '',
+              last_name: employee.last_name,
+              department: employee.department,
+              id_number: employee.id_number
+            },
+            clockType: data.clock_type,
+            sessionType: this.getSessionTypeFromClockType(data.clock_type),
+            clockTime: data.clock_time,
+            isOvertimeSession: this.isOvertimeClockType(data.clock_type),
+            // ✅ NEW: Add the fresh hours data
+            regularHours: regularHours,
+            overtimeHours: overtimeHours,
+            totalHours: totalHours
+          };
+          
+          console.log('📊 Displaying downloaded attendance with fresh hours:', displayData);
+          
+          // Show on dashboard
+          await this.showEmployeeDisplay(displayData);
+          
+          // Refresh UI one more time to ensure everything is updated
+          await this.loadDailySummary();
+        } else {
+          console.warn(`Employee ${data.employee_uid} not found in local database`);
+        }
+      }
+    } catch (displayError) {
+      console.error('Error displaying downloaded attendance:', displayError);
+    }
+    
+    // ✅ STEP 5: Trigger immediate sync back to server after processing
+    setTimeout(async () => {
+      console.log('🔄 Triggering sync back to server after download processing...');
+      await this.performImmediateSync();
+    }, 1000); // Reduced to 1 second since we already waited above
+
+  } catch (error) {
+    console.error('Error handling downloaded attendance:', error);
+  }
+}
+
+  // ✅ NEW: Handle validation completed
+  async handleValidationCompleted(data) {
+    try {
+      const { employeeUid, date, results } = data;
+      
+      console.log(`✅ Validation completed for employee ${employeeUid} on ${date}`);
+      console.log(`   - Total records: ${results.totalRecords}`);
+      console.log(`   - Corrections: ${results.correctedRecords}`);
+      console.log(`   - Summaries regenerated: ${results.summariesRegenerated || 0}`);
+
+      // Show notification if corrections were made
+      if (results.correctedRecords > 0) {
+        this.showDownloadToast(
+          `✅ Validated ${results.totalRecords} records\n` +
+          `🔧 Made ${results.correctedRecords} corrections\n` +
+          `📊 Regenerated ${results.summariesRegenerated || 0} summaries`,
+          'success'
+        );
+      }
+
+      // Refresh UI displays
+      await this.loadTodayAttendance();
+      await this.loadDailySummary();
+
+      // Update statistics
+      const statsResult = await this.electronAPI.getTodayStatistics();
+      if (statsResult.success) {
+        this.updateStatistics(statsResult.data);
+      }
+
+    } catch (error) {
+      console.error('Error handling validation completion:', error);
+    }
+  }
+
+  // ✅ NEW: Handle validation error
+  handleValidationError(data) {
+    const { employeeUid, date, error } = data;
+    
+    console.error(`❌ Validation failed for employee ${employeeUid} on ${date}:`, error);
+    
+    this.showDownloadToast(
+      `⚠️ Validation failed for employee ${employeeUid}\n${error}`,
+      'error'
+    );
+  }
+
+  // ✅ NEW: Handle re-upload completed
+  async handleReuploadCompleted(data) {
+    try {
+      const { employeeUid, date, attendanceCount, summaryUploaded } = data;
+      
+      console.log(`📤 Re-upload completed for employee ${employeeUid} on ${date}`);
+      console.log(`   - Attendance records: ${attendanceCount}`);
+      console.log(`   - Summary uploaded: ${summaryUploaded}`);
+
+      // Show success notification
+      this.showDownloadToast(
+        `✅ Validated data uploaded to server\n` +
+        `📋 ${attendanceCount} attendance records\n` +
+        `${summaryUploaded ? '📊 Summary updated' : ''}`,
+        'success'
+      );
+
+      // Refresh displays
+      await this.loadTodayAttendance();
+      await this.loadDailySummary();
+
+    } catch (error) {
+      console.error('Error handling re-upload completion:', error);
+    }
+  }
+
+  // ✅ NEW: Handle re-upload error
+  handleReuploadError(data) {
+    const { employeeUid, date, error } = data;
+    
+    console.error(`❌ Re-upload failed for employee ${employeeUid} on ${date}:`, error);
+    
+    this.showDownloadToast(
+      `⚠️ Failed to upload validated data\nEmployee: ${employeeUid}\n${error}`,
+      'error'
+    );
+  }
+
+  // ✅ NEW: Handle download error
+  handleDownloadError(data) {
+    const { eventType, error } = data;
+    
+    console.error(`❌ Download error for ${eventType}:`, error);
+    
+    this.showDownloadToast(
+      `⚠️ Failed to sync data from server\n${error}`,
+      'error'
+    );
+  }
+
+  // ✅ NEW: Update polling stats in UI (optional)
+  updatePollingStatsUI(stats) {
+    try {
+      // Update a stats display in settings panel if it exists
+      const pollingStatsElement = document.getElementById('pollingStats');
+      
+      if (pollingStatsElement) {
+        pollingStatsElement.innerHTML = `
+          <div class="polling-stats">
+            <div class="stat-item">
+              <strong>Events Processed:</strong> ${stats.total || 0}
+            </div>
+            <div class="stat-item">
+              <strong>Employees:</strong> ${stats.employees || 0}
+            </div>
+            <div class="stat-item">
+              <strong>Attendance:</strong> ${stats.attendance || 0}
+            </div>
+            <div class="stat-item">
+              <strong>Summaries:</strong> ${stats.summaries || 0}
+            </div>
+          </div>
+        `;
+      }
+    } catch (error) {
+      console.warn('Error updating polling stats UI:', error);
+    }
+  }
+
+  handlePollingEvent(event) {
+    const { type, data } = event;
+    
+    console.log(`📥 Real-time event received: ${type}`, data);
+    
+    switch(type) {
+      case 'employee-created':
+        this.showDownloadToast(`👤 Employee added: ${data.first_name} ${data.last_name}`, 'success');
+        // ✅ Reload employee data in main process AND refresh UI
+        if (this.electronAPI && this.electronAPI.syncEmployees) {
+          this.electronAPI.syncEmployees().then(() => {
+            console.log('✓ Employees resynced after creation event');
+          });
+        }
+        break;
+        
+      case 'employee-updated':
+        this.showDownloadToast(`👤 Employee updated: ${data.first_name} ${data.last_name}`, 'info');
+        // ✅ Reload employee data in main process
+        if (this.electronAPI && this.electronAPI.syncEmployees) {
+          this.electronAPI.syncEmployees().then(() => {
+            console.log('✓ Employees resynced after update event');
+          });
+        }
+        break;
+        
+      case 'employee-deleted':
+        this.showDownloadToast(`🗑️ Employee deleted`, 'warning');
+        // ✅ Reload employee data in main process
+        if (this.electronAPI && this.electronAPI.syncEmployees) {
+          this.electronAPI.syncEmployees().then(() => {
+            console.log('✓ Employees resynced after deletion event');
+          });
+        }
+        break;
+
+      case 'employee-status-changed':
+        this.showDownloadToast(`📊 Employee status changed: ${data.full_name}`, 'info');
+        // ✅ Reload employee data
+        if (this.electronAPI && this.electronAPI.syncEmployees) {
+          this.electronAPI.syncEmployees().then(() => {
+            console.log('✓ Employees resynced after status change');
+          });
+        }
+        break;
+
+      case 'employee-bulk-deleted':
+        this.showDownloadToast(`🗑️ ${data.deleted_count} employees deleted`, 'warning');
+        // ✅ Reload employee data
+        if (this.electronAPI && this.electronAPI.syncEmployees) {
+          this.electronAPI.syncEmployees().then(() => {
+            console.log('✓ Employees resynced after bulk deletion');
+          });
+        }
+        break;
+        
+      case 'attendance-changed':
+        this.showDownloadToast('📝 Attendance record updated', 'info');
+        this.loadTodayAttendance();
+        break;
+        
+      case 'attendance-deleted':
+        this.showDownloadToast('🗑️ Attendance record deleted', 'warning');
+        this.loadTodayAttendance();
+        break;
+
+      case 'attendance-synced':
+        console.log('Attendance synced on server');
+        break;
+
+      case 'daily-summary-synced':
+        console.log('Daily summary synced on server');
+        break;
+    }
+  }
+
   async onProfileImageUpdated(employeeUID) {
     if (this.faceRecognitionManager) {
       // Force regenerate descriptor for this employee
@@ -4547,12 +4823,7 @@ class AttendanceApp {
       const attendanceSyncInfo = document.getElementById("attendanceSyncInfo");
 
       if (attendanceSyncInfo && unsyncedResult.success) {
-        // Format schedule times
-        const scheduleTimes = this.attendanceSyncSchedule.map(s =>
-          `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`
-        ).join(', ');
 
-        const nextSync = this.getNextScheduledSyncTime();
         const summaryCount = await this.electronAPI.getUnsyncedDailySummaryCount();
 
         attendanceSyncInfo.innerHTML = `
@@ -4562,45 +4833,10 @@ class AttendanceApp {
     <div class="sync-info-item">
       <strong>Unsynced Summary:</strong> ${summaryCount.count || 0}
     </div>
-    <div class="sync-info-item">
-      <strong>Sync Schedule:</strong> ${scheduleTimes} (daily)
-      <br><small>Syncs both attendance and summary together</small>
-    </div>
-    <div class="sync-info-item">
-      <strong>Next Sync:</strong> ${nextSync}
-    </div>
   `;
       }
     } catch (error) {
       console.error("Error loading attendance sync info:", error);
-    }
-  }
-
-  // Helper method to calculate next scheduled sync time
-  getNextScheduledSyncTime() {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    for (const schedule of this.attendanceSyncSchedule) {
-      const scheduleMinutes = schedule.hour * 60 + schedule.minute;
-
-      if (scheduleMinutes > currentMinutes) {
-        return `Today at ${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
-      }
-    }
-
-    // If all times passed today, show first time tomorrow
-    const firstSchedule = this.attendanceSyncSchedule[0];
-    return `Tomorrow at ${String(firstSchedule.hour).padStart(2, '0')}:${String(firstSchedule.minute).padStart(2, '0')}`;
-  }
-
-  // Update next sync countdown
-  updateNextSyncTime() {
-    // This is a simplified version - in a real app you might want to track the exact next sync time
-    const nextSyncElement = document.getElementById("nextSyncTime");
-    if (nextSyncElement) {
-      const minutes = Math.floor(this.syncSettings.interval / 60000);
-      nextSyncElement.textContent = `~${minutes} minutes`;
     }
   }
 
@@ -4914,14 +5150,41 @@ class AttendanceApp {
     });
   }
 
-  deferredOperations(data) {
-    // Queue these operations to run after a short delay
-    setTimeout(() => {
-      this.loadTodayAttendance();
-      this.markSummaryDataChanged();
-      this.markAttendanceForSync(); // NEW: Mark for scheduled sync instead of immediate sync
-    }, 1000);
+deferredOperations(data) {
+  // Queue these operations to run after a short delay
+  setTimeout(() => {
+    this.loadTodayAttendance();
+    this.markSummaryDataChanged();
+    
+    // ✅ NEW: Sync immediately instead of marking for scheduled sync
+    this.performImmediateSync();
+  }, 1000);
+}
+
+// ✅ NEW: Add this helper method for immediate sync
+async performImmediateSync() {
+  try {
+    console.log('🔄 Triggering immediate sync after attendance...');
+    
+    // Sync attendance immediately
+    const attendanceResult = await this.performAttendanceSync(true, 0, false);
+    
+    if (attendanceResult.success) {
+      console.log('✅ Immediate attendance sync completed');
+      
+      // Also sync summary after a short delay
+      setTimeout(async () => {
+        const summaryResult = await this.performSummarySync(true, 0, false);
+        if (summaryResult.success) {
+          console.log('✅ Immediate summary sync completed');
+        }
+      }, 2000);
+    }
+  } catch (error) {
+    console.error('❌ Immediate sync error:', error);
+    // Don't show error to user for silent sync
   }
+}
 
   // Generate a loading image as data URL
   getLoadingImageDataURL() {
@@ -6234,6 +6497,24 @@ class AttendanceApp {
     console.log(
       "AttendanceApp destroyed and cleaned up with performance optimizations"
     );
+
+    if (this.electronAPI && this.electronAPI.polling) {
+    this.electronAPI.polling.stop();
+    this.electronAPI.polling.removeEventListener('polling-event');
+    this.electronAPI.polling.removeEventListener('polling-stats');
+    this.electronAPI.polling.removeEventListener('polling-error');
+  }
+
+  // Stop polling
+    if (this.electronAPI && this.electronAPI.polling) {
+      this.electronAPI.polling.stop();
+    }
+
+    // Clear polling listeners flag
+    this.pollingListenersSetup = false;
+
+    console.log('AttendanceApp destroyed with polling cleanup');
+
   }
 
   // Add these methods to your AttendanceApp class
@@ -7311,44 +7592,41 @@ class OptimizedAttendanceApp extends AttendanceApp {
     button.disabled = isProcessing;
   }
 
-  // Queue background updates to avoid blocking UI
-  queueBackgroundUpdates(data) {
-    this.pendingUpdates.attendance = true;
-    this.pendingUpdates.currentlyClocked = true;
-    this.pendingUpdates.statistics = true;
+// Queue background updates to avoid blocking UI
+queueBackgroundUpdates(data) {
+  this.pendingUpdates.attendance = true;
+  this.pendingUpdates.currentlyClocked = true;
+  this.pendingUpdates.statistics = true;
 
-    // Debounce updates
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
-    }
-
-    this.batchTimeout = setTimeout(() => {
-      this.processBatchUpdates();
-    }, 1000); // Batch updates after 1 second of no new scans
+  // Debounce updates
+  if (this.batchTimeout) {
+    clearTimeout(this.batchTimeout);
   }
 
-  // Process batched background updates
-  async processBatchUpdates() {
-    if (this.pendingUpdates.attendance) {
-      this.loadTodayAttendance();
-      this.pendingUpdates.attendance = false;
-    }
+  this.batchTimeout = setTimeout(() => {
+    this.processBatchUpdates();
+  }, 500); // ✅ REDUCED: Faster batching for immediate sync
+}
 
-    if (
-      this.pendingUpdates.currentlyClocked ||
-      this.pendingUpdates.statistics
-    ) {
-      this.markSummaryDataChanged();
-      this.pendingUpdates.currentlyClocked = false;
-      this.pendingUpdates.statistics = false;
-    }
-
-    // Queue sync after all UI updates
-    setTimeout(() => {
-      this.performAttendanceSync(true);
-    }, 2000);
+// Process batched background updates
+async processBatchUpdates() {
+  if (this.pendingUpdates.attendance) {
+    this.loadTodayAttendance();
+    this.pendingUpdates.attendance = false;
   }
 
+  if (
+    this.pendingUpdates.currentlyClocked ||
+    this.pendingUpdates.statistics
+  ) {
+    this.markSummaryDataChanged();
+    this.pendingUpdates.currentlyClocked = false;
+    this.pendingUpdates.statistics = false;
+  }
+
+  // ✅ NEW: Sync immediately instead of queuing
+  this.performImmediateSync();
+}
   // Optimized input focus with selection
   focusInput() {
     const input = document.getElementById("barcodeInput");
