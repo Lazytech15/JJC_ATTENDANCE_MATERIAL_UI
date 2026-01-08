@@ -248,6 +248,10 @@ class AttendanceApp {
       case 'attendance-downloaded':
         this.handleAttendanceDownloaded(event.data);
         break;
+
+      case 'attendance-deleted':
+        this.handleAttendanceDeleted(event.data);
+        break;
         
       case 'validation-completed':
         this.handleValidationCompleted(event.data);
@@ -288,6 +292,35 @@ class AttendanceApp {
 
   this.pollingListenersSetup = true;
   console.log('✓ Polling event listeners setup complete');
+}
+
+async handleAttendanceDeleted(data) {
+  try {
+    console.log(`🗑️ Processing deleted attendance: ID ${data.id}`);
+    
+    // Show notification
+    this.showDownloadToast(
+      `🗑️ Attendance record deleted from server`,
+      'warning'
+    );
+
+    // ✅ Refresh UI just like the local delete
+    await Promise.all([
+      this.loadTodayAttendance(),
+      this.loadDailySummary()
+    ]);
+
+    // Update statistics
+    const statsResult = await this.electronAPI.getTodayStatistics();
+    if (statsResult.success) {
+      this.updateStatistics(statsResult.data);
+    }
+
+    console.log('✓ UI refreshed after server deletion');
+
+  } catch (error) {
+    console.error('Error handling deleted attendance:', error);
+  }
 }
 
   // ✅ NEW: Handle attendance downloaded from server
@@ -2356,6 +2389,20 @@ async handleAttendanceDownloaded(data) {
         document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
         this.showStatus('✓ Record deleted successfully', 'success');
 
+        // ✅ NEW: Refresh UI just like syncCurrentlyClockedEmployees
+        await Promise.all([
+          this.loadTodayAttendance(),
+          this.loadDailySummary()
+        ]);
+
+        // Update statistics
+        const statsResult = await this.electronAPI.getTodayStatistics();
+        if (statsResult.success) {
+          this.updateStatistics(statsResult.data);
+        }
+
+        console.log('✓ UI refreshed after record deletion');
+
         // Reload the editor to show updated data
         setTimeout(() => {
           this.loadEditorData();
@@ -2423,11 +2470,25 @@ async handleAttendanceDownloaded(data) {
       // Step 4: Delete from local database
       const result = await this.electronAPI.invoke('bulk-delete-attendance', ids.map(id => parseInt(id)));
 
-      if (result.success) {
+     if (result.success) {
         ids.forEach(id => {
           document.querySelector(`tr[data-record-id="${id}"]`)?.remove();
         });
         this.showStatus(`✓ Deleted ${ids.length} records successfully`, 'success');
+
+        // ✅ NEW: Refresh UI just like syncCurrentlyClockedEmployees
+        await Promise.all([
+          this.loadTodayAttendance(),
+          this.loadDailySummary()
+        ]);
+
+        // Update statistics
+        const statsResult = await this.electronAPI.getTodayStatistics();
+        if (statsResult.success) {
+          this.updateStatistics(statsResult.data);
+        }
+
+        console.log('✓ UI refreshed after bulk deletion');
 
         // Reload the editor
         setTimeout(() => {

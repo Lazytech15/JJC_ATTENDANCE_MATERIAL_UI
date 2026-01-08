@@ -1,7 +1,7 @@
 {
   "name": "jjc-attendance-management-system",
-  "version": "1.4.0",
-  "description": "Adding polling to automatically update attendance and employee data from server.",
+  "version": "1.5.0",
+  "description": "Adding new feauture, dynamically check the server and update the local database, dynamically check the server for existing attendance if null update the local database",
   "main": "src/main.js",
   "type": "commonjs",
   "scripts": {

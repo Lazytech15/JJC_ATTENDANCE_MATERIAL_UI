@@ -774,6 +774,10 @@ async syncCurrentlyClockedEmployees() {
         if (eventType.startsWith('employee_')) {
           await this.handleEmployeeEvent(eventType, data, db);
           processedEvents.employees.push(eventType);
+        } else if (eventType === 'attendance_deleted') {
+          // ✅ Handle deletion separately - don't try to download
+          await this.handleAttendanceDeletedFromServer(eventType, data, db);
+          processedEvents.attendance.push(eventType);
         } else if (eventType.startsWith('attendance_')) {
           const insertResult = await this.downloadAndInsertAttendance(eventType, data, db);
           
@@ -811,6 +815,60 @@ async syncCurrentlyClockedEmployees() {
 
     return processedEvents;
   }
+
+  /**
+ * NEW: Handle attendance deleted from server
+ */
+async handleAttendanceDeletedFromServer(eventType, data, db) {
+  try {
+    console.log(`🗑️ Processing server deletion for attendance ID: ${data.id}`);
+    
+    // Check if record exists locally
+    const existingRecord = db.prepare(`
+      SELECT id, employee_uid, date, clock_type, clock_time 
+      FROM attendance 
+      WHERE id = ?
+    `).get(data.id);
+    
+    if (!existingRecord) {
+      console.log(`Record ${data.id} not found locally, skipping deletion`);
+      return;
+    }
+    
+    // Delete from local database
+    const deleteStmt = db.prepare('DELETE FROM attendance WHERE id = ?');
+    const result = deleteStmt.run(data.id);
+    
+    if (result.changes > 0) {
+      console.log(`✓ Deleted attendance record ${data.id} from local database`);
+      
+      // Emit event for UI update
+      this.emit('attendance-deleted', {
+        id: data.id,
+        employee_uid: existingRecord.employee_uid,
+        date: existingRecord.date,
+        clock_type: existingRecord.clock_type
+      });
+      
+      // Queue validation and summary regeneration for affected date
+      if (this.autoValidateEnabled && existingRecord.employee_uid && existingRecord.date) {
+        console.log(`📋 Queuing validation for ${existingRecord.employee_uid} on ${existingRecord.date}`);
+        this.queueValidation(existingRecord.employee_uid, existingRecord.date);
+      }
+      
+      // Emit UI refresh event
+      this.emit('ui-refresh-needed', {
+        reason: 'attendance-deleted',
+        employee_uid: existingRecord.employee_uid,
+        date: existingRecord.date
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error handling deleted attendance from server:', error);
+    throw error;
+  }
+}
 
   // Queue validation, process validation queue, process reupload queue, etc.
   // [Rest of the existing methods remain the same...]
