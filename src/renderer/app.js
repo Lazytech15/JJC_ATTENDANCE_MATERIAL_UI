@@ -240,7 +240,7 @@ class AttendanceApp {
 
   console.log('📡 Setting up polling event listeners...');
 
-  // ✅ FIXED: Listen for attendance-downloaded event specifically
+  // ✅ FIXED: Listen for all polling events
   this.electronAPI.polling.onEvent((event) => {
     console.log('Polling event received:', event.type, event.data);
     
@@ -267,6 +267,21 @@ class AttendanceApp {
         
       case 'download-error':
         this.handleDownloadError(event.data);
+        break;
+
+      // ✅ NEW: Handle currently-clocked sync event
+      case 'currently-clocked-synced':
+        this.handleCurrentlyClockedSynced(event.data);
+        break;
+
+      // ✅ NEW: Handle UI refresh event
+      case 'ui-refresh-needed':
+        this.handleUIRefreshNeeded(event.data);
+        break;
+
+      // ✅ NEW: Handle attendance-changed event
+      case 'attendance-changed':
+        this.handleAttendanceChanged(event.data);
         break;
     }
   });
@@ -479,6 +494,78 @@ async handleAttendanceDownloaded(data) {
       `⚠️ Failed to sync data from server\n${error}`,
       'error'
     );
+  }
+
+  // ✅ NEW: Handle currently clocked sync event
+  async handleCurrentlyClockedSynced(data) {
+    try {
+      const { synced, total, missingCount } = data;
+      
+      console.log(`📥 Currently clocked sync completed: ${synced} records synced`);
+      
+      // Show notification
+      this.showDownloadToast(
+        `✅ Synced ${synced} attendance records for currently clocked employees`,
+        'success'
+      );
+
+      // Refresh all relevant UI components
+      await Promise.all([
+        this.loadTodayAttendance(),
+        this.loadDailySummary()
+      ]);
+
+      // Update statistics
+      const statsResult = await this.electronAPI.getTodayStatistics();
+      if (statsResult.success) {
+        this.updateStatistics(statsResult.data);
+      }
+
+      console.log('✓ UI refreshed after currently clocked sync');
+    } catch (error) {
+      console.error('Error handling currently clocked sync:', error);
+    }
+  }
+
+  // ✅ NEW: Handle UI refresh needed event
+  async handleUIRefreshNeeded(data) {
+    try {
+      const { reason, syncedCount } = data;
+      
+      console.log(`🔄 UI refresh requested: ${reason} (${syncedCount} records)`);
+
+      // Refresh all UI components
+      await Promise.all([
+        this.loadTodayAttendance(),
+        this.loadDailySummary()
+      ]);
+
+      // Update statistics
+      const statsResult = await this.electronAPI.getTodayStatistics();
+      if (statsResult.success) {
+        this.updateStatistics(statsResult.data);
+      }
+
+      console.log('✓ UI refresh completed');
+    } catch (error) {
+      console.error('Error during UI refresh:', error);
+    }
+  }
+
+  // ✅ NEW: Handle attendance changed event
+  async handleAttendanceChanged(data) {
+    try {
+      const { type, count } = data;
+      
+      console.log(`📝 Attendance changed: ${type} (${count} records)`);
+
+      // Refresh attendance data
+      await this.loadTodayAttendance();
+
+      console.log('✓ Attendance data refreshed');
+    } catch (error) {
+      console.error('Error handling attendance change:', error);
+    }
   }
 
   // ✅ NEW: Update polling stats in UI (optional)

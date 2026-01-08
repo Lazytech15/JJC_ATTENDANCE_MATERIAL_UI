@@ -1,4 +1,4 @@
-// services/pollingManager.js - ENHANCED VERSION
+// services/pollingManager.js - ENHANCED VERSION WITH CURRENTLY CLOCKED SYNC
 
 const fetch = require('node-fetch');
 const EventEmitter = require('events');
@@ -19,14 +19,18 @@ class PollingManager extends EventEmitter {
     this.abortController = null;
     this.healthCheckPassed = false;
     
-    // ✅ NEW: Validation & Re-upload tracking
+    // Validation & Re-upload tracking
     this.isValidating = false;
     this.validationQueue = new Set();
     this.reuploadQueue = new Map();
     this.autoValidateEnabled = true;
     this.autoReuploadEnabled = true;
     this.validationDebounceTimer = null;
-    this.validationDebounceDelay = 3000; // Wait 3s after last event before validating
+    this.validationDebounceDelay = 3000;
+    
+    // ✅ NEW: Currently clocked employees sync
+    this.lastClockedSync = 0;
+    this.clockedSyncInterval = 300000; // Sync every 5 minutes
     
     this.subscribedEvents = [
       'employee_created',
@@ -49,7 +53,7 @@ class PollingManager extends EventEmitter {
       'daily_summary_updated'
     ];
 
-    console.log('PollingManager initialized with validation & re-upload support');
+    console.log('PollingManager initialized with validation & currently-clocked sync');
   }
 
   /**
@@ -61,7 +65,6 @@ class PollingManager extends EventEmitter {
         throw new Error('Server URL is required');
       }
 
-      // Clean and normalize the URL
       let baseUrl = serverUrl.trim();
       baseUrl = baseUrl.replace(/\/api\/employees\/?$/, '');
       baseUrl = baseUrl.replace(/\/$/, '');
@@ -73,15 +76,14 @@ class PollingManager extends EventEmitter {
       this.serverUrl = baseUrl;
       this.pollingEndpoint = `${baseUrl}/api/socket`;
       
-      // ✅ NEW: Initialize validation options
       this.autoValidateEnabled = options.autoValidate !== false;
       this.autoReuploadEnabled = options.autoReupload !== false;
       
       console.log(`✓ Polling endpoint configured: ${this.pollingEndpoint}`);
       console.log(`✓ Auto-validate: ${this.autoValidateEnabled}`);
       console.log(`✓ Auto-reupload: ${this.autoReuploadEnabled}`);
+      console.log(`✓ Clocked sync interval: ${this.clockedSyncInterval}ms`);
       
-      // Perform health check
       const healthCheck = await this.performHealthCheck();
       
       if (!healthCheck.success) {
@@ -114,7 +116,7 @@ class PollingManager extends EventEmitter {
   }
 
   /**
-   * Health check (unchanged)
+   * Health check
    */
   async performHealthCheck() {
     try {
@@ -174,7 +176,7 @@ class PollingManager extends EventEmitter {
   }
 
   /**
-   * Start polling (unchanged)
+   * Start polling
    */
   async startPolling(options = {}) {
     if (this.isPolling) {
@@ -238,7 +240,7 @@ class PollingManager extends EventEmitter {
   }
 
   /**
-   * Stop polling (unchanged)
+   * Stop polling
    */
   stopPolling() {
     this.isPolling = false;
@@ -253,7 +255,6 @@ class PollingManager extends EventEmitter {
       this.pollingInterval = null;
     }
     
-    // Clear validation timer
     if (this.validationDebounceTimer) {
       clearTimeout(this.validationDebounceTimer);
       this.validationDebounceTimer = null;
@@ -268,7 +269,7 @@ class PollingManager extends EventEmitter {
   }
 
   /**
-   * Main polling loop (unchanged)
+   * Main polling loop with currently clocked sync
    */
   async poll() {
     if (!this.isPolling) {
@@ -316,6 +317,13 @@ class PollingManager extends EventEmitter {
         }
       }
 
+      // ✅ NEW: Check if it's time to sync currently clocked employees
+      const now = Date.now();
+      if (now - this.lastClockedSync >= this.clockedSyncInterval) {
+        await this.syncCurrentlyClockedEmployees();
+        this.lastClockedSync = now;
+      }
+
       if (this.isPolling) {
         this.pollingInterval = setTimeout(() => this.poll(), 3000);
       }
@@ -352,7 +360,396 @@ class PollingManager extends EventEmitter {
   }
 
   /**
-   * ✅ ENHANCED: Process events - Download new data, validate, and re-upload
+ * ✅ ENHANCED: Sync currently clocked employees AND today's daily summary from server
+ */
+async syncCurrentlyClockedEmployees() {
+  try {
+    console.log('🔄 Syncing currently clocked employees and daily summary from server...');
+    
+    const { getSettings } = require('../api/routes/settings');
+    const settings = await getSettings();
+
+    if (!settings.success) {
+      throw new Error('Settings not available');
+    }
+
+    const serverUrl = settings.data.server_url.replace('/api/employees', '');
+    const today = new Date().toISOString().split('T')[0];
+    
+    // ✅ STEP 1: Fetch currently clocked employees from server
+    const clockedResponse = await fetch(`${serverUrl}/api/attendance/currently-clocked`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (!clockedResponse.ok) {
+      const errorText = await clockedResponse.text();
+      throw new Error(`Server returned ${clockedResponse.status}: ${errorText}`);
+    }
+
+    const clockedResult = await clockedResponse.json();
+    
+    if (!clockedResult.success || !clockedResult.data) {
+      console.log('⏭️ No currently clocked employees on server');
+      return;
+    }
+
+    const clockedEmployees = clockedResult.data;
+    console.log(`📊 Server: ${clockedEmployees.length} currently clocked employees`);
+
+    // ✅ STEP 2: Fetch today's daily summary from server
+    console.log(`📊 Fetching today's daily summary from server (${today})...`);
+    
+    const summaryResponse = await fetch(
+      `${serverUrl}/api/daily-summary?start_date=${today}&end_date=${today}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    let serverSummaries = [];
+    if (summaryResponse.ok) {
+      const summaryResult = await summaryResponse.json();
+      if (summaryResult.success && summaryResult.data) {
+        serverSummaries = summaryResult.data;
+        console.log(`📊 Server: ${serverSummaries.length} daily summary records for today`);
+      }
+    } else {
+      console.warn(`⚠️ Failed to fetch daily summary: ${summaryResponse.status}`);
+    }
+
+    // ✅ STEP 3: Compare with local database
+    const db = getDatabase();
+    
+    // Get local currently clocked employees
+    const localClocked = db.prepare(`
+      SELECT DISTINCT 
+        employee_uid, 
+        clock_type, 
+        clock_time,
+        id as attendance_id
+      FROM attendance
+      WHERE date = ?
+      AND clock_type LIKE '%_in'
+      AND NOT EXISTS (
+        SELECT 1 FROM attendance a2
+        WHERE a2.employee_uid = attendance.employee_uid
+        AND a2.date = attendance.date
+        AND a2.clock_type LIKE '%_out'
+        AND REPLACE(a2.clock_type, '_out', '') = REPLACE(attendance.clock_type, '_in', '')
+        AND a2.clock_time > attendance.clock_time
+      )
+    `).all(today);
+
+    console.log(`📊 Local: ${localClocked.length} currently clocked employees`);
+
+    // Create sets for comparison
+    const serverUids = new Set(clockedEmployees.map(e => e.employee_uid));
+    const localUids = new Set(localClocked.map(e => e.employee_uid));
+
+    // Find employees clocked on server but not locally
+    const missingLocally = clockedEmployees.filter(e => !localUids.has(e.employee_uid));
+    
+    let syncedAttendanceCount = 0;
+    
+    // ✅ STEP 4: Download missing attendance records
+    if (missingLocally.length > 0) {
+      console.log(`⚠️ Found ${missingLocally.length} employees clocked on server but not locally`);
+      
+      for (const employee of missingLocally) {
+        try {
+          console.log(`📥 Downloading attendance for ${employee.employee_uid} (${employee.first_name} ${employee.last_name})`);
+          
+          const attendanceResponse = await fetch(
+            `${serverUrl}/api/attendance?employee_uid=${employee.employee_uid}&date=${today}`,
+            {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' }
+            }
+          );
+
+          if (attendanceResponse.ok) {
+            const attendanceData = await attendanceResponse.json();
+            
+            if (attendanceData.success && attendanceData.data && attendanceData.data.length > 0) {
+              console.log(`   Found ${attendanceData.data.length} attendance records for ${employee.employee_uid}`);
+              
+              // Insert ALL missing records
+              for (const record of attendanceData.data) {
+                // ✅ FIX: More precise duplicate check - use UNIQUE constraint fields
+                const existingRecord = db.prepare(`
+                  SELECT id FROM attendance 
+                  WHERE employee_uid = ? 
+                  AND clock_time = ? 
+                  AND date = ? 
+                  AND clock_type = ?
+                `).get(
+                  record.employee_uid,
+                  record.clock_time,
+                  record.date,
+                  record.clock_type
+                );
+
+                if (existingRecord) {
+                  console.log(`   ⏭️ Record for ${record.clock_type} at ${record.clock_time} already exists (ID: ${existingRecord.id}), skipping`);
+                  continue;
+                }
+                
+                // Format clock_time properly
+                let formattedClockTime = record.clock_time;
+                if (formattedClockTime && record.date) {
+                  if (/^\d{2}:\d{2}:\d{2}/.test(formattedClockTime) && !formattedClockTime.includes('T')) {
+                    const timeOnly = formattedClockTime.trim();
+                    const timeParts = timeOnly.split('.');
+                    const milliseconds = timeParts[1] ? timeParts[1].substring(0, 3).padEnd(3, '0') : '000';
+                    const timeWithMs = timeParts[0] + '.' + milliseconds;
+                    formattedClockTime = `${record.date}T${timeWithMs}`;
+                  } else {
+                    formattedClockTime = formattedClockTime
+                      .replace('Z', '')
+                      .replace(/[+-]\d{2}:\d{2}$/, '')
+                      .trim();
+                    
+                    if (!formattedClockTime.includes('.')) {
+                      formattedClockTime += '.000';
+                    }
+                  }
+                }
+                
+                // ✅ FIX: Don't use server's ID - let local DB generate a new one
+                const insertStmt = db.prepare(`
+                  INSERT INTO attendance (
+                    employee_uid, id_number, clock_type, clock_time, 
+                    regular_hours, overtime_hours, date, is_late, is_synced, created_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                `);
+
+                try {
+                  const insertResult = insertStmt.run(
+                    record.employee_uid,
+                    record.id_number,
+                    record.clock_type,
+                    formattedClockTime,
+                    record.regular_hours || 0,
+                    record.overtime_hours || 0,
+                    record.date,
+                    record.is_late || 0,
+                    record.created_at || new Date().toISOString()
+                  );
+
+                  if (insertResult.changes > 0) {
+                    console.log(`   ✓ Inserted ${record.clock_type} (Local ID: ${insertResult.lastInsertRowid}, Server ID: ${record.id}) at ${formattedClockTime}`);
+                    syncedAttendanceCount++;
+                  }
+                } catch (insertError) {
+                  // Check if it's a UNIQUE constraint violation
+                  if (insertError.message.includes('UNIQUE constraint failed')) {
+                    console.log(`   ⏭️ Duplicate detected during insert for ${record.clock_type} at ${record.clock_time}, skipping`);
+                  } else {
+                    throw insertError;
+                  }
+                }
+              }
+            } else {
+              console.log(`   ⚠️ No attendance records found on server for ${employee.employee_uid}`);
+            }
+          } else {
+            console.error(`   ✗ Failed to fetch attendance for ${employee.employee_uid}: ${attendanceResponse.status}`);
+          }
+        } catch (error) {
+          console.error(`   ✗ Error downloading attendance for ${employee.employee_uid}:`, error.message);
+        }
+      }
+    } else {
+      console.log('✓ Local attendance is in sync with server for currently clocked employees');
+    }
+
+    // ✅ STEP 5: Sync daily summary records
+    let syncedSummaryCount = 0;
+    
+    if (serverSummaries.length > 0) {
+      console.log(`📊 Syncing ${serverSummaries.length} daily summary records from server...`);
+      
+      for (const serverSummary of serverSummaries) {
+        try {
+          // Check if local summary exists
+          const localSummary = db.prepare(`
+            SELECT * FROM daily_attendance_summary
+            WHERE employee_uid = ? AND date = ?
+          `).get(serverSummary.employee_uid, serverSummary.date);
+
+          // Format datetime fields
+          const formatDateTime = (dt) => {
+            if (!dt) return null;
+            if (dt.includes('T')) {
+              return dt.replace('Z', '').replace(/[+-]\d{2}:\d{2}$/, '').trim() + 
+                     (dt.includes('.') ? '' : '.000');
+            }
+            return dt + (dt.includes('.') ? '' : '.000');
+          };
+
+          if (!localSummary) {
+            // Insert new summary
+            const insertStmt = db.prepare(`
+              INSERT INTO daily_attendance_summary (
+                employee_uid, id_number, employee_name, first_name, last_name,
+                department, date, first_clock_in, last_clock_out,
+                morning_in, morning_out, afternoon_in, afternoon_out,
+                evening_in, evening_out, overtime_in, overtime_out,
+                regular_hours, overtime_hours, total_hours,
+                morning_hours, afternoon_hours, evening_hours, overtime_session_hours,
+                is_incomplete, has_late_entry, has_overtime
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            insertStmt.run(
+              serverSummary.employee_uid,
+              serverSummary.id_number,
+              serverSummary.employee_name,
+              serverSummary.first_name,
+              serverSummary.last_name,
+              serverSummary.department,
+              serverSummary.date,
+              formatDateTime(serverSummary.first_clock_in),
+              formatDateTime(serverSummary.last_clock_out),
+              formatDateTime(serverSummary.morning_in),
+              formatDateTime(serverSummary.morning_out),
+              formatDateTime(serverSummary.afternoon_in),
+              formatDateTime(serverSummary.afternoon_out),
+              formatDateTime(serverSummary.evening_in),
+              formatDateTime(serverSummary.evening_out),
+              formatDateTime(serverSummary.overtime_in),
+              formatDateTime(serverSummary.overtime_out),
+              serverSummary.regular_hours || 0,
+              serverSummary.overtime_hours || 0,
+              serverSummary.total_hours || 0,
+              serverSummary.morning_hours || 0,
+              serverSummary.afternoon_hours || 0,
+              serverSummary.evening_hours || 0,
+              serverSummary.overtime_session_hours || 0,
+              serverSummary.is_incomplete || 0,
+              serverSummary.has_late_entry || 0,
+              serverSummary.has_overtime || 0
+            );
+
+            syncedSummaryCount++;
+            console.log(`   ✓ Inserted summary for ${serverSummary.employee_uid}`);
+          } else {
+            // Compare and update if different
+            const needsUpdate = 
+              localSummary.regular_hours !== (serverSummary.regular_hours || 0) ||
+              localSummary.overtime_hours !== (serverSummary.overtime_hours || 0) ||
+              localSummary.total_hours !== (serverSummary.total_hours || 0);
+
+            if (needsUpdate) {
+              const updateStmt = db.prepare(`
+                UPDATE daily_attendance_summary SET
+                  first_clock_in = ?, last_clock_out = ?,
+                  morning_in = ?, morning_out = ?,
+                  afternoon_in = ?, afternoon_out = ?,
+                  evening_in = ?, evening_out = ?,
+                  overtime_in = ?, overtime_out = ?,
+                  regular_hours = ?, overtime_hours = ?, total_hours = ?,
+                  morning_hours = ?, afternoon_hours = ?, evening_hours = ?,
+                  overtime_session_hours = ?,
+                  is_incomplete = ?, has_late_entry = ?, has_overtime = ?
+                WHERE employee_uid = ? AND date = ?
+              `);
+
+              updateStmt.run(
+                formatDateTime(serverSummary.first_clock_in),
+                formatDateTime(serverSummary.last_clock_out),
+                formatDateTime(serverSummary.morning_in),
+                formatDateTime(serverSummary.morning_out),
+                formatDateTime(serverSummary.afternoon_in),
+                formatDateTime(serverSummary.afternoon_out),
+                formatDateTime(serverSummary.evening_in),
+                formatDateTime(serverSummary.evening_out),
+                formatDateTime(serverSummary.overtime_in),
+                formatDateTime(serverSummary.overtime_out),
+                serverSummary.regular_hours || 0,
+                serverSummary.overtime_hours || 0,
+                serverSummary.total_hours || 0,
+                serverSummary.morning_hours || 0,
+                serverSummary.afternoon_hours || 0,
+                serverSummary.evening_hours || 0,
+                serverSummary.overtime_session_hours || 0,
+                serverSummary.is_incomplete || 0,
+                serverSummary.has_late_entry || 0,
+                serverSummary.has_overtime || 0,
+                serverSummary.employee_uid,
+                serverSummary.date
+              );
+
+              syncedSummaryCount++;
+              console.log(`   ✓ Updated summary for ${serverSummary.employee_uid}`);
+            }
+          }
+        } catch (error) {
+          console.error(`   ✗ Error syncing summary for ${serverSummary.employee_uid}:`, error.message);
+        }
+      }
+    }
+
+    console.log(`✅ Sync completed: ${syncedAttendanceCount} attendance, ${syncedSummaryCount} summaries`);
+
+    // ✅ STEP 6: Emit events for UI update
+    if (syncedAttendanceCount > 0 || syncedSummaryCount > 0) {
+      this.emit('currently-clocked-synced', {
+        synced: syncedAttendanceCount,
+        total: clockedEmployees.length,
+        missingCount: missingLocally.length,
+        summariesSynced: syncedSummaryCount,
+        timestamp: new Date().toISOString()
+      });
+
+      this.emit('ui-refresh-needed', {
+        reason: 'currently-clocked-sync',
+        syncedCount: syncedAttendanceCount,
+        summariesSynced: syncedSummaryCount,
+        employeeUids: missingLocally.map(e => e.employee_uid),
+        timestamp: new Date().toISOString()
+      });
+
+      this.emit('attendance-changed', {
+        type: 'currently_clocked_sync',
+        count: syncedAttendanceCount,
+        timestamp: new Date().toISOString()
+      });
+
+      if (syncedSummaryCount > 0) {
+        this.emit('summary-synced', {
+          count: syncedSummaryCount,
+          date: today,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    this.emit('clocked-employees-checked', {
+      server: clockedEmployees.length,
+      local: localClocked.length,
+      syncedAttendance: syncedAttendanceCount,
+      syncedSummaries: syncedSummaryCount,
+      statistics: clockedResult.statistics
+    });
+
+  } catch (error) {
+    console.error('❌ Error syncing currently clocked employees:', error.message);
+    this.emit('clocked-sync-error', {
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+  /**
+   * Process events
    */
   async processEvents(events) {
     const db = getDatabase();
@@ -378,13 +775,11 @@ class PollingManager extends EventEmitter {
           await this.handleEmployeeEvent(eventType, data, db);
           processedEvents.employees.push(eventType);
         } else if (eventType.startsWith('attendance_')) {
-          // ✅ STEP 1: Download and insert new attendance data from server
           const insertResult = await this.downloadAndInsertAttendance(eventType, data, db);
           
           if (insertResult.success) {
             processedEvents.attendance.push(eventType);
             
-            // ✅ STEP 2: Queue for validation after insertion
             if (this.autoValidateEnabled && data.employee_uid && data.date) {
               this.queueValidation(data.employee_uid, data.date);
             }
@@ -417,16 +812,14 @@ class PollingManager extends EventEmitter {
     return processedEvents;
   }
 
-  /**
-   * ✅ NEW: Queue validation for employee-date combination
-   */
+  // Queue validation, process validation queue, process reupload queue, etc.
+  // [Rest of the existing methods remain the same...]
+  
   queueValidation(employeeUid, date) {
     const key = `${employeeUid}:${date}`;
     this.validationQueue.add(key);
-    
     console.log(`📋 Queued validation for employee ${employeeUid} on ${date}`);
     
-    // Debounce validation - wait for events to settle
     if (this.validationDebounceTimer) {
       clearTimeout(this.validationDebounceTimer);
     }
@@ -436,9 +829,6 @@ class PollingManager extends EventEmitter {
     }, this.validationDebounceDelay);
   }
 
-  /**
-   * ✅ NEW: Process validation queue
-   */
   async processValidationQueue() {
     if (this.isValidating || this.validationQueue.size === 0) {
       return;
@@ -459,7 +849,6 @@ class PollingManager extends EventEmitter {
         try {
           console.log(`✅ Validating employee ${employeeUid} on ${date}...`);
           
-          // Validate attendance data
           const validationResult = await validateTimeRoutes.validateAttendanceData(
             date,
             date,
@@ -481,12 +870,10 @@ class PollingManager extends EventEmitter {
             console.log(`   - Corrections: ${results.correctedRecords}`);
             console.log(`   - Summaries regenerated: ${results.summariesRegenerated || 0}`);
 
-            // ✅ NEW: Queue for re-upload if corrections were made
             if (this.autoReuploadEnabled && results.correctedRecords > 0) {
               this.queueReupload(employeeUid, date, results);
             }
 
-            // Emit validation event
             this.emit('validation-completed', {
               employeeUid,
               date,
@@ -503,7 +890,6 @@ class PollingManager extends EventEmitter {
           });
         }
 
-        // Small delay between validations
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
@@ -514,16 +900,12 @@ class PollingManager extends EventEmitter {
     } finally {
       this.isValidating = false;
       
-      // Check if new items were queued during processing
       if (this.validationQueue.size > 0) {
         setTimeout(() => this.processValidationQueue(), 1000);
       }
     }
   }
 
-  /**
-   * ✅ NEW: Queue re-upload for corrected data
-   */
   queueReupload(employeeUid, date, validationResults) {
     const key = `${employeeUid}:${date}`;
     this.reuploadQueue.set(key, {
@@ -534,14 +916,9 @@ class PollingManager extends EventEmitter {
     });
     
     console.log(`📤 Queued re-upload for employee ${employeeUid} on ${date}`);
-    
-    // Process re-upload queue immediately
     setTimeout(() => this.processReuploadQueue(), 500);
   }
 
-  /**
-   * ✅ NEW: Process re-upload queue
-   */
   async processReuploadQueue() {
     if (this.reuploadQueue.size === 0) {
       return;
@@ -554,8 +931,6 @@ class PollingManager extends EventEmitter {
 
     try {
       const db = getDatabase();
-      const attendanceSyncRoutes = require('../api/routes/attendance-sync');
-      const summarySyncRoutes = require('../api/routes/summary-sync');
 
       for (const item of items) {
         const { employeeUid, date, validationResults } = item;
@@ -563,7 +938,6 @@ class PollingManager extends EventEmitter {
         try {
           console.log(`📤 Re-uploading data for employee ${employeeUid} on ${date}...`);
 
-          // ✅ STEP 1: Re-upload corrected attendance records
           const attendanceRecords = db.prepare(`
             SELECT * FROM attendance 
             WHERE employee_uid = ? AND date = ? AND is_synced = 0
@@ -575,11 +949,9 @@ class PollingManager extends EventEmitter {
 
             for (const record of attendanceRecords) {
               try {
-                // Upload to server
                 const uploadResult = await this.uploadAttendanceRecord(record);
                 
                 if (uploadResult.success) {
-                  // Mark as synced
                   db.prepare(`
                     UPDATE attendance 
                     SET is_synced = 1 
@@ -594,7 +966,6 @@ class PollingManager extends EventEmitter {
             }
           }
 
-          // ✅ STEP 2: Re-upload regenerated daily summary
           const summaryRecord = db.prepare(`
             SELECT * FROM daily_attendance_summary 
             WHERE employee_uid = ? AND date = ?
@@ -607,7 +978,6 @@ class PollingManager extends EventEmitter {
               const summaryUpload = await this.uploadSummaryRecord(summaryRecord);
               
               if (summaryUpload.success) {
-                // Mark summary as synced
                 db.prepare(`
                   UPDATE daily_attendance_summary 
                   SET is_synced = 1 
@@ -621,7 +991,6 @@ class PollingManager extends EventEmitter {
             }
           }
 
-          // Emit re-upload event
           this.emit('reupload-completed', {
             employeeUid,
             date,
@@ -640,7 +1009,6 @@ class PollingManager extends EventEmitter {
           });
         }
 
-        // Small delay between re-uploads
         await new Promise(resolve => setTimeout(resolve, 200));
       }
 
@@ -651,9 +1019,6 @@ class PollingManager extends EventEmitter {
     }
   }
 
-  /**
-   * ✅ NEW: Upload single attendance record to server
-   */
   async uploadAttendanceRecord(record) {
     try {
       const { getSettings } = require('../api/routes/settings');
