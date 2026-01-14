@@ -1694,6 +1694,43 @@ ipcMain.handle('recalculate-summaries', async (event, ids) => {
   }
 });
 
+// In your IPC handlers
+ipcMain.handle('preview-duplicates', async () => {
+  try {
+    const { previewDuplicates } = require('./services/removeDuplicateAttendance.js');
+    const duplicates = previewDuplicates();
+    
+    return {
+      success: true,
+      duplicates: duplicates
+    };
+  } catch (error) {
+    console.error('Preview duplicates error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+ipcMain.handle('remove-duplicates', async () => {
+  try {
+    const { removeDuplicateAttendanceRecords } = require('./services/removeDuplicateAttendance.js');
+    const result = removeDuplicateAttendanceRecords();
+    
+    return {
+      success: true,
+      ...result
+    };
+  } catch (error) {
+    console.error('Remove duplicates error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
 // Get single attendance record info
 ipcMain.handle('get-attendance-record', async (event, id) => {
   try {

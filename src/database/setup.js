@@ -783,7 +783,7 @@ if (currentVersion < 9) {
   }
 }
 
-// UPDATED: Function to update daily attendance summary
+// FIXED: Function to update daily attendance summary
 function updateDailyAttendanceSummary(employeeUid, date, db = null) {
   if (!db) {
     db = getDatabase()
@@ -811,7 +811,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       ORDER BY clock_time ASC
     `).all(employeeUid, date)
 
-    // ✅ NEW: If no attendance records, DELETE the summary instead of keeping old data
+    // If no attendance records, DELETE the summary instead of keeping old data
     if (attendanceRecords.length === 0) {
       console.log(`No attendance records found for employee ${employeeUid} on ${date}, deleting summary`)
       db.prepare(`
@@ -829,6 +829,7 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       overtime_in: null, overtime_out: null
     }
 
+    // ✅ FIX: Only count hours from clock-OUT records
     let totalRegularHours = 0
     let totalOvertimeHours = 0
     let totalSessions = 0
@@ -847,9 +848,12 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
         sessionTimes[clockType] = record.clock_time
       }
 
-      // Accumulate hours
-      totalRegularHours += record.regular_hours || 0
-      totalOvertimeHours += record.overtime_hours || 0
+      // ✅ FIX: Only accumulate hours from clock-OUT records
+      if (clockType.endsWith('_out')) {
+        totalRegularHours += record.regular_hours || 0
+        totalOvertimeHours += record.overtime_hours || 0
+        console.log(`  ${clockType}: Regular=${record.regular_hours || 0}h, OT=${record.overtime_hours || 0}h`)
+      }
 
       // Track session counts and flags
       if (clockType.endsWith('_in')) {
@@ -872,7 +876,9 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       }
     })
 
-    // ✅ IMPROVED: Calculate session-specific hours based on actual records
+    console.log(`  Total from clock-outs: Regular=${totalRegularHours}h, OT=${totalOvertimeHours}h`)
+
+    // ✅ FIX: Calculate session-specific hours ONLY from clock-out records
     const sessionHours = {
       morning_hours: 0,
       afternoon_hours: 0,
@@ -880,22 +886,33 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
       overtime_session_hours: 0
     }
 
-    // Calculate hours for each session type based on actual records
-    const calculateSessionHours = (inType, outType) => {
-      const inRecord = attendanceRecords.find(r => r.clock_type === inType)
-      const outRecord = attendanceRecords.find(r => r.clock_type === outType &&
-        (!inRecord || new Date(r.clock_time) > new Date(inRecord.clock_time)))
+    // ✅ CORRECTED: Get regular hours only for morning/afternoon, overtime for evening/OT sessions
+    const morningOutRecord = attendanceRecords.find(r => r.clock_type === 'morning_out')
+    const afternoonOutRecord = attendanceRecords.find(r => r.clock_type === 'afternoon_out')
+    const eveningOutRecord = attendanceRecords.find(r => r.clock_type === 'evening_out')
+    const overtimeOutRecord = attendanceRecords.find(r => r.clock_type === 'overtime_out')
 
-      if (inRecord && outRecord) {
-        return (inRecord.regular_hours || 0) + (inRecord.overtime_hours || 0)
-      }
-      return 0
+    // Morning hours = regular_hours from morning_out only
+    if (morningOutRecord) {
+      sessionHours.morning_hours = morningOutRecord.regular_hours || 0
     }
 
-    sessionHours.morning_hours = calculateSessionHours('morning_in', 'morning_out')
-    sessionHours.afternoon_hours = calculateSessionHours('afternoon_in', 'afternoon_out')
-    sessionHours.evening_hours = calculateSessionHours('evening_in', 'evening_out')
-    sessionHours.overtime_session_hours = calculateSessionHours('overtime_in', 'overtime_out')
+    // Afternoon hours = regular_hours from afternoon_out only
+    if (afternoonOutRecord) {
+      sessionHours.afternoon_hours = afternoonOutRecord.regular_hours || 0
+    }
+
+    // Evening hours = overtime_hours from evening_out (evening is always OT)
+    if (eveningOutRecord) {
+      sessionHours.evening_hours = eveningOutRecord.overtime_hours || 0
+    }
+
+    // Overtime session hours = overtime_hours from overtime_out
+    if (overtimeOutRecord) {
+      sessionHours.overtime_session_hours = overtimeOutRecord.overtime_hours || 0
+    }
+
+    console.log(`  Session breakdown: Morning=${sessionHours.morning_hours}h, Afternoon=${sessionHours.afternoon_hours}h, Evening=${sessionHours.evening_hours}h, OT=${sessionHours.overtime_session_hours}h`)
 
     // Get first and last times
     const firstClockIn = attendanceRecords.find(r => r.clock_type.endsWith('_in'))?.clock_time
@@ -1019,6 +1036,8 @@ function updateDailyAttendanceSummary(employeeUid, date, db = null) {
     )
 
     console.log(`✓ Daily attendance summary updated for employee ${employeeUid} on ${date}`)
+    console.log(`  Final totals: Regular=${totalRegularHours}h, OT=${totalOvertimeHours}h, Total=${totalRegularHours + totalOvertimeHours}h`)
+    
     return true
 
   } catch (error) {

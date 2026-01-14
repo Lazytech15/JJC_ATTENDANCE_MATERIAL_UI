@@ -86,9 +86,9 @@ async validateAttendanceData(startDate = null, endDate = null, employeeUid = nul
   }
 }
 
-  /**
- * Validate a single employee's attendance for a specific date
- * NOW: Only validates clock-time-based calculations IF no manual edits exist
+ /**
+ * FIXED: Actually validate and recalculate hours from clock times
+ * This replaces the validateEmployeeDailyAttendance function in your validationService.js
  */
 async validateEmployeeDailyAttendance(employeeUid, date, records, options = {}) {
   const { autoCorrect = true, updateSyncStatus = true, apply8HourRule = true } = options
@@ -98,63 +98,133 @@ async validateEmployeeDailyAttendance(employeeUid, date, records, options = {}) 
   // Sort records by clock time
   const sortedRecords = records.sort((a, b) => new Date(a.clock_time) - new Date(b.clock_time))
   
-  // ✅ SKIP VALIDATION: Don't recalculate hours from clock times
-  // This preserves any manual edits made to regular_hours and overtime_hours
-  console.log(`Skipping clock-time validation to preserve manual edits`)
+  // Group records into pairs (clock_in + clock_out)
+  const sessions = []
+  const clockInMap = new Map()
   
-  // ✅ INSTEAD: Update summary from actual attendance record values
-  try {
-    console.log(`Reading actual hours from attendance table for summary update...`)
-    
-    // Get the current hour values from attendance table (includes manual edits)
-    const currentRecords = this.db.prepare(`
-      SELECT id, clock_type, regular_hours, overtime_hours 
-      FROM attendance 
-      WHERE employee_uid = ? AND date = ?
-      ORDER BY clock_time
-    `).all(employeeUid, date)
-    
-    // Calculate totals from actual attendance records
-    const totalRegular = currentRecords.reduce((sum, r) => sum + (r.regular_hours || 0), 0)
-    const totalOvertime = currentRecords.reduce((sum, r) => sum + (r.overtime_hours || 0), 0)
-    
-    console.log(`Attendance totals from records:`)
-    currentRecords.forEach(r => {
-      console.log(`  ${r.clock_type}: Regular=${r.regular_hours || 0}h, OT=${r.overtime_hours || 0}h`)
-    })
-    console.log(`Sum: Regular=${totalRegular}h, OT=${totalOvertime}h, Total=${totalRegular + totalOvertime}h`)
-    
-    // Check if summary exists
-    const existingSummary = this.db.prepare(`
-      SELECT id FROM daily_attendance_summary 
-      WHERE employee_uid = ? AND date = ?
-    `).get(employeeUid, date)
-    
-    if (existingSummary) {
-      // Update existing summary with totals from attendance records
-      this.db.prepare(`
-        UPDATE daily_attendance_summary 
-        SET regular_hours = ?,
-            overtime_hours = ?,
-            total_hours = ?,
-            last_updated = CURRENT_TIMESTAMP
-        WHERE employee_uid = ? AND date = ?
-      `).run(totalRegular, totalOvertime, totalRegular + totalOvertime, employeeUid, date)
-      
-      console.log(`✅ Updated existing summary with attendance totals`)
-    } else {
-      // Summary doesn't exist, create it using updateDailyAttendanceSummary
-      console.log(`No summary exists, calling updateDailyAttendanceSummary to create one`)
-      updateDailyAttendanceSummary(employeeUid, date, this.db)
+  // First pass: organize all clock-ins
+  sortedRecords.forEach(record => {
+    if (record.clock_type.endsWith('_in')) {
+      const sessionType = record.clock_type.replace('_in', '')
+      if (!clockInMap.has(sessionType)) {
+        clockInMap.set(sessionType, [])
+      }
+      clockInMap.get(sessionType).push(record)
     }
-    
-    // Mark as valid (we're trusting the attendance records)
-    this.validationResults.validRecords += currentRecords.length
-    
-  } catch (error) {
-    console.error(`Error updating summary from attendance records:`, error)
-    this.validationResults.errorRecords += sortedRecords.length
+  })
+  
+  // Second pass: match clock-outs with clock-ins
+  sortedRecords.forEach(record => {
+    if (record.clock_type.endsWith('_out')) {
+      const sessionType = record.clock_type.replace('_out', '')
+      const clockIns = clockInMap.get(sessionType) || []
+      
+      // Find the most recent clock-in before this clock-out
+      const clockIn = clockIns
+        .filter(ci => new Date(ci.clock_time) <= new Date(record.clock_time))
+        .sort((a, b) => new Date(b.clock_time) - new Date(a.clock_time))[0]
+      
+      if (clockIn) {
+        sessions.push({
+          clockIn,
+          clockOut: record,
+          sessionType
+        })
+      }
+    }
+  })
+  
+  console.log(`Found ${sessions.length} complete sessions to validate`)
+  
+  // Validate each session
+  for (const session of sessions) {
+    await this.validateClockOutRecord(session.clockOut, sortedRecords, {
+      autoCorrect,
+      updateSyncStatus
+    })
   }
+  
+  // After validation, update the summary from corrected values
+  console.log(`Updating daily attendance summary after validation...`)
+  updateDailyAttendanceSummary(employeeUid, date, this.db)
+}
+
+/**
+ * ALTERNATIVE: Check for duplicates first, then validate
+ */
+async validateEmployeeDailyAttendanceWithDuplicateCheck(employeeUid, date, records, options = {}) {
+  const { autoCorrect = true, updateSyncStatus = true } = options
+  
+  console.log(`\n--- Validating ${records.length} records for employee ${employeeUid} on ${date} ---`)
+  
+  // Check for duplicate records
+  const duplicates = new Map()
+  records.forEach(record => {
+    const key = `${record.clock_type}-${record.clock_time}`
+    if (duplicates.has(key)) {
+      duplicates.get(key).push(record)
+    } else {
+      duplicates.set(key, [record])
+    }
+  })
+  
+  // Find and report duplicates
+  const duplicateGroups = Array.from(duplicates.values()).filter(group => group.length > 1)
+  
+  if (duplicateGroups.length > 0) {
+    console.log(`⚠️  WARNING: Found ${duplicateGroups.length} sets of duplicate records!`)
+    
+    duplicateGroups.forEach((group, index) => {
+      const sample = group[0]
+      console.log(`\nDuplicate ${index + 1}: ${sample.clock_type} at ${sample.clock_time}`)
+      console.log(`  IDs: ${group.map(r => r.id).join(', ')} (${group.length} copies)`)
+      console.log(`  Hours: Regular=${sample.regular_hours}, OT=${sample.overtime_hours}`)
+      
+      if (autoCorrect) {
+        // Keep only the first record, delete the rest
+        const keepId = group[0].id
+        const deleteIds = group.slice(1).map(r => r.id)
+        
+        console.log(`  Action: Keeping ID ${keepId}, deleting ${deleteIds.length} duplicates`)
+        
+        const deleteStmt = this.db.prepare(`DELETE FROM attendance WHERE id = ?`)
+        deleteIds.forEach(id => {
+          deleteStmt.run(id)
+          console.log(`  ✓ Deleted record ${id}`)
+        })
+      }
+    })
+    
+    if (autoCorrect) {
+      // Re-fetch records after deletion
+      records = this.db.prepare(`
+        SELECT * FROM attendance 
+        WHERE employee_uid = ? AND date = ?
+        ORDER BY clock_time
+      `).all(employeeUid, date)
+      
+      console.log(`After duplicate removal: ${records.length} records remaining`)
+    }
+  }
+  
+  // Now proceed with normal validation
+  const sortedRecords = records.sort((a, b) => new Date(a.clock_time) - new Date(b.clock_time))
+  
+  // Get only clock-out records for validation
+  const clockOutRecords = sortedRecords.filter(r => r.clock_type.endsWith('_out'))
+  
+  console.log(`Validating ${clockOutRecords.length} clock-out records...`)
+  
+  for (const clockOut of clockOutRecords) {
+    await this.validateClockOutRecord(clockOut, sortedRecords, {
+      autoCorrect,
+      updateSyncStatus
+    })
+  }
+  
+  // Update summary after validation
+  console.log(`Updating summary for employee ${employeeUid} on ${date}...`)
+  updateDailyAttendanceSummary(employeeUid, date, this.db)
 }
 
   /**

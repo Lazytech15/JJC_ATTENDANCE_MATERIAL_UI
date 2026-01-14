@@ -1459,91 +1459,91 @@ async handleAttendanceDownloaded(data) {
     }
   }
 
-  /**
-  * UPDATED: setupServerEditSyncUI - Update button text and description
-  */
-  setupServerEditSyncUI() {
-    const syncPanel = document.getElementById('syncPanel');
+  // /**
+  // * UPDATED: setupServerEditSyncUI - Update button text and description
+  // */
+  // setupServerEditSyncUI() {
+  //   const syncPanel = document.getElementById('syncPanel');
 
-    if (!syncPanel) {
-      console.warn('Sync panel not found, cannot setup server edit sync UI');
-      return;
-    }
+  //   if (!syncPanel) {
+  //     console.warn('Sync panel not found, cannot setup server edit sync UI');
+  //     return;
+  //   }
 
-    if (document.getElementById('serverEditSyncInfo')) {
-      console.log('Server edit sync UI already setup');
-      return;
-    }
+  //   if (document.getElementById('serverEditSyncInfo')) {
+  //     console.log('Server edit sync UI already setup');
+  //     return;
+  //   }
 
-    const serverEditSection = document.createElement('div');
-    serverEditSection.className = 'settings-section server-edit-sync-section';
-    serverEditSection.innerHTML = `
-    <h3>📝 Server Edit Sync (Manual)</h3>
-    <p class="section-description">
-      Manually check for attendance corrections made on the server and apply them to local records.
-      <br><strong>Note:</strong> This is a manual process - click the button below when you want to sync.
-    </p>
-    <div id="serverEditSyncInfo" class="sync-info">
-      <div class="loading">Loading sync information...</div>
-    </div>
-    <div class="button-group" style="margin-top: 15px;">
-      <button id="checkServerEditsNowBtn" class="primary-button">
-        🔄 Check Server Edits Now
-      </button>
-      <button id="viewServerEditHistoryBtn" class="secondary-button">
-        📊 View Sync History
-      </button>
-    </div>
-    <div class="sync-info-item" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 4px solid #3b82f6;">
-      <strong>💡 How to use:</strong>
-      <ul style="margin: 5px 0 0 20px; padding: 0;">
-        <li>Click "Check Server Edits Now" whenever you want to download changes from the server</li>
-        <li>The system will download edits, validate data, regenerate summaries, and upload them back</li>
-        <li>Check the history to see previous sync operations</li>
-      </ul>
-    </div>
-  `;
+  //   const serverEditSection = document.createElement('div');
+  //   serverEditSection.className = 'settings-section server-edit-sync-section';
+  //   serverEditSection.innerHTML = `
+  //   <h3>📝 Server Edit Sync (Manual)</h3>
+  //   <p class="section-description">
+  //     Manually check for attendance corrections made on the server and apply them to local records.
+  //     <br><strong>Note:</strong> This is a manual process - click the button below when you want to sync.
+  //   </p>
+  //   <div id="serverEditSyncInfo" class="sync-info">
+  //     <div class="loading">Loading sync information...</div>
+  //   </div>
+  //   <div class="button-group" style="margin-top: 15px;">
+  //     <button id="checkServerEditsNowBtn" class="primary-button">
+  //       🔄 Check Server Edits Now
+  //     </button>
+  //     <button id="viewServerEditHistoryBtn" class="secondary-button">
+  //       📊 View Sync History
+  //     </button>
+  //   </div>
+  //   <div class="sync-info-item" style="margin-top: 10px; padding: 10px; background: #f0f9ff; border-left: 4px solid #3b82f6;">
+  //     <strong>💡 How to use:</strong>
+  //     <ul style="margin: 5px 0 0 20px; padding: 0;">
+  //       <li>Click "Check Server Edits Now" whenever you want to download changes from the server</li>
+  //       <li>The system will download edits, validate data, regenerate summaries, and upload them back</li>
+  //       <li>Check the history to see previous sync operations</li>
+  //     </ul>
+  //   </div>
+  // `;
 
-    const lastSection = syncPanel.querySelector('.settings-section:last-child');
-    if (lastSection) {
-      syncPanel.insertBefore(serverEditSection, lastSection);
-    } else {
-      syncPanel.appendChild(serverEditSection);
-    }
+  //   const lastSection = syncPanel.querySelector('.settings-section:last-child');
+  //   if (lastSection) {
+  //     syncPanel.insertBefore(serverEditSection, lastSection);
+  //   } else {
+  //     syncPanel.appendChild(serverEditSection);
+  //   }
 
-    // Add event listeners
-    const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
-    const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
+  //   // Add event listeners
+  //   const checkNowBtn = document.getElementById('checkServerEditsNowBtn');
+  //   const viewHistoryBtn = document.getElementById('viewServerEditHistoryBtn');
 
-    if (checkNowBtn) {
-      checkNowBtn.addEventListener('click', async () => {
-        checkNowBtn.disabled = true;
-        checkNowBtn.textContent = '🔄 Checking...';
+  //   if (checkNowBtn) {
+  //     checkNowBtn.addEventListener('click', async () => {
+  //       checkNowBtn.disabled = true;
+  //       checkNowBtn.textContent = '🔄 Checking...';
 
-        try {
-          await this.checkServerEdits(false);
-        } catch (error) {
-          console.error('Error checking server edits:', error);
-          this.showStatus(`Error: ${error.message}`, 'error');
-        } finally {
-          checkNowBtn.disabled = false;
-          checkNowBtn.textContent = '🔄 Check Server Edits Now';
+  //       try {
+  //         await this.checkServerEdits(false);
+  //       } catch (error) {
+  //         console.error('Error checking server edits:', error);
+  //         this.showStatus(`Error: ${error.message}`, 'error');
+  //       } finally {
+  //         checkNowBtn.disabled = false;
+  //         checkNowBtn.textContent = '🔄 Check Server Edits Now';
 
-          await this.loadServerEditSyncInfo();
-        }
-      });
-    }
+  //         await this.loadServerEditSyncInfo();
+  //       }
+  //     });
+  //   }
 
-    if (viewHistoryBtn) {
-      viewHistoryBtn.addEventListener('click', () => {
-        this.showServerEditSyncHistory();
-      });
-    }
+  //   if (viewHistoryBtn) {
+  //     viewHistoryBtn.addEventListener('click', () => {
+  //       this.showServerEditSyncHistory();
+  //     });
+  //   }
 
-    this.loadServerEditSyncInfo();
+  //   this.loadServerEditSyncInfo();
 
-    console.log('✓ Server edit sync UI setup complete (Manual mode)');
-  }
+  //   console.log('✓ Server edit sync UI setup complete (Manual mode)');
+  // }
 
   /**
    * NEW: Load local attendance data editor
@@ -3528,106 +3528,140 @@ async handleAttendanceDownloaded(data) {
     }
   }
 
-  async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
-    if (!this.electronAPI) {
-      if (!silent) {
-        this.showStatus("Demo mode: Sync simulated successfully!", "success");
-      }
-      return { success: true, message: "Demo sync" };
+  // In renderer.js - Update performAttendanceSync method
+
+async performAttendanceSync(silent = false, retryCount = 0, showDownloadToast = false) {
+  if (!this.electronAPI) {
+    if (!silent) {
+      this.showStatus("Demo mode: Sync simulated successfully!", "success");
+    }
+    return { success: true, message: "Demo sync" };
+  }
+
+  try {
+    // ✅ Check if auto-sync is enabled before syncing
+    if (silent && !this.syncSettings.enabled) {
+      console.log('Auto-sync is disabled, skipping scheduled sync');
+      return { success: false, message: "Auto-sync disabled" };
     }
 
-    try {
-      // ✅ Check if auto-sync is enabled before syncing
-      if (silent && !this.syncSettings.enabled) {
-        console.log('Auto-sync is disabled, skipping scheduled sync');
-        return { success: false, message: "Auto-sync disabled" };
-      }
-
-      // First validate unsynced records before syncing
-      if (retryCount === 0) {
-        try {
-          if (!silent) {
-            this.showStatus("Validating attendance data before sync...", "info");
-          }
-
-          const validationResult = await this.electronAPI.validateAndCorrectUnsyncedRecords({
-            autoCorrect: true,
-            updateSyncStatus: false,
-          });
-
-          if (validationResult.success && validationResult.data.summary.correctedRecords > 0) {
-            const corrected = validationResult.data.summary.correctedRecords;
-            console.log(`Pre-sync validation: ${corrected} records corrected`);
-
-            if (!silent) {
-              this.showStatus(`Validated and corrected ${corrected} records before sync`, "success");
-            }
-          }
-        } catch (validationError) {
-          console.warn("Pre-sync validation failed, continuing with sync:", validationError);
-        }
-      }
-
-      const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
-
-      if (!countResult.success || countResult.count === 0) {
+    // ✅ STEP 1: Remove duplicates FIRST
+    if (retryCount === 0) {
+      try {
         if (!silent) {
-          this.showStatus("No attendance records to sync", "info");
-        }
-        return await this.performSummarySync(silent, retryCount, showDownloadToast);
-      }
-
-      if (showDownloadToast || (!silent && retryCount === 0)) {
-        this.showDownloadToast(
-          `📤 Uploading ${countResult.count} attendance records to server...`,
-          "info"
-        );
-      } else if (!silent) {
-        this.showStatus(`Syncing ${countResult.count} attendance records...`, "info");
-      }
-
-      const syncResult = await this.electronAPI.syncAttendanceToServer();
-
-      if (syncResult.success) {
-        if (showDownloadToast || !silent) {
-          this.showDownloadToast("✅ Attendance data uploaded successfully!", "success");
-        }
-        console.log("Attendance sync successful:", syncResult.message);
-
-        if (document.getElementById("settingsModal").classList.contains("show")) {
-          await this.loadSyncInfo();
+          this.showStatus("Removing duplicate records...", "info");
         }
 
-        console.log("Triggering summary sync after attendance sync");
-        const summaryResult = await this.performSummarySync(true, 0, false);
+        const duplicateResult = await this.electronAPI.invoke('remove-duplicates');
 
-        return {
-          success: true,
-          message: syncResult.message,
-          attendanceSync: syncResult,
-          summarySync: summaryResult,
-        };
-      } else {
-        throw new Error(syncResult.message);
+        if (duplicateResult.success && duplicateResult.recordsDeleted > 0) {
+          console.log(`Pre-sync cleanup: ${duplicateResult.recordsDeleted} duplicates removed`);
+
+          if (!silent) {
+            this.showStatus(
+              `Removed ${duplicateResult.recordsDeleted} duplicate records`,
+              "success"
+            );
+          }
+        }
+      } catch (duplicateError) {
+        console.warn("Duplicate removal failed, continuing with sync:", duplicateError);
       }
-    } catch (error) {
-      console.error("Attendance sync error:", error);
+    }
 
-      // ✅ Only show error toast if not silent (i.e., user-initiated)
+    // ✅ STEP 2: Validate unsynced records before syncing
+    if (retryCount === 0) {
+      try {
+        if (!silent) {
+          this.showStatus("Validating attendance data before sync...", "info");
+        }
+
+        const validationResult = await this.electronAPI.validateAndCorrectUnsyncedRecords({
+          autoCorrect: true,
+          updateSyncStatus: false,
+        });
+
+        if (validationResult.success && validationResult.data.summary.correctedRecords > 0) {
+          const corrected = validationResult.data.summary.correctedRecords;
+          console.log(`Pre-sync validation: ${corrected} records corrected`);
+
+          if (!silent) {
+            this.showStatus(
+              `Validated and corrected ${corrected} records before sync`,
+              "success"
+            );
+          }
+        }
+      } catch (validationError) {
+        console.warn("Pre-sync validation failed, continuing with sync:", validationError);
+      }
+    }
+
+    // ✅ STEP 3: Check for records to sync
+    const countResult = await this.electronAPI.getUnsyncedAttendanceCount();
+
+    if (!countResult.success || countResult.count === 0) {
       if (!silent) {
-        this.showDownloadToast(`❌ Upload failed: ${error.message}`, "error");
-      } else {
-        // For silent/scheduled syncs, just log the error
-        console.log('Scheduled sync failed (will retry at next interval):', error.message);
+        this.showStatus("No attendance records to sync", "info");
       }
+      return await this.performSummarySync(silent, retryCount, showDownloadToast);
+    }
+
+    // ✅ STEP 4: Perform sync
+    if (showDownloadToast || (!silent && retryCount === 0)) {
+      this.showDownloadToast(
+        `📤 Uploading ${countResult.count} validated attendance records...`,
+        "info"
+      );
+    } else if (!silent) {
+      this.showStatus(`Syncing ${countResult.count} attendance records...`, "info");
+    }
+
+    const syncResult = await this.electronAPI.syncAttendanceToServer();
+
+    if (syncResult.success) {
+      if (showDownloadToast || !silent) {
+        this.showDownloadToast(
+          "✅ Clean, validated data uploaded successfully!",
+          "success"
+        );
+      }
+      console.log("Attendance sync successful:", syncResult.message);
+
+      if (document.getElementById("settingsModal").classList.contains("show")) {
+        await this.loadSyncInfo();
+      }
+
+      console.log("Triggering summary sync after attendance sync");
+      const summaryResult = await this.performSummarySync(true, 0, false);
 
       return {
-        success: false,
-        message: error.message,
-        willRetryAtScheduledTime: true
+        success: true,
+        message: syncResult.message,
+        duplicatesRemoved: duplicateResult?.recordsDeleted || 0,
+        recordsCorrected: validationResult?.data?.summary?.correctedRecords || 0,
+        attendanceSync: syncResult,
+        summarySync: summaryResult,
       };
+    } else {
+      throw new Error(syncResult.message);
     }
+  } catch (error) {
+    console.error("Attendance sync error:", error);
+
+    if (!silent) {
+      this.showDownloadToast(`❌ Upload failed: ${error.message}`, "error");
+    } else {
+      console.log('Scheduled sync failed (will retry at next interval):', error.message);
+    }
+
+    return {
+      success: false,
+      message: error.message,
+      willRetryAtScheduledTime: true
+    };
   }
+}
 
   async performSummarySync(
     silent = false,
@@ -3813,6 +3847,464 @@ async handleAttendanceDownloaded(data) {
     }
   }
 
+  setupCustomSyncButton() {
+  const syncPanel = document.getElementById('syncPanel');
+  
+  if (!syncPanel) {
+    console.warn('Sync panel not found');
+    return;
+  }
+  
+  if (document.getElementById('customSyncButton')) {
+    console.log('Custom sync button already exists');
+    return;
+  }
+  
+  const customSection = document.createElement('div');
+  customSection.className = 'settings-section custom-sync-section';
+  customSection.innerHTML = `
+    <h3>🔧 Custom Sync Actions</h3>
+    <p class="section-description">
+      Additional sync and maintenance tools for your attendance system.
+    </p>
+    
+    <div class="button-group" style="margin-top: 15px;">
+      <button id="customSyncButton" class="primary-button" style="width: 100%;">
+        🔄 Custom Sync Action
+      </button>
+      
+      <button id="validateAllButton" class="secondary-button" style="width: 100%; margin-top: 10px;">
+        ✅ Validate All Records
+      </button>
+      
+      <button id="rebuildSummariesButton" class="secondary-button" style="width: 100%; margin-top: 10px;">
+        📊 Rebuild All Summaries
+      </button>
+      
+      <!-- ✅ NEW: Add duplicate removal buttons -->
+      <button id="previewDuplicatesButton" class="secondary-button" style="width: 100%; margin-top: 10px; background: #f59e0b;">
+        🔍 Preview Duplicate Records
+      </button>
+      
+      <button id="removeDuplicatesButton" class="danger-button" style="width: 100%; margin-top: 10px;">
+        🗑️ Remove Duplicate Records
+      </button>
+    </div>
+    
+    <div id="customSyncStatus" class="sync-info-item" style="margin-top: 15px; display: none;">
+      <!-- Status messages will appear here -->
+    </div>
+  `;
+  
+  const lastSection = syncPanel.querySelector('.settings-section:last-child');
+  if (lastSection) {
+    syncPanel.insertBefore(customSection, lastSection);
+  } else {
+    syncPanel.appendChild(customSection);
+  }
+  
+  this.setupCustomSyncButtonListeners();
+  
+  console.log('✓ Custom sync buttons added to sync panel');
+}
+
+/**
+ * Setup event listeners for custom sync buttons
+ */
+setupCustomSyncButtonListeners() {
+  // Custom Sync Action button
+  const customSyncBtn = document.getElementById('customSyncButton');
+  if (customSyncBtn) {
+    customSyncBtn.addEventListener('click', async () => {
+      await this.handleCustomSync();
+    });
+  }
+  
+  // Validate All button
+  const validateAllBtn = document.getElementById('validateAllButton');
+  if (validateAllBtn) {
+    validateAllBtn.addEventListener('click', async () => {
+      await this.handleValidateAll();
+    });
+  }
+  
+  // Rebuild Summaries button
+  const rebuildSummariesBtn = document.getElementById('rebuildSummariesButton');
+  if (rebuildSummariesBtn) {
+    rebuildSummariesBtn.addEventListener('click', async () => {
+      await this.handleRebuildSummaries();
+    });
+  }
+  // ✅ NEW: Preview Duplicates button
+  const previewDuplicatesBtn = document.getElementById('previewDuplicatesButton');
+  if (previewDuplicatesBtn) {
+    previewDuplicatesBtn.addEventListener('click', async () => {
+      await this.handlePreviewDuplicates();
+    });
+  }
+  
+  // ✅ NEW: Remove Duplicates button
+  const removeDuplicatesBtn = document.getElementById('removeDuplicatesButton');
+  if (removeDuplicatesBtn) {
+    removeDuplicatesBtn.addEventListener('click', async () => {
+      await this.handleRemoveDuplicates();
+    });
+  }
+}
+
+/**
+ * Handle custom sync action
+ */
+async handleCustomSync() {
+  const btn = document.getElementById('customSyncButton');
+  const statusDiv = document.getElementById('customSyncStatus');
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Processing...';
+  
+  try {
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+      <div class="loading" style="text-align: center;">
+        🔄 Running custom sync...
+      </div>
+    `;
+    
+    // YOUR CUSTOM SYNC LOGIC HERE
+    // Example: Sync attendance then summaries
+    const attendanceResult = await this.performAttendanceSync(false, 0, true);
+    
+    if (attendanceResult.success) {
+      const summaryResult = await this.performSummarySync(false, 0, true);
+      
+      if (summaryResult.success) {
+        statusDiv.innerHTML = `
+          <div style="color: #059669; font-weight: bold;">
+            ✅ Custom sync completed successfully!
+          </div>
+        `;
+      } else {
+        throw new Error('Summary sync failed');
+      }
+    } else {
+      throw new Error('Attendance sync failed');
+    }
+    
+  } catch (error) {
+    console.error('Custom sync error:', error);
+    statusDiv.innerHTML = `
+      <div style="color: #dc2626; font-weight: bold;">
+        ❌ Error: ${error.message}
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Custom Sync Action';
+    
+    // Hide status after 5 seconds
+    setTimeout(() => {
+      statusDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+/**
+ * Handle validate all action
+ */
+async handleValidateAll() {
+  const btn = document.getElementById('validateAllButton');
+  const statusDiv = document.getElementById('customSyncStatus');
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Validating...';
+  
+  try {
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+      <div class="loading" style="text-align: center;">
+        🔍 Validating all attendance records...
+      </div>
+    `;
+    
+    // Validate all attendance data
+    const result = await this.electronAPI.validateAttendanceData({
+      autoCorrect: true,
+      updateSyncStatus: true,
+      validateStatistics: true,
+      rebuildSummary: true,
+      apply8HourRule: true
+    });
+    
+    if (result.success && result.data) {
+      const corrected = result.data.correctedRecords || 0;
+      const total = result.data.totalRecords || 0;
+      
+      statusDiv.innerHTML = `
+        <div style="color: #059669; font-weight: bold;">
+          ✅ Validation complete!<br>
+          📊 ${total} records validated<br>
+          ${corrected > 0 ? `🔧 ${corrected} corrections made` : '✓ All records accurate'}
+        </div>
+      `;
+      
+      // Refresh UI
+      await this.loadTodayAttendance();
+      await this.loadDailySummary();
+      
+    } else {
+      throw new Error(result.error || 'Validation failed');
+    }
+    
+  } catch (error) {
+    console.error('Validation error:', error);
+    statusDiv.innerHTML = `
+      <div style="color: #dc2626; font-weight: bold;">
+        ❌ Error: ${error.message}
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✅ Validate All Records';
+    
+    setTimeout(() => {
+      statusDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+/**
+ * Handle rebuild summaries action
+ */
+async handleRebuildSummaries() {
+  const btn = document.getElementById('rebuildSummariesButton');
+  const statusDiv = document.getElementById('customSyncStatus');
+  
+  const confirm = window.confirm(
+    'This will rebuild ALL daily summaries.\n\n' +
+    'This may take a few minutes for large datasets.\n\n' +
+    'Continue?'
+  );
+  
+  if (!confirm) return;
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Rebuilding...';
+  
+  try {
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+      <div class="loading" style="text-align: center;">
+        🔄 Rebuilding all daily summaries...<br>
+        <small>This may take a few minutes...</small>
+      </div>
+    `;
+    
+    // Get date range for rebuild (e.g., last 3 months)
+    const endDate = new Date().toISOString().split('T')[0];
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - 3);
+    const startDateStr = startDate.toISOString().split('T')[0];
+    
+    // Call your rebuild function
+    // You'll need to expose this through electronAPI
+    const result = await this.electronAPI.invoke('recalculate-summaries', {
+      startDate: startDateStr,
+      endDate: endDate
+    });
+    
+    if (result && result.success) {
+      statusDiv.innerHTML = `
+        <div style="color: #059669; font-weight: bold;">
+          ✅ Summaries rebuilt successfully!<br>
+          📊 ${result.recalculated || 0} summaries regenerated
+        </div>
+      `;
+      
+      // Refresh summary display
+      await this.loadDailySummary();
+      
+    } else {
+      throw new Error(result?.error || 'Rebuild failed');
+    }
+    
+  } catch (error) {
+    console.error('Rebuild error:', error);
+    statusDiv.innerHTML = `
+      <div style="color: #dc2626; font-weight: bold;">
+        ❌ Error: ${error.message}
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📊 Rebuild All Summaries';
+    
+    setTimeout(() => {
+      statusDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+/**
+ * ✅ NEW: Handle preview duplicates action
+ */
+async handlePreviewDuplicates() {
+  const btn = document.getElementById('previewDuplicatesButton');
+  const statusDiv = document.getElementById('customSyncStatus');
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanning...';
+  
+  try {
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+      <div class="loading" style="text-align: center;">
+        🔍 Scanning for duplicate records...
+      </div>
+    `;
+    
+    // Call preview duplicates function
+    const result = await this.electronAPI.invoke('preview-duplicates');
+    
+    if (result.success && result.duplicates) {
+      const duplicates = result.duplicates;
+      const totalToRemove = duplicates.reduce((sum, dup) => sum + (dup.count - 1), 0);
+      
+      if (duplicates.length === 0) {
+        statusDiv.innerHTML = `
+          <div style="color: #059669; font-weight: bold; padding: 15px; background: #d1fae5; border-radius: 8px;">
+            ✅ No duplicate records found!<br>
+            <small style="font-weight: normal;">Your database is clean.</small>
+          </div>
+        `;
+      } else {
+        // Show detailed preview
+        const duplicatesList = duplicates.map((dup, index) => `
+          <div style="padding: 8px; background: #fef3c7; border-left: 4px solid #f59e0b; margin: 5px 0; border-radius: 4px;">
+            <strong>${index + 1}.</strong> Employee ${dup.employee_uid} - ${dup.date} - ${dup.clock_type}: 
+            <span style="color: #dc2626; font-weight: bold;">${dup.count} records</span>
+            <span style="color: #6b7280;"> (will remove ${dup.count - 1})</span>
+          </div>
+        `).join('');
+        
+        statusDiv.innerHTML = `
+          <div style="padding: 15px; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px;">
+            <div style="font-weight: bold; color: #92400e; margin-bottom: 10px;">
+              ⚠️ Found ${duplicates.length} sets of duplicate records
+            </div>
+            <div style="max-height: 300px; overflow-y: auto; margin: 10px 0;">
+              ${duplicatesList}
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background: #fee2e2; border-radius: 4px; color: #991b1b;">
+              <strong>Total duplicate records to remove:</strong> ${totalToRemove}
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #6b7280;">
+              💡 Click "Remove Duplicate Records" to clean these up.
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      throw new Error(result.error || 'Preview failed');
+    }
+    
+  } catch (error) {
+    console.error('Preview duplicates error:', error);
+    statusDiv.innerHTML = `
+      <div style="color: #dc2626; font-weight: bold;">
+        ❌ Error: ${error.message}
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Preview Duplicate Records';
+    
+    // Don't auto-hide - keep visible for user review
+  }
+}
+
+/**
+ * ✅ NEW: Handle remove duplicates action
+ */
+async handleRemoveDuplicates() {
+  const btn = document.getElementById('removeDuplicatesButton');
+  const statusDiv = document.getElementById('customSyncStatus');
+  
+  // Confirm action
+  const confirm = window.confirm(
+    '⚠️ WARNING: This will permanently delete duplicate attendance records!\n\n' +
+    'For each set of duplicates, only the EARLIEST record will be kept.\n' +
+    'All other duplicates will be DELETED.\n\n' +
+    'This action CANNOT be undone.\n\n' +
+    'Do you want to continue?'
+  );
+  
+  if (!confirm) return;
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Removing...';
+  
+  try {
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+      <div class="loading" style="text-align: center;">
+        🗑️ Removing duplicate records...<br>
+        <small>This may take a moment...</small>
+      </div>
+    `;
+    
+    // Call remove duplicates function
+    const result = await this.electronAPI.invoke('remove-duplicates');
+    
+    if (result.success) {
+      const { duplicateSetsFound, recordsDeleted } = result;
+      
+      statusDiv.innerHTML = `
+        <div style="color: #059669; font-weight: bold; padding: 15px; background: #d1fae5; border-radius: 8px;">
+          ✅ Duplicate removal complete!<br>
+          <div style="margin-top: 10px; font-size: 14px; font-weight: normal;">
+            📊 <strong>${duplicateSetsFound}</strong> sets of duplicates found<br>
+            🗑️ <strong>${recordsDeleted}</strong> duplicate records removed<br>
+            ✨ Database is now clean
+          </div>
+        </div>
+      `;
+      
+      // Refresh UI to show updated data
+      await Promise.all([
+        this.loadTodayAttendance(),
+        this.loadDailySummary()
+      ]);
+      
+      // Update statistics
+      const statsResult = await this.electronAPI.getTodayStatistics();
+      if (statsResult.success) {
+        this.updateStatistics(statsResult.data);
+      }
+      
+      console.log('✓ UI refreshed after duplicate removal');
+      
+    } else {
+      throw new Error(result.error || 'Removal failed');
+    }
+    
+  } catch (error) {
+    console.error('Remove duplicates error:', error);
+    statusDiv.innerHTML = `
+      <div style="color: #dc2626; font-weight: bold; padding: 15px; background: #fee2e2; border-radius: 8px;">
+        ❌ Error: ${error.message}<br>
+        <small style="font-weight: normal;">Please try again or check logs.</small>
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🗑️ Remove Duplicate Records';
+    
+    setTimeout(() => {
+      statusDiv.style.display = 'none';
+    }, 10000); // Hide after 10 seconds
+  }
+}
+
   // NEW: Perform summary sync with similar pattern to attendance sync
   async performSummarySync(
     silent = false,
@@ -3923,254 +4415,197 @@ async handleAttendanceDownloaded(data) {
     console.log("Summary data marked as changed, pending sync");
   }
 
-  async saveAndSync() {
-    const syncNowBtn = document.getElementById("syncNowBtn");
-    const originalText = syncNowBtn.textContent;
+  // In renderer.js - Update saveAndSync method
 
-    // Generate descriptors for all profiles in background
-    setTimeout(() => {
-      this.generateDescriptorsForAllProfiles().then(result => {
-        if (result && result.success) {
-          console.log(`Generated ${result.generated} face descriptors`);
-        }
-      });
-    }, 2000); // Wait 2 seconds after sync to avoid blocking
+async saveAndSync() {
+  const syncNowBtn = document.getElementById("syncNowBtn");
+  const originalText = syncNowBtn.textContent;
 
-    // Show loading state
-    syncNowBtn.textContent = "💾 Saving & Syncing...";
-    syncNowBtn.disabled = true;
+  syncNowBtn.textContent = "💾 Saving & Syncing...";
+  syncNowBtn.disabled = true;
 
-    if (!this.electronAPI) {
-      this.showSettingsStatus(
-        "Demo mode: Settings saved and sync completed successfully!",
-        "success"
-      );
-      this.showDownloadToast(
-        "📊 Demo: Employee data downloaded successfully!",
-        "success"
-      );
-      await this.loadSyncInfo();
-      syncNowBtn.textContent = originalText;
-      syncNowBtn.disabled = false;
+  if (!this.electronAPI) {
+    this.showSettingsStatus(
+      "Demo mode: Settings saved and sync completed successfully!",
+      "success"
+    );
+    this.showDownloadToast(
+      "📊 Demo: Employee data downloaded successfully!",
+      "success"
+    );
+    await this.loadSyncInfo();
+    syncNowBtn.textContent = originalText;
+    syncNowBtn.disabled = false;
+    return;
+  }
+
+  try {
+    // Save settings first
+    const settingsForm = document.getElementById("settingsForm");
+    if (!settingsForm) {
+      throw new Error("Settings form not found");
+    }
+
+    const formData = new FormData(settingsForm);
+
+    const serverUrlInput =
+      formData.get("serverUrl") ||
+      document.getElementById("serverUrl")?.value;
+    if (!serverUrlInput) {
+      this.showSettingsStatus("Server URL is required", "error");
       return;
     }
 
-    try {
-      // First, save the settings
-      const settingsForm = document.getElementById("settingsForm");
-      if (!settingsForm) {
-        throw new Error("Settings form not found");
-      }
+    let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, "");
+    if (baseUrl.endsWith("/api/employees")) {
+      baseUrl = baseUrl.replace("/api/employees", "");
+    }
 
-      const formData = new FormData(settingsForm);
+    const fullServerUrl = `${baseUrl}/api/employees`;
 
-      // Get server URL with proper null checking
-      const serverUrlInput =
-        formData.get("serverUrl") ||
-        document.getElementById("serverUrl")?.value;
-      if (!serverUrlInput) {
-        this.showSettingsStatus("Server URL is required", "error");
-        return;
-      }
+    const syncIntervalInput =
+      formData.get("syncInterval") ||
+      document.getElementById("syncInterval")?.value ||
+      "5";
+    const gracePeriodInput =
+      formData.get("gracePeriod") ||
+      document.getElementById("gracePeriod")?.value ||
+      "5";
+    const summarySyncIntervalInput =
+      formData.get("summarySyncInterval") ||
+      document.getElementById("summarySyncInterval")?.value ||
+      "10";
 
-      // Clean the base URL and ensure it doesn't already have the API endpoint
-      let baseUrl = serverUrlInput.toString().trim().replace(/\/$/, ""); // Remove trailing slash
-      if (baseUrl.endsWith("/api/employees")) {
-        baseUrl = baseUrl.replace("/api/employees", "");
-      }
+    const faceRecognitionEnabled = document.getElementById("faceRecognitionToggle")?.checked || false;
+    const authPinInput = formData.get("auth_pin") ||
+      document.getElementById("authPin")?.value ||
+      "1234";
 
-      const fullServerUrl = `${baseUrl}/api/employees`;
+    const settings = {
+      server_url: fullServerUrl,
+      sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
+      summary_sync_interval: (
+        Number.parseInt(summarySyncIntervalInput) * 60000
+      ).toString(),
+      grace_period: gracePeriodInput,
+      face_detection_enabled: faceRecognitionEnabled.toString(),
+      auth_pin: authPinInput,
+    };
 
-      // Get other form values with fallbacks
-      const syncIntervalInput =
-        formData.get("syncInterval") ||
-        document.getElementById("syncInterval")?.value ||
-        "5";
-      const gracePeriodInput =
-        formData.get("gracePeriod") ||
-        document.getElementById("gracePeriod")?.value ||
-        "5";
-      const summarySyncIntervalInput =
-        formData.get("summarySyncInterval") ||
-        document.getElementById("summarySyncInterval")?.value ||
-        "10";
+    const saveResult = await this.electronAPI.updateSettings(settings);
 
-      const faceRecognitionEnabled = document.getElementById("faceRecognitionToggle")?.checked || false;
-
-      // Get auth PIN value
-      const authPinInput = formData.get("auth_pin") ||
-        document.getElementById("authPin")?.value ||
-        "1234"; // Default PIN
-
-      const settings = {
-        server_url: fullServerUrl,
-        sync_interval: (Number.parseInt(syncIntervalInput) * 60000).toString(),
-        summary_sync_interval: (
-          Number.parseInt(summarySyncIntervalInput) * 60000
-        ).toString(),
-        grace_period: gracePeriodInput,
-        face_detection_enabled: faceRecognitionEnabled.toString(),
-        auth_pin: authPinInput, // Add auth PIN to settings
-      };
-
-      console.log("Saving settings:", settings); // Debug log
-
-      const saveResult = await this.electronAPI.updateSettings(settings);
-
-      if (!saveResult.success) {
-        this.showSettingsStatus(
-          saveResult.error || "Error saving settings",
-          "error"
-        );
-        return;
-      }
-
-      // Update local sync settings
-      this.syncSettings.interval = Number.parseInt(settings.sync_interval);
-      this.summarySyncSettings.interval = Number.parseInt(
-        settings.summary_sync_interval
+    if (!saveResult.success) {
+      this.showSettingsStatus(
+        saveResult.error || "Error saving settings",
+        "error"
       );
+      return;
+    }
 
-      // Restart auto-sync with new intervals
-      this.startAutoSync();
-      this.startSummaryAutoSync();
+    this.syncSettings.interval = Number.parseInt(settings.sync_interval);
+    this.summarySyncSettings.interval = Number.parseInt(
+      settings.summary_sync_interval
+    );
 
-      // Update button text and show download toast for validation phase
-      syncNowBtn.textContent = "🔍 Validating Data...";
+    this.startAutoSync();
+    this.startSummaryAutoSync();
+
+    // ✅ NEW: Remove duplicates before validation
+    syncNowBtn.textContent = "🗑️ Removing Duplicates...";
+    this.showDownloadToast("🔄 Removing duplicate records...", "info");
+
+    const duplicateResult = await this.electronAPI.invoke('remove-duplicates');
+    if (duplicateResult.success && duplicateResult.recordsDeleted > 0) {
       this.showDownloadToast(
-        "🔄 Validating attendance calculations...",
-        "info"
+        `✅ Removed ${duplicateResult.recordsDeleted} duplicate records`,
+        "success"
       );
+    }
 
-      // Validate all attendance data before sync
-      const validationResult = await this.electronAPI.validateAttendanceData({
-        autoCorrect: true,
-        updateSyncStatus: true,
-        validateStatistics: true,
-        rebuildSummary: true,
-        apply8HourRule: true
-      });
+    // Validate data
+    syncNowBtn.textContent = "🔍 Validating Data...";
+    this.showDownloadToast("🔄 Validating attendance calculations...", "info");
 
-      if (validationResult.success && validationResult.data) {
-        // Access the validation data directly (not through a summary property)
-        const validationData = validationResult.data;
+    const validationResult = await this.electronAPI.validateAttendanceData({
+      autoCorrect: true,
+      updateSyncStatus: true,
+      validateStatistics: true,
+      rebuildSummary: true,
+      apply8HourRule: true
+    });
 
-        // Check if we have the expected structure and show appropriate message
-        if (validationData.totalRecords !== undefined) {
-          const correctedRecords = validationData.correctedRecords || 0;
-          const totalRecords = validationData.totalRecords || 0;
+    if (validationResult.success && validationResult.data) {
+      const validationData = validationResult.data;
 
-          if (correctedRecords > 0) {
-            this.showDownloadToast(
-              `✅ Validated ${totalRecords} records (${correctedRecords} corrections)`,
-              "success"
-            );
-          } else {
-            this.showDownloadToast(
-              `✅ All ${totalRecords} records validated successfully`,
-              "success"
-            );
-          }
-        } else {
-          // Fallback message if structure is different
+      if (validationData.totalRecords !== undefined) {
+        const correctedRecords = validationData.correctedRecords || 0;
+        const totalRecords = validationData.totalRecords || 0;
+
+        if (correctedRecords > 0) {
           this.showDownloadToast(
-            "✅ Attendance validation completed",
+            `✅ Validated ${totalRecords} records (${correctedRecords} corrections)`,
+            "success"
+          );
+        } else {
+          this.showDownloadToast(
+            `✅ All ${totalRecords} records validated successfully`,
             "success"
           );
         }
-      } else {
-        // Log warning but don't stop the sync process
-        console.warn(
-          "Attendance validation had issues:",
-          validationResult.error
-        );
-        this.showDownloadToast(
-          "⚠️ Validation completed with warnings",
-          "warning"
-        );
       }
+    }
 
-      // Update button text and show download toast for employee sync phase
-      syncNowBtn.textContent = "📥 Downloading Employees...";
-      this.showDownloadToast(
-        "🔄 Connecting to server and downloading employee data...",
-        "info"
+    // Sync employees
+    syncNowBtn.textContent = "📥 Downloading Employees...";
+    this.showDownloadToast(
+      "🔄 Connecting to server and downloading employee data...",
+      "info"
+    );
+
+    const employeeSyncResult = await this.electronAPI.syncEmployees();
+
+    if (!employeeSyncResult.success) {
+      this.showSettingsStatus(
+        `Settings saved, but employee sync failed: ${employeeSyncResult.error}`,
+        "warning"
       );
+      return;
+    }
 
-      // Then sync the employees
-      const employeeSyncResult = await this.electronAPI.syncEmployees();
+    this.showDownloadToast("✅ Employee data downloaded successfully!", "success");
 
-      if (!employeeSyncResult.success) {
-        this.showSettingsStatus(
-          `Settings saved, but employee sync failed: ${employeeSyncResult.error}`,
-          "warning"
-        );
-        this.showDownloadToast(
-          "❌ Failed to download employee data from server",
-          "error"
-        );
-        return;
-      }
+    // Sync attendance (already includes duplicate removal and validation)
+    syncNowBtn.textContent = "📊 Uploading Attendance...";
+    const attendanceSyncResult = await this.performAttendanceSync(false, 0, true);
 
-      // Show success toast for employee download
-      this.showDownloadToast(
-        "✅ Employee data downloaded successfully!",
+    // Sync summary
+    syncNowBtn.textContent = "📈 Uploading Summary...";
+    const summarySyncResult = await this.performSummarySync(false, 0, true);
+
+    if (attendanceSyncResult?.success && summarySyncResult?.success) {
+      const duplicatesRemoved = attendanceSyncResult.duplicatesRemoved || 0;
+      const recordsCorrected = attendanceSyncResult.recordsCorrected || 0;
+      
+      this.showSettingsStatus(
+        `Success! Removed ${duplicatesRemoved} duplicates, corrected ${recordsCorrected} records, and synced all data!`,
         "success"
       );
-
-      // Update button text to show attendance sync phase
-      syncNowBtn.textContent = "📊 Uploading Attendance...";
-
-      // Then sync attendance with download toast
-      const attendanceSyncResult = await this.performAttendanceSync(
-        false,
-        0,
-        true
-      );
-
-      // Update button text to show summary sync phase
-      syncNowBtn.textContent = "📈 Uploading Summary...";
-
-      // Finally sync summary data
-      const summarySyncResult = await this.performSummarySync(false, 0, true);
-
-      if (
-        attendanceSyncResult &&
-        attendanceSyncResult.success &&
-        summarySyncResult &&
-        summarySyncResult.success
-      ) {
-        this.showSettingsStatus(
-          "Settings saved, data validated, and all synced successfully!",
-          "success"
-        );
-        await this.loadSyncInfo();
-        await this.loadSummaryInfo();
-        // Also refresh the main attendance data
-        await this.loadTodayAttendance();
-      } else if (attendanceSyncResult && attendanceSyncResult.success) {
-        this.showSettingsStatus(
-          "Settings saved, attendance synced, but summary sync had issues",
-          "warning"
-        );
-      } else {
-        this.showSettingsStatus(
-          "Settings saved, employees synced, but data sync had issues",
-          "warning"
-        );
-      }
-    } catch (error) {
-      console.error("Save and sync error:", error);
-      this.showSettingsStatus(
-        `Error occurred during save and sync: ${error.message}`,
-        "error"
-      );
-      this.showDownloadToast("❌ Connection to server failed", "error");
-    } finally {
-      syncNowBtn.textContent = originalText;
-      syncNowBtn.disabled = false;
+      await this.loadSyncInfo();
+      await this.loadSummaryInfo();
+      await this.loadTodayAttendance();
     }
+
+  } catch (error) {
+    console.error("Save and sync error:", error);
+    this.showSettingsStatus(
+      `Error occurred: ${error.message}`,
+      "error"
+    );
+  } finally {
+    syncNowBtn.textContent = originalText;
+    syncNowBtn.disabled = false;
   }
+}
 
   // New method for download-specific toast messages
   showDownloadToast(message, type = "info") {
@@ -4654,25 +5089,25 @@ async handleAttendanceDownloaded(data) {
     }
   }
 
-  /**
-   * Update openSettings() to load server edit sync info
-   */
-  openSettings() {
-    const modal = document.getElementById('settingsModal');
-    modal.classList.add('show');
-    this.loadSettings();
-    this.loadSyncInfo();
-    this.loadSummaryInfo();
-    this.loadAttendanceSyncInfo();
-    this.loadServerEditSyncInfo();
-    this.loadDailySummary();
-    this.initializeSettingsTabs();
-
-    // Setup server edit sync UI if not already done
-    if (!document.getElementById('serverEditSyncInfo')?.hasChildNodes()) {
-      this.setupServerEditSyncUI();
-    }
+openSettings() {
+  const modal = document.getElementById('settingsModal');
+  modal.classList.add('show');
+  this.loadSettings();
+  this.loadSyncInfo();
+  this.loadSummaryInfo();
+  this.loadAttendanceSyncInfo();
+  this.loadServerEditSyncInfo();
+  this.loadDailySummary();
+  this.initializeSettingsTabs();
+  
+  // ✅ ADD THIS LINE:
+  this.setupCustomSyncButton();
+  
+  // Setup server edit sync UI if not already done
+  if (!document.getElementById('serverEditSyncInfo')?.hasChildNodes()) {
+    this.setupServerEditSyncUI();
   }
+}
 
   /**
    * KEEP: destroy method but remove auto-sync cleanup
@@ -5309,18 +5744,43 @@ deferredOperations(data) {
   }, 1000);
 }
 
-// ✅ NEW: Add this helper method for immediate sync
+// In renderer.js - Update performImmediateSync method
+
 async performImmediateSync() {
   try {
-    console.log('🔄 Triggering immediate sync after attendance...');
+    console.log('🔄 Triggering immediate sync with cleanup...');
     
-    // Sync attendance immediately
+    // ✅ STEP 1: Remove duplicates
+    try {
+      const duplicateResult = await this.electronAPI.invoke('remove-duplicates');
+      if (duplicateResult.success && duplicateResult.recordsDeleted > 0) {
+        console.log(`✓ Removed ${duplicateResult.recordsDeleted} duplicates before sync`);
+      }
+    } catch (error) {
+      console.warn('Duplicate removal error:', error);
+    }
+    
+    // ✅ STEP 2: Validate
+    try {
+      const validationResult = await this.electronAPI.validateAndCorrectUnsyncedRecords({
+        autoCorrect: true,
+        updateSyncStatus: false,
+      });
+      
+      if (validationResult.success && validationResult.data.summary.correctedRecords > 0) {
+        console.log(`✓ Corrected ${validationResult.data.summary.correctedRecords} records`);
+      }
+    } catch (error) {
+      console.warn('Validation error:', error);
+    }
+    
+    // ✅ STEP 3: Sync attendance
     const attendanceResult = await this.performAttendanceSync(true, 0, false);
     
     if (attendanceResult.success) {
       console.log('✅ Immediate attendance sync completed');
       
-      // Also sync summary after a short delay
+      // ✅ STEP 4: Sync summary after delay
       setTimeout(async () => {
         const summaryResult = await this.performSummarySync(true, 0, false);
         if (summaryResult.success) {
@@ -5330,7 +5790,6 @@ async performImmediateSync() {
     }
   } catch (error) {
     console.error('❌ Immediate sync error:', error);
-    // Don't show error to user for silent sync
   }
 }
 
